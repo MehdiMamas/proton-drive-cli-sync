@@ -4,38 +4,38 @@ overview: "Phase 5 of 6. Headless defaults and file locations. Scope is limited 
 todos:
   - id: p05-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 5 and the Phase 4 gate is recorded with command output; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §3, §4, §8"
-    status: pending
+    status: completed
   - id: p05-1-task
     content: "config.effective_rename_ext shared by engine and GUI (task 1)"
-    status: pending
+    status: completed
     dependencies: [p05-0-preflight]
   - id: p05-2-task
     content: "paths.py, settings migration, config/i18n switch (task 2)"
-    status: pending
+    status: completed
     dependencies: [p05-1-task]
   - id: p05-3-task
     content: "CLI version cache path, CLI discovery order, path mentions (task 3)"
-    status: pending
+    status: completed
     dependencies: [p05-2-task]
   - id: p05-4-task
     content: "Symlink documentation (task 4)"
-    status: pending
+    status: completed
     dependencies: [p05-3-task]
   - id: p05-5-task
     content: "Remove the last xfail marker (task 5)"
-    status: pending
+    status: completed
     dependencies: [p05-4-task]
   - id: p05-6-task
     content: "CHANGELOG (task 6)"
-    status: pending
+    status: completed
     dependencies: [p05-5-task]
   - id: p05-8-gate
     content: "Verify gate: `wsl -- bash scripts/test.sh` exits 0 with 0 failed and 0 xfailed"
-    status: pending
+    status: completed
     dependencies: [p05-6-task]
   - id: p05-9-handoff
     content: "Record gate evidence in PROGRESS.md, mark Phase 5 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
-    status: pending
+    status: completed
     dependencies: [p05-8-gate]
 ---
 

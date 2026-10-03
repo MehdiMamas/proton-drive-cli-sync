@@ -3,9 +3,8 @@
 Phase 2 moved the equal-size tests to tests/test_equal_size.py and removed their markers.
 Phase 3 removed the upload-failure markers: those passes now exit 5.
 Phase 4 removed the exclusion-plus-delete marker.
+Phase 5 moved the headless extension-rename test to tests/test_headless_defaults.py.
 """
-
-import pytest
 
 
 def _mapping(source, **extra):
@@ -51,18 +50,3 @@ def test_exclusion_added_later_keeps_remote_copy(fake_drive, local_tree, write_m
     assert result.returncode == 0, result.stdout + result.stderr
     assert not fake_drive.trashed("/my-files/Backups/Docs/secret.txt")
     assert fake_drive.content("/my-files/Backups/Docs/secret.txt") == b"hide"
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="phase-05: headless run renames extensions when the setting is absent",
-)
-def test_headless_run_does_not_rename_extensions_on_modern_cli(
-        fake_drive, local_tree, write_mappings, engine):
-    src = local_tree({"Docs/IMG.JPG": (b"img", 1_000_000_000)})
-    cfg = write_mappings([_mapping(src / "Docs")])
-    result = engine(cfg)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert (src / "Docs" / "IMG.JPG").is_file()
-    assert not (src / "Docs" / "IMG.jpg").exists()

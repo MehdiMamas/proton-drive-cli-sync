@@ -22,4 +22,10 @@ separate pull requests. New files added by the fork are not listed.
 | `realtime_consumer.py` | 4 | Names `deletions_refused` in the failure summary of a kept marker |
 | `proton_mapping_editor.py` | 4 | Editing a mapping dropped keys the dialog does not know; they are carried over now |
 | `README.md`, `README_fr.md`, `mappings.example.json` | 4 | Exclusion semantics, mass-deletion guard, `"permanent"` example replaced by `"trash"` |
+| `config.py` | 5 | Headless extension default (`effective_rename_ext`) and CLI lookup on `PATH` after the bundled binary |
+| `i18n.py` | 5 | Settings path follows `paths.settings_path()` (XDG, with a one-time copy from the legacy file) |
+| `proton_sync.py` | 5 | Engine uses `effective_rename_ext`; CLI version cache lives in the data directory |
+| `proton_mapping_editor.py` | 5 | One-time extension notice uses the same decision as the engine |
+| `local_watcher.py`, `realtime_consumer.py`, `realtime_manager.py` | 5 | No-config fallbacks use `~/.proton-drive-sync` instead of the legacy split paths |
+| `README.md`, `README_fr.md` | 5 | Current paths, settings location, and CLI search order |
 | `INSTALLATION-systemd.md` | 3 | Exit-code table and the `--refresh-units` step for units already installed |

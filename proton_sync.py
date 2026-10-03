@@ -13,7 +13,7 @@ chaque sous-dossier à chaque passage (très coûteux sur une arborescence
 profonde), un cache JSON local stocke une empreinte de chaque dossier
 synchronisé avec succès. Au passage suivant, si l'empreinte locale n'a
 pas changé, on saute l'appel CLI. Le cache vit dans
-~/.proton_sync_cache/<nom_du_mapping>.cache et n'est qu'un raccourci :
+~/.proton-drive-sync/cache/<nom_du_mapping>.cache et n'est qu'un raccourci :
 le supprimer force un passage complet (équivalent à --ignore-cache).
 
 Usage :
@@ -76,23 +76,25 @@ if _HAS_CONFIG:
     HEALTH_FILE = appconfig.HEALTH_FILE
     LAST_RUN_FILE = appconfig.LAST_RUN_FILE
 else:
+    # Même arborescence que config.DATA_DIR, sans importer config.
+    _DATA_DIR = os.path.expanduser("~/.proton-drive-sync")
     # Verrou pour empêcher deux exécutions simultanées sous le même compte
     # Linux. Placé sous le home plutôt que /tmp/ pour que chaque utilisateur
     # (un par utilisateur) ait son propre verrou.
-    LOCK_FILE = os.path.expanduser("~/.proton_sync.lock")
+    LOCK_FILE = os.path.join(_DATA_DIR, "proton_sync.lock")
     # Répertoire des fichiers de cache. Un cache par fichier de mappings,
     # indexé par le nom du JSON (chaque utilisateur a le sien).
-    CACHE_DIR = os.path.expanduser("~/.proton_sync_cache")
+    CACHE_DIR = os.path.join(_DATA_DIR, "cache")
     # Journal DÉDIÉ des échecs d'upload (option #2) : chaque fichier qui
     # refuse de monter (même après ré-essai individuel) y est consigné, une
     # ligne par échec, horodatage + chemin + raison. But : relire SEULEMENT
     # les échecs sans dérouler tout le journal.
-    FAILURES_LOG = os.path.expanduser("~/.proton_sync/failures.log")
+    FAILURES_LOG = os.path.join(_DATA_DIR, "failures.log")
     # Journal DÉDIÉ des renommages d'extension (majuscule -> minuscule).
-    RENAMED_LOG = os.path.expanduser("~/.proton_sync/renamed-extensions.log")
+    RENAMED_LOG = os.path.join(_DATA_DIR, "renamed-extensions.log")
     # État de santé publié en fin de passage complet (cf. config.py).
-    HEALTH_FILE = os.path.expanduser("~/.proton_sync/health.json")
-    LAST_RUN_FILE = os.path.expanduser("~/.proton_sync/last-run.json")
+    HEALTH_FILE = os.path.join(_DATA_DIR, "health.json")
+    LAST_RUN_FILE = os.path.join(_DATA_DIR, "last-run.json")
 
 
 # Compteurs du passage en cours. Même durée de vie que _UNREADABLE : un
@@ -1081,7 +1083,12 @@ _cli_version_cache = {}          # empreinte -> version ; absent = pas encore su
 # indéfiniment. On mémorise donc le résultat sur disque, avec l'empreinte du
 # binaire (chemin + date + taille) : remplacer le CLI change l'empreinte et
 # relance la sonde automatiquement, sans invalidation manuelle.
-CLI_VERSION_CACHE = os.path.expanduser("~/.proton_sync/cli-version.json")
+# Même dossier que le cache (config.DATA_DIR). Sans config, le repli suit
+# cette arborescence plutôt qu'un ancien chemin à part.
+if _HAS_CONFIG:
+    CLI_VERSION_CACHE = os.path.join(appconfig.DATA_DIR, "cli-version.json")
+else:
+    CLI_VERSION_CACHE = os.path.expanduser("~/.proton-drive-sync/cli-version.json")
 
 
 def _cli_fingerprint():
@@ -1112,12 +1119,17 @@ def _cli_version_to_disk(fingerprint, version):
     remplacement."""
     if not version or not fingerprint:
         return
+    tmp = CLI_VERSION_CACHE + ".tmp"
     try:
         os.makedirs(os.path.dirname(CLI_VERSION_CACHE), exist_ok=True)
-        with open(CLI_VERSION_CACHE, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"fingerprint": fingerprint, "version": version}, f)
+        os.replace(tmp, CLI_VERSION_CACHE)
     except OSError:
-        pass
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def cli_version():
@@ -2956,15 +2968,15 @@ def main():
     parser.add_argument(
         "--no-rename-ext", action="store_true",
         help="DÉSACTIVE la normalisation des extensions pour CE passage, quel que "
-             "soit le réglage persistant (config.py / GUI). Par défaut, le moteur "
-             "renomme les fichiers source dont l'extension finale contient des "
-             "majuscules -> extension en minuscule (IMG.JPG -> IMG.jpg, DOC.PDF -> "
-             "DOC.pdf), pour que Proton détecte le bon type MIME (vignette, aperçu, "
-             "icône) et que le cache reste cohérent (local = distant). En cas de "
-             "collision avec une cible existante, on n'écrase jamais (suffixe "
-             "configurable, voir rename_ext_collision_suffix dans settings.json). "
-             "Ne touche pas aux dossiers ni aux fichiers exclus. Chaque renommage "
-             "est journalisé (renamed-extensions.log).",
+             "soit le réglage persistant (config.py / GUI). Sans ce drapeau, "
+             "effective_rename_ext décide : un faux explicite reste arrêté, un vrai "
+             "explicite après la migration du GUI reste allumé, sinon le "
+             "contournement ne reste actif que pour un CLI antérieur à 0.5.0 "
+             "(IMG.JPG -> IMG.jpg). En cas de collision avec une cible existante, "
+             "on n'écrase jamais (suffixe configurable, voir "
+             "rename_ext_collision_suffix dans settings.json). Ne touche pas aux "
+             "dossiers ni aux fichiers exclus. Chaque renommage est journalisé "
+             "(renamed-extensions.log).",
     )
     parser.add_argument(
         "--check-lock", action="store_true",
@@ -2989,7 +3001,10 @@ def main():
     # ce passage, quel que soit le réglage. Résolu une seule fois ici, propagé
     # à tous les appels du passage.
     if _HAS_CONFIG:
-        effective_rename_ext = appconfig.rename_ext_enabled() and not args.no_rename_ext
+        effective_rename_ext = (
+            appconfig.effective_rename_ext(cli_supports_shared_delete)
+            and not args.no_rename_ext
+        )
         effective_collision_suffix = appconfig.rename_ext_collision_suffix()
     else:
         effective_rename_ext = not args.no_rename_ext

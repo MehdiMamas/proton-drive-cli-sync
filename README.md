@@ -89,7 +89,7 @@ Keeping the previous binary around also gives you an instant rollback. The appli
 
 Since the CLI only supports one active account at a time (credentials live in the keyring of the current Linux user), the chosen solution is: **two separate Linux accounts** on the same Mint machine, each with its own graphical session and its own keyring. No Windows VM nor second container needed — Linux natively handles multi-user sessions without the Windows Home/Pro limitation.
 
-The lock (see below) uses `~/.proton_sync.lock` (in each user's home) and the cache `~/.proton_sync_cache/` — so User1 and User2 can run **simultaneously** from their respective sessions without interference.
+The lock (see below) uses `~/.proton-drive-sync/proton_sync.lock` (in each user's home) and the cache `~/.proton-drive-sync/cache/` — so User1 and User2 can run **simultaneously** from their respective sessions without interference.
 
 ---
 
@@ -206,10 +206,11 @@ realtime_consumer.py        <- consumer: reads markers, debounces, launches the 
 realtime_manager.py         <- GUI backend for real-time (daemons, config, NAS push, queues)
 proton-nas-watch.service    <- systemd unit for the NAS watcher (to install on the NAS)
 
-~/.proton_sync.lock         <- lock (created automatically, per user)
-~/.proton_sync_cache/       <- folder fingerprint cache (per mappings file)
-~/.proton_sync/queue/       <- real-time marker queue (local)
-~/.proton_sync/realtime.conf<- real-time settings (debounce, cycle) — written by the GUI
+~/.proton-drive-sync/proton_sync.lock  <- lock (created automatically, per user)
+~/.proton-drive-sync/cache/            <- folder fingerprint cache (per mappings file)
+~/.proton-drive-sync/queue/            <- real-time marker queue (local)
+~/.proton-drive-sync/realtime.conf     <- real-time settings (debounce, cycle) — written by the GUI
+~/.config/proton-drive-sync/settings.json <- settings (see Configuration)
 /media/home_nas/proton-sync/ <- NAS side over NFS: config/ (pushed mappings) + queue/<account>/
 ```
 
@@ -305,7 +306,7 @@ With `--verify-hash`, it adds a SHA1 comparison when sizes match — detecting c
 
 **Problem solved**: without a cache, the engine makes one `filesystem list` call per visited folder, at ~1-2 s each. On User1's tree (the `Communs` folder alone contains **1890 subfolders**), a "nothing to do" pass would take tens of minutes to several hours.
 
-**Solution**: `~/.proton_sync_cache/<mapping_name>.cache` (JSON). For each successfully synced folder, we store a fingerprint: the folder's mtime + the sorted list of (name, size, mtime) of its direct files. On the next pass, if the local fingerprint is identical -> we **skip the CLI call entirely** ("⚡ cache valid") and just descend into subfolders. Result: a no-change pass drops from hours to seconds.
+**Solution**: `~/.proton-drive-sync/cache/<mapping_name>.cache` (JSON). For each successfully synced folder, we store a fingerprint: the folder's mtime + the sorted list of (name, size, mtime) of its direct files. On the next pass, if the local fingerprint is identical -> we **skip the CLI call entirely** ("⚡ cache valid") and just descend into subfolders. Result: a no-change pass drops from hours to seconds.
 
 **Safeguards**:
 
@@ -321,7 +322,7 @@ The cache is saved to disk **after each processed mapping entry** (not only at t
 
 ### Lock (no simultaneous runs)
 
-`flock` on `~/.proton_sync.lock`. Prevents two engine instances from running at the same time **under the same user** (e.g. cron firing during a manual pass). The lock is released automatically by the OS at process end — clean exit, kill, Ctrl+C or crash — so no orphan lock. Since it lives in the user's home, User1 and User2 (separate Linux sessions) never block each other.
+`flock` on `~/.proton-drive-sync/proton_sync.lock`. Prevents two engine instances from running at the same time **under the same user** (e.g. cron firing during a manual pass). The lock is released automatically by the OS at process end — clean exit, kill, Ctrl+C or crash — so no orphan lock. Since it lives in the user's home, User1 and User2 (separate Linux sessions) never block each other.
 
 ### Automatic folder creation
 
@@ -437,20 +438,20 @@ Options:
 - `--subpath <folder>` + `--mapping-source <source>`: processes only **one subfolder** of a given mapping, instead of sweeping everything. Deletions follow the same gates as a full pass (`--delete`, `allow_delete`, mount guard, `excluded_remote`, mass-deletion guard). Used by the real-time layer (the consumer launches the engine targeted at the folder that just changed).
 - `--check-auth`: probes **only** authentication (is the keyring unlocked?) then exits — code 0 = OK, code 2 = locked. Doesn't take the lock, syncs nothing, doesn't touch the cache. Used by the real-time consumer to avoid launching passes doomed to exit code 2 while the session isn't open (reuses the engine's exact test, no duplicated logic).
 - `-v` / `--verbose`: also shows `unchanged` files, cache skips, and the raw JSON of each folder's first element
-- `--no-rename-ext`: **disables** extension normalization (see below; on by default).
+- `--no-rename-ext`: **disables** extension normalization for this run. Without it, a CLI ≥ 0.5.0 does not rename unless settings explicitly turn that back on (see Configuration). An older CLI still renames by default.
 
 ### Upload robustness, thumbnails and MIME detection (extensions)
 
 Three behaviors added after production observations. They target a backup whose **previews** are visible in Proton (web/mobile), not just recoverable files.
 
 **1. Case-sensitive MIME detection on the extension — automatic normalization.** *Fixed upstream in CLI 0.5.0: the media type is now detected correctly even with an uppercase extension. On first launch with 0.5.0 or later the application therefore turns this normalization **off** and tells you why — renaming your own files is no longer needed. You can turn it back on if you want your extensions normalized anyway, or to repair older uploads sent with an uppercase extension; that choice is then kept for good. The description below applies to older CLI versions.* The Proton CLI derives the MIME type from the **extension**, but **case-sensitively**: a file named `DOC.PDF` or `IMG.JPG` (uppercase extension) is mis-typed (`application/octet-stream`), which breaks **thumbnail, preview AND icon** in the Proton apps at once — silently, with no error. Confirmed side by side: `doc.pdf`/`photo.jpg` (lowercase) get their type and preview, byte-identical `DOC.PDF`/`PHOTO.JPG` do not. Applies to images **and** PDFs (and presumably any preview-able format).
-To fix this at the root **and** keep the cache coherent, the engine **renames the SOURCE**: any final extension containing uppercase letters is lowercased (`IMG_1949.JPG → IMG_1949.jpg`, base name unchanged). A single injection point (`sync_folder`) → covers **manual, priming/reset AND real-time**. Safety: directories and **excluded** files are never touched; on a **collision** with an existing target it **never** overwrites (suffix `_ProtonEditExt`, then a counter); `--dry-run` reports without renaming. **Scope (whitelist).** Since the only remaining purpose is to repair *older* uploads, and only preview-able formats ever had a thumbnail, normalization is limited to the extensions listed in `rename_ext_whitelist` (images, video, audio, documents — editable in ⚙ Configuration…). Renaming a router `.CFG` or a phone `.Backup` would modify one of your files without repairing anything — and if an external agent (a phone backup app, `rsync`…) recreates the original name on every pass, the collision guard turns an idempotent overwrite into an **unbounded pile-up**: one extra suffixed copy every night, on disk *and* on the Drive (observed in production, 12 copies of the same 6 KB file). An empty list means no restriction (historical behavior). **Duplicate suffixes** added by external agents are understood: `PHOTO.JPG (1)` is read as a photo and repaired to `PHOTO.jpg (1)`, the ` (1)` being restored untouched — without this, `splitext` yields an extension `.JPG (1)` that matches no list. Every rename is logged to `~/.proton_sync/renamed-extensions.log`. Disable with `--no-rename-ext`. Note: renaming a file previously uploaded with an uppercase extension leaves a remote orphan (old name), cleaned by any `--delete` pass.
+To fix this at the root **and** keep the cache coherent, the engine **renames the SOURCE**: any final extension containing uppercase letters is lowercased (`IMG_1949.JPG → IMG_1949.jpg`, base name unchanged). A single injection point (`sync_folder`) → covers **manual, priming/reset AND real-time**. Safety: directories and **excluded** files are never touched; on a **collision** with an existing target it **never** overwrites (suffix `_ProtonEditExt`, then a counter); `--dry-run` reports without renaming. **Scope (whitelist).** Since the only remaining purpose is to repair *older* uploads, and only preview-able formats ever had a thumbnail, normalization is limited to the extensions listed in `rename_ext_whitelist` (images, video, audio, documents — editable in ⚙ Configuration…). Renaming a router `.CFG` or a phone `.Backup` would modify one of your files without repairing anything — and if an external agent (a phone backup app, `rsync`…) recreates the original name on every pass, the collision guard turns an idempotent overwrite into an **unbounded pile-up**: one extra suffixed copy every night, on disk *and* on the Drive (observed in production, 12 copies of the same 6 KB file). An empty list means no restriction (historical behavior). **Duplicate suffixes** added by external agents are understood: `PHOTO.JPG (1)` is read as a photo and repaired to `PHOTO.jpg (1)`, the ` (1)` being restored untouched — without this, `splitext` yields an extension `.JPG (1)` that matches no list. Every rename is logged to `~/.proton-drive-sync/renamed-extensions.log`. Disable with `--no-rename-ext`. Note: renaming a file previously uploaded with an uppercase extension leaves a remote orphan (old name), cleaned by any `--delete` pass.
 
 > **Transient marker burst (real-time).** The *first* normalization of a tree renames many files at once; each rename is seen by the watcher as a pair of events (`DEL` of the old name + `ADD` of the new one), which drop real-time markers. This is **transient and self-resorbing**: on the next pass the files are already lowercase (no rename, no marker), and new files almost always arrive lowercase already. The consumer's **per-directory deduplication** also bounds the burst — ten files renamed in one folder = **one** sync of that folder, not ten. To avoid the burst entirely, do the first normalization via a **priming/reset** (`--delete` pass, consumer paused) rather than letting real-time discover everything.
 
 **2. Thumbnails impossible for some formats (TIFF/HEIC/AVIF) — auto `--skip-thumbnails`.** Even with a lowercase extension, the CLI **fails thumbnail generation** for these formats on Linux (`Failed to generate thumbnails … format not supported … require the OS codec`), and that failure fails the **whole** batch upload. Installing system codecs (`libheif`, `libaom`, `libdav1d`, `libtiff`) does **not** help — verified: already installed, TIFF still fails; the CLI (TypeScript/Bun) doesn't use the system image libraries. Engine response: on that specific signature it **re-uploads the file with `--skip-thumbnails`** → the file is saved (intact, encrypted; viewable with a third-party viewer or after downloading), only Proton's **built-in** preview is missing. For an in-Proton preview, convert to JPEG/PNG. Affected files are logged `NO-THUMBNAIL` in the failures log, with the exact reason.
 
-**3. Upload-failure isolation + dedicated log.** On a batch failure the CLI reports only a **count** (`N item(s) failed`), not the culprit — and the real reason is on **stdout** (not stderr). The engine then re-lists the remote (skipping what already landed), retries **file by file** to name the culprit and capture its exact reason, applies the auto-`--skip-thumbnails` above where relevant, and logs everything to `~/.proton_sync/failures.log` (`❌ FAIL` = genuine failure; `⚠ NO-THUMBNAIL` = uploaded without a thumbnail). The GUI has an **"❗ Errors only"** toggle that re-filters the output to error lines only.
+**3. Upload-failure isolation + dedicated log.** On a batch failure the CLI reports only a **count** (`N item(s) failed`), not the culprit — and the real reason is on **stdout** (not stderr). The engine then re-lists the remote (skipping what already landed), retries **file by file** to name the culprit and capture its exact reason, applies the auto-`--skip-thumbnails` above where relevant, and logs everything to `~/.proton-drive-sync/failures.log` (`❌ FAIL` = genuine failure; `⚠ NO-THUMBNAIL` = uploaded without a thumbnail). The GUI has an **"❗ Errors only"** toggle that re-filters the output to error lines only.
 
 **4. The CLI can freeze forever on an upload — engine-side circuit breaker.** Observed in production: on a 2 GiB upload the CLI stopped for **over 4 hours** at the very end of the transfer, holding the engine lock the whole time and stalling every other sync behind it, until a manual `kill`. Diagnosis: the CLI uploads 4 MiB blocks over a **pool of ~20 connections**; when one of them is dropped by an intermediate device during the quiet tail of a transfer, the reply never arrives, the process sleeps in `epoll_wait` and **no TCP timer is armed** — nothing at the network level will ever wake it. The engine therefore watches the upload it started (`Popen` + two pipe-draining threads; without them a full 64 KB buffer would block the CLI, creating the very problem being solved) and stops it after `cli_stall_minutes` of **total inactivity**, returning a failure so markers are kept and the folder is retried. What is sampled is `rchar` in `/proc/<pid>/io` (bytes read **by syscall**): `read_bytes` is unusable — the page cache serves the file, so it stays **frozen for minutes during a perfectly healthy transfer**. Instantaneous throughput does not discriminate either (a healthy final stretch still crawls at a few KB/min, same order as a freeze): **only duration separates them** — measured at 1 min 24 s for a healthy finalization, versus hours for a freeze. `cli_stall_max_kills` bounds *consecutive* attempts on the same destination: past the limit one pass is skipped and the counter resets — the folder is **never** permanently abandoned, since a backup that silently stops backing up is worse than the bandwidth it would save.
 
@@ -617,7 +618,7 @@ realtime_manager.py  (local machine)  GUI backend: daemon install/control, confi
 
 A **marker** is a small JSON file `{"path": "...", "delete": bool}` written by a watcher when a folder changes. For a deletion, the marker points at the **parent folder**: the engine notices the absence during the pass, needing no information about the vanished file.
 
-- Local queue (local machine): `~/.proton_sync/queue/`
+- Local queue (local machine): `~/.proton-drive-sync/queue/`
 - NAS queue: `/home/nasuser/proton-sync/queue/<account>/`, seen over NFS on the local machine as `/media/home_nas/proton-sync/queue/<account>/`
 
 **Identity = account name, not Unix login.** The `<account>` comes from the mappings file name (`mappings-user1.json` → `user1`) — a convention shared by the NAS watcher (which writes into `queue/user1`), the consumer (which reads there) and the GUI. This is deliberately **independent of the Linux login**, which can differ (e.g. `myuser` for the `user1` account): relying on `$USER` would read the wrong NAS queue. (Bug fixed: the consumer now derives the account from the mappings file, no more `$USER`.)
@@ -626,7 +627,7 @@ A **marker** is a small JSON file `{"path": "...", "delete": bool}` written by a
 
 Runs in a loop (cycle ~30 s):
 
-- re-reads its config `~/.proton_sync/realtime.conf` (JSON `debounce_seconds`, `cycle_seconds`) **on every cycle** → live tuning, no restart;
+- re-reads its config `~/.proton-drive-sync/realtime.conf` (JSON `debounce_seconds`, `cycle_seconds`) **on every cycle** → live tuning, no restart;
 - groups markers per folder, applies the **debounce** (lets write bursts settle before acting), merges conflicts with the rule **`delete=true` wins**;
 - launches the engine on the single mature subfolder via `--subpath <folder> --mapping-source <source>` (and `--delete` if the mapping allows it) — so no full sweep, just what moved.
 
@@ -662,7 +663,7 @@ Detailed installation: `INSTALLATION-realtime.md`.
 
 ### Interaction with the batch and the lock
 
-Real-time, the scheduled batch and manual launches share the **lock** `~/.proton_sync.lock`: never two passes in parallel under the same user. If a manual pass holds the lock, the consumer **keeps** its markers and retries at the next cycle — safe behavior, observed in production (no loss).
+Real-time, the scheduled batch and manual launches share the **lock** `~/.proton-drive-sync/proton_sync.lock`: never two passes in parallel under the same user. If a manual pass holds the lock, the consumer **keeps** its markers and retries at the next cycle — safe behavior, observed in production (no loss).
 
 The symmetric case on the **scheduled** side: if the real-time consumer holds the lock when the timer fires, the scheduled pass exits with failure (code 1). Its systemd service therefore uses `Type=exec` with `Restart=on-failure` + `RestartSec=120`: it **automatically retries ~2 minutes later**, once the consumer has finished and released the lock (bounded by `StartLimitBurst` to avoid any loop). Without this, a single collision was enough to skip the whole nightly pass. An exit code 2 (locked keyring) is still treated as success (`SuccessExitStatus=0 2`) and thus triggers no pointless retry.
 
@@ -742,7 +743,7 @@ The project is **bilingual French/English**, via **GNU gettext** (standard Pytho
 
 - **Source language = English** (the code's strings, `msgid`) — GitHub convention: future translators start from English. **French** is restored by the catalog `locale/fr/LC_MESSAGES/proton-sync.po` (the translation source, editable with Poedit) compiled into `.mo` (shipped binary).
 - **Language resolution**, identical everywhere (GUI, engine, daemons) via `i18n.py`: **1)** explicit preference in `settings.json` (`{"language": "fr"}`) → **2)** otherwise the system language (`LANG`) → **3)** otherwise English. The **"🌍 Language…"** selector in the GUI writes `settings.json`; the change applies at the GUI's **next launch** and at the daemons' **next restart**.
-- **NAS case (no GUI)**: the NAS watcher follows the NAS's system language; to force it, drop a `settings.json` next to it by hand (`echo '{"language": "fr"}' > /home/nasuser/proton-sync/settings.json`). Without `i18n.py`/`locale/`, nothing breaks: messages stay in English (guarded import, same pattern as `mount_check`).
+- **NAS case (no GUI)**: the NAS watcher follows the NAS's system language; to force it, write `~/.config/proton-drive-sync/settings.json` (`echo '{"language": "fr"}' > ~/.config/proton-drive-sync/settings.json`). An old file next to the scripts is copied once to that path. Without `i18n.py`/`locale/`, nothing breaks: messages stay in English (guarded import, same pattern as `mount_check`).
 - **External programs**: zenity (calendar) is launched with an adjusted locale environment (`i18n.subprocess_env()`) so its own UI follows the chosen language rather than the system's. Limitation: displaying a language requires its locale to be **generated** on the system (`locale -a`).
 - **systemd unit descriptions**: generated **in the current language at "Install / Update" time**, then frozen inside the `.service`/`.timer` files (the nature of systemd) — redo an Install/Update after a language change to rewrite them.
 - **`build_locales.sh`**: a **development** tool only (recompile the `.po` files after editing; requires the `gettext` package). Never required in production.
@@ -757,7 +758,7 @@ The project is **bilingual French/English**, via **GNU gettext** (standard Pytho
 
 ## Configuration (settings.json) and local-only mode
 
-Since the "configuration" work package, everything that varies from one installation to another is **externalized in `settings.json`** (the same file as the language, next to the scripts) — nothing essential remains hard-coded. The **`config.py`** module is the single source of truth, shared by the engine, the GUI and the daemons (tolerant import: without it, every file falls back to its historical defaults).
+Since the "configuration" work package, everything that varies from one installation to another is **externalized in `settings.json`** — nothing essential remains hard-coded. The file is `~/.config/proton-drive-sync/settings.json` (`$XDG_CONFIG_HOME/proton-drive-sync/settings.json` when that variable is set). `PROTON_SYNC_SETTINGS` overrides it. If an older install still has `settings.json` next to the scripts and the new file does not exist yet, the first run copies the old file (mode 0600) and leaves it in place. The **`config.py`** module is the single source of truth, shared by the engine, the GUI and the daemons (tolerant import: without it, every file falls back to its historical defaults).
 
 **Available settings** (GUI dialog **"⚙ Configuration…"**, each with its own "?" help button written for non-programmers; or edit the JSON directly — see `settings.example.json`):
 
@@ -766,8 +767,8 @@ Since the "configuration" work package, everything that varies from one installa
 | `language` | `"auto"` | Interface language (pre-existing, "Language…" dialog) |
 | `nas_enabled` | `true` | **NAS mode switch.** When `false` (**local-only** mode), the application **never** tries to reach a NAS: no mappings push, no NAS queue polling in the consumer, NAS sections **hidden** in the Real-time window — a clean cut, not "try then fail" |
 | `nas_mount_path` | `"/media/home_nas"` | NFS mount point where the NAS's `proton-sync/config` and `proton-sync/queue` live |
-| `proton_cli_path` | `null` | Path to the Proton CLI binary. `null` = default resolution. Priority order shared everywhere: **`PROTON_DRIVE_CLI` environment variable > this setting > `<scripts folder>/proton-drive`**. When set, the generated systemd units use it too |
-| `rename_ext_enabled` | `true` | Automatic uppercase-extension fixing (see the "Upload robustness…" section) — durably on/off; `--no-rename-ext` remains the one-shot override |
+| `proton_cli_path` | `null` | Path to the Proton CLI binary. `null` = default resolution. Priority order shared everywhere: **`PROTON_DRIVE_CLI` > this setting > `<scripts folder>/proton-drive` if that file is executable > `proton-drive` on `PATH`**. When set, the generated systemd units use it too |
+| `rename_ext_enabled` | `true` | Stored default. With CLI ≥ 0.5.0 a headless run does **not** rename unless this is `true` and `rename_ext_auto_disabled` is also `true`. `--no-rename-ext` still forces off for one run |
 | `rename_ext_auto_disabled` | `false` | Internal: records that the one-time switch-off of extension normalization (CLI ≥ 0.5.0) has happened, so your own choice is never overridden afterwards |
 | `rename_ext_collision_suffix` | `"_ProtonEditExt"` | Suffix inserted on a rename collision (never overwrites). Validated on input: non-empty, no `/ \ " '` |
 | `rename_ext_whitelist` | images, video, audio, documents (37 entries) | Extensions the normalization is allowed to touch. Empty list = no restriction (historical behavior) |
