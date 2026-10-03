@@ -4,46 +4,46 @@ overview: "Phase 3 of 6. Honest run results. Scope is limited to this phase; fin
 todos:
   - id: p03-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 3 and the Phase 2 gate is recorded with command output; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §4, §5, §9"
-    status: pending
+    status: completed
   - id: p03-1-task
     content: "RunStats accumulator and increments (task 1)"
-    status: pending
+    status: completed
     dependencies: [p03-0-preflight]
   - id: p03-2-task
     content: "Exit code 5 plumbing incl. sync_subpath and sync_file (task 2)"
-    status: pending
+    status: completed
     dependencies: [p03-1-task]
   - id: p03-3-task
     content: "[run-result] line and last-run.json (task 3)"
-    status: pending
+    status: completed
     dependencies: [p03-2-task]
   - id: p03-4-task
     content: "Consumer exit-5 branch and failure backoff (task 4)"
-    status: pending
+    status: completed
     dependencies: [p03-3-task]
   - id: p03-5-task
     content: "Unit text, result labels, refresh_units + --refresh-units (task 5)"
-    status: pending
+    status: completed
     dependencies: [p03-4-task]
   - id: p03-6-task
     content: "GUI handles exit 5 (task 6)"
-    status: pending
+    status: completed
     dependencies: [p03-5-task]
   - id: p03-7-task
     content: "Remove the phase-03 xfail markers (task 7)"
-    status: pending
+    status: completed
     dependencies: [p03-6-task]
   - id: p03-8-task
     content: "Exit-code table in 00-core.mdc, INSTALLATION-systemd.md, CHANGELOG (task 8)"
-    status: pending
+    status: completed
     dependencies: [p03-7-task]
   - id: p03-8-gate
     content: "Verify gate: `wsl -- bash scripts/test.sh` exits 0 with 0 failed, 0 xpassed and exactly 2 xfailed (owned by phases 4-5)"
-    status: pending
+    status: completed
     dependencies: [p03-8-task]
   - id: p03-9-handoff
     content: "Record gate evidence in PROGRESS.md, mark Phase 3 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
-    status: pending
+    status: completed
     dependencies: [p03-8-gate]
 ---
 

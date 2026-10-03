@@ -4789,9 +4789,15 @@ class MappingEditor(tk.Tk):
             # message explicite pour ne pas laisser croire à un plantage.
             if not self._verbose_flag and getattr(self, "_folders_shown", 0) == 0 and code == 0:
                 self._append_output(_("  ✓ Nothing to update — everything is already in sync.") + "\n")
-            self._append_output("\n" + _("=== Finished (code {c}) — log: {p} ===").format(c=code, p=log_path) + "\n\n")
+            if code == 5:
+                # Terminé, mais des envois, listings ou dossiers ont échoué.
+                # Avertissement : ni un plantage, ni une réussite.
+                self._append_output("\n" + _("=== Finished with failures (code 5) — log: {p} ===").format(p=log_path) + "\n\n")
+                self._ui(lambda: self.status.set(_("Sync finished with failures (code 5).")))
+            else:
+                self._append_output("\n" + _("=== Finished (code {c}) — log: {p} ===").format(c=code, p=log_path) + "\n\n")
+                self._ui(lambda: self.status.set(_("Sync finished (code {c}).").format(c=code)))
             self._ui(self._hide_progress)   # filet : masquer la barre si un « done » a été manqué
-            self._ui(lambda: self.status.set(_("Sync finished (code {c}).").format(c=code)))
             # Un vrai passage fait autorité sur l'état d'auth : s'il a rapporté un
             # échec d'authentification, l'indicateur doit le refléter (plus fiable
             # que la sonde de démarrage, qui peut donner un faux positif si le CLI
@@ -5260,7 +5266,7 @@ class MappingEditor(tk.Tk):
                               "account.")))
                     if "[auth-failed]" in line:
                         self._auth_failed_seen = True
-                    # Le moteur sort en code 0 même quand des fichiers ont échoué :
+                    # Le moteur sort en code 5 quand le passage se termine avec des échecs :
                     # c'est VOULU (il journalise et poursuit, jamais d'interruption
                     # d'un passage sans écran). Mais annoncer « code 0 » au GUI se
                     # lit comme une réussite — constaté le 1er septembre : 4 archives
@@ -5288,8 +5294,12 @@ class MappingEditor(tk.Tk):
                     self._prime_current = self._extract_path(line) or self._prime_current
                 self.sync_process.wait()
             code = self.sync_process.returncode
-            _echecs = getattr(self, "_prime_failures_seen", False)
-            if is_reset:
+            _echecs = getattr(self, "_prime_failures_seen", False) or code == 5
+            if code == 5:
+                _banner = (_("Reset finished with failures (code 5)") if is_reset
+                           else _("Priming finished with failures (code 5)"))
+                self._append_output("\n=== " + _banner + " ===\n")
+            elif is_reset:
                 self._append_output("\n=== " + (
                     _("Reset finished (code {c}) — but some files failed; those "
                       "folders will be retried").format(c=code) if _echecs
@@ -5330,6 +5340,9 @@ class MappingEditor(tk.Tk):
                     self._ui(lambda: self.status.set(_("Reset finished (code {c}).").format(c=code)))
                 else:
                     self._ui(lambda: self.status.set(_("Priming finished (code {c}).").format(c=code)))
+            if code == 5:
+                # Écrase le statut « prêt » : un code 5 n'est pas une réussite.
+                self._ui(lambda: self.status.set(_("Finished with failures (code 5).")))
         except Exception as e:
             if is_reset:
                 self._append_output("\n=== " + _("Reset error: {e}").format(e=e) + " ===\n")

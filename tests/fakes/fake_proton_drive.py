@@ -205,6 +205,9 @@ def _create_folder(state, parent, name):
     if parent != "/" and parent not in state["nodes"]:
         return _fail("not found", 1)
     path = (parent.rstrip("/") + "/" + name) if parent != "/" else "/" + name
+    fired = remote_state.consume_faults(state, "create-folder", path)
+    if fired:
+        return _fail(fired[0].get("stderr") or "permission denied", 1)
     if path in state["nodes"] and not state["nodes"][path].get("trashed"):
         return _fail("already exists", 1)
     state["nodes"][path] = {"type": "folder"}
@@ -212,6 +215,9 @@ def _create_folder(state, parent, name):
 
 
 def _trash(state, path):
+    path = remote_state.normalize(path)
+    if remote_state.consume_faults(state, "trash", path):
+        return _fail("trash failed", 1)
     if not remote_state.trash_tree(state, path):
         return _fail("not found", 1)
     return 0
