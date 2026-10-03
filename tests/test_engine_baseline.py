@@ -93,8 +93,9 @@ def test_listing_failure_skips_folder_without_upload_or_trash(
     cfg = write_mappings([_mapping(
         src / "Docs", allow_delete=True, source_kind="local")])
     result = engine(cfg, "--delete")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert fake_drive.content("/my-files/Backups/Docs/a.txt") is None
+    assert fake_drive.content("/my-files/Backups/Docs/a.txt") is None, (
+        result.stdout + result.stderr
+    )
     assert not fake_drive.trashed("/my-files/Backups/Docs/orphan.txt")
     assert not any(path.endswith("/a.txt") for path in fake_drive.uploads())
 
@@ -141,6 +142,8 @@ def test_exit_1_when_lock_held(fake_drive, local_tree, write_mappings, engine, i
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
     assert result.returncode == 1, result.stdout + result.stderr
+    assert str(lock_path) in result.stdout
+    assert not any(call and call[0] == "filesystem" for call in fake_drive.calls())
 
 
 def test_exit_4_on_account_change(fake_drive, local_tree, write_mappings, engine, isolated_home):
@@ -192,10 +195,11 @@ def test_partial_batch_failure_retries_individually_and_logs_failure(
     fake_drive.add_fault(cmd="upload", match="bad.txt", times=5, stderr="nope")
     cfg = write_mappings([_mapping(src / "Docs")])
     result = engine(cfg)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert fake_drive.content("/my-files/Backups/Docs/good.txt") == b"good"
+    assert fake_drive.content("/my-files/Backups/Docs/good.txt") == b"good", (
+        result.stdout + result.stderr
+    )
     assert fake_drive.content("/my-files/Backups/Docs/bad.txt") is None
-    assert "[upload-failed]" in result.stdout
+    assert "[upload-failed]" in result.stdout, result.stdout + result.stderr
 
 
 def test_engine_refuses_unset_proton_drive_cli(

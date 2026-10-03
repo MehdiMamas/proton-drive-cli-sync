@@ -85,23 +85,42 @@ def _take_wide_upload_faults(state, remote_parent):
     return fired
 
 
+def _hang(fault):
+    """Sleep outside the state lock. See main()."""
+    try:
+        seconds = int(fault.get("seconds") or 3600)
+    except (TypeError, ValueError):
+        seconds = 3600
+    return ("hang", seconds)
+
+
 def _upload(state, args):
     names, remote_parent = _parse_upload(args)
     if not names or not remote_parent:
         return _fail("fake: unsupported command", 2)
     remote_parent = remote_state.normalize(remote_parent)
+    state.setdefault("upload_cwds", []).append({
+        "argv": ["filesystem", "upload", *list(args)],
+        "cwd": os.getcwd(),
+    })
+    parent = state["nodes"].get(remote_parent)
+    if (
+        not isinstance(parent, dict)
+        or parent.get("type") != "folder"
+        or parent.get("trashed")
+    ):
+        return _fail("not found", 1)
     for fault in _take_wide_upload_faults(state, remote_parent):
         mode = fault.get("mode") or "fail"
         if mode == "hang":
-            time.sleep(3600)
-            return _fail(fault.get("stderr") or "fake: hung", 1)
+            return _hang(fault)
         if mode == "perm":
             return _fail(fault.get("stderr") or "permission denied", 1)
         if mode == "stderr_text":
             return _fail(fault.get("stderr") or "upload failed", 1)
         # fail / partial with no file name: every name in the batch fails.
         for escaped in names:
-            name = remote_state.unescape_glob(escaped)
+            name = os.path.basename(remote_state.unescape_glob(escaped))
             detail = fault.get("stderr") or "upload failed"
             print("- {name}: {detail}".format(name=name, detail=detail))
         print("{n} item(s) failed to upload".format(n=len(names)), file=sys.stderr)
@@ -109,32 +128,31 @@ def _upload(state, args):
     failed = []
     for escaped in names:
         name = remote_state.unescape_glob(escaped)
+        stored = os.path.basename(name)
         file_faults = remote_state.consume_faults(state, "upload", name)
         blocking = [f for f in file_faults if (f.get("mode") or "fail") != "hang"]
         hang = [f for f in file_faults if f.get("mode") == "hang"]
         if hang:
-            time.sleep(3600)
-            return _fail("fake: hung", 1)
+            return _hang(hang[0])
         if blocking:
             fault = blocking[0]
             mode = fault.get("mode") or "fail"
             if mode == "perm":
                 return _fail(fault.get("stderr") or "permission denied", 1)
             detail = fault.get("stderr") or "upload failed"
-            print("- {name}: {detail}".format(name=name, detail=detail))
-            failed.append(name)
+            print("- {name}: {detail}".format(name=stored, detail=detail))
+            failed.append(stored)
             continue
-        local = name if not os.path.isabs(name) else name
         try:
-            with open(local, "rb") as handle:
+            with open(name, "rb") as handle:
                 data = handle.read()
-            mtime = int(os.stat(local).st_mtime)
+            mtime = int(os.stat(name).st_mtime)
         except OSError as exc:
-            print("- {name}: {exc}".format(name=name, exc=exc))
-            failed.append(name)
+            print("- {name}: {exc}".format(name=stored, exc=exc))
+            failed.append(stored)
             continue
         remote_state.store_file(
-            state, remote_parent.rstrip("/") + "/" + name, data, mtime)
+            state, remote_parent.rstrip("/") + "/" + stored, data, mtime)
     if failed:
         print(
             "{n} item(s) failed to upload".format(n=len(failed)),
@@ -153,8 +171,10 @@ def _list(state, path, as_json):
         return 0
     if remote_state.consume_faults(state, "list", path):
         return _fail("not found", 1)
-    if path != "/" and path not in state["nodes"]:
-        return _fail("not found", 1)
+    if path != "/":
+        node = state["nodes"].get(path)
+        if not isinstance(node, dict) or node.get("trashed"):
+            return _fail("not found", 1)
     if not as_json:
         print("ok")
         return 0
@@ -198,7 +218,9 @@ def _trash(state, path):
 
 def dispatch(state, argv):
     state.setdefault("calls", []).append(list(argv))
-    if argv and argv[0] == "--version":
+    if not argv:
+        return _fail("fake: unsupported command", 2)
+    if argv[0] == "--version":
         print(state.get("version_text") or "", end="")
         return 0
     if argv[0] != "filesystem" or len(argv) < 2:
@@ -224,7 +246,12 @@ def main(argv):
     if not path:
         print("fake: FAKE_PROTON_STATE is unset", file=sys.stderr)
         return 2
-    return _locked_update(path, lambda state: dispatch(state, argv))
+    result = _locked_update(path, lambda state: dispatch(state, argv))
+    if isinstance(result, tuple) and result and result[0] == "hang":
+        time.sleep(result[1])
+        print("fake: hung", file=sys.stderr)
+        return 1
+    return result
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ Read this file **before** any work. It is the single source of truth for which p
 
 | Phase | Plan | Status | Gate evidence | Date |
 |---|---|---|---|---|
-| 1 | `phase-01-test-harness.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `23 passed, 7 xfailed in 12.15s` (0 failed, 0 xpassed). `git diff origin/main -- proton_sync.py` empty. Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
+| 1 | `phase-01-test-harness.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `28 passed, 7 xfailed in 12.70s` (0 failed, 0 xpassed). `git diff origin/main -- proton_sync.py` empty. Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 2 | `phase-02-equal-size-edits.plan.md` | not started | | |
 | 3 | `phase-03-run-results.plan.md` | not started | | |
 | 4 | `phase-04-deletion-safety.plan.md` | not started | | |
@@ -40,6 +40,7 @@ Detect equal-size edits from .cursor/plans/phase-02-equal-size-edits.plan.md. Th
 - [Human, any time] Run the read-only inventory from spec §5 on Nizar's machine (after phase 6: `proton-drive-sync-doctor --redact`) to learn whether deletion, rename-ext or equal-size edits affect his setup. Noticed while planning, 2026-10-03.
 
 ## Notes / decisions
+- 2026-10-03: `CHANGELOG.md` was added and `UPSTREAM.md` was edited even though the phase 1 plan's Files list says "Nothing else". `00-core` requires a changelog entry for the settings-path behavior, and it requires every touched upstream file in `UPSTREAM.md`. The changelog heading is `## [Unreleased]` so phase 2 can add a Fixed entry without reformatting.
 - 2026-10-03: WSL ready: Ubuntu 26.04.1 LTS, WSL2, user mehdi. `wsl -- id -un` prints `mehdi`; `python3 -c "import venv, fcntl"` prints `ok`; `msgfmt` is GNU gettext-tools 0.23.2.
 - 2026-10-03: `PROTON_SYNC_SETTINGS` is a new override, not a renamed path. When it is unset or empty, `config._SETTINGS_PATH` and `i18n.SETTINGS_PATH` stay `APP_DIR/settings.json`. Those two modules are the only readers and writers of the file. Other `settings.json` hits are comments, `.gitignore`, `settings.example.json`, and docs. This repo has no `-dev` or leading-dot sibling of the settings path.
 - 2026-10-03: Forked at upstream `5a852e218d353209a3b39cabdb4b810d0f254177`, the commit the spec reviewed. Upstream remote is `upstream`.

@@ -52,7 +52,7 @@ updates the fake if it does not.
 
 Uploads read names relative to the process cwd, which is how the engine
 calls the CLI. Glob escapes are undone first (`a[[]b.txt` is the file
-`a[b.txt]`). An upload of an existing file replaces the bytes and bumps
+`a[b.txt`). An upload of an existing file replaces the bytes and bumps
 `revisions`. A per-file fault fails that name only: `- <name>: <error>` on
 stdout, `N item(s) failed to upload` on stderr, exit 1, and the other names
 in the batch are stored. `filesystem trash` marks the node and its
@@ -60,9 +60,10 @@ descendants trashed, and listings hide them.
 
 `add_fault(cmd=..., match=..., mode=..., times=..., stderr=...)` injects a
 failure. `times` defaults to every call; `times=1` fires once. `mode` is
-`fail` (per-file or whole command), `partial` (same reporting; other files
-in a per-file fault still succeed), `perm` (stderr contains `permission`),
-`stderr_text`, or `hang`. On a node, `remove_size_meta` omits `claimedSize`
+`fail` or `partial` (the fake treats them the same: that name fails and the
+other names in the batch are stored), `perm` (stderr contains `permission`),
+`stderr_text`, or `hang` (the state lock is released, then the process
+sleeps; `seconds` defaults to 3600). On a node, `remove_size_meta` omits `claimedSize`
 and the `totalStorageSize` fallback, and `remove_digest` omits
 `claimedDigests`, so a test can force the missing-metadata paths.
 

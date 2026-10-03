@@ -38,6 +38,21 @@ def test_settings_path_defaults_when_env_unset(tmp_path):
     assert "ok" in result.stdout
 
 
+def test_settings_path_defaults_when_env_empty(tmp_path):
+    home = tmp_path / "seam-home-empty"
+    home.mkdir()
+    code = (
+        "import os, config, i18n\n"
+        "expect = os.path.join(config.APP_DIR, 'settings.json')\n"
+        "assert config._SETTINGS_PATH == expect, config._SETTINGS_PATH\n"
+        "assert i18n.SETTINGS_PATH == os.path.join(i18n.APP_DIR, 'settings.json')\n"
+        "print('ok')\n"
+    )
+    result = _python(code, home, {"PROTON_SYNC_SETTINGS": ""})
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout
+
+
 def test_settings_path_follows_env_when_set(tmp_path):
     home = tmp_path / "seam-home"
     home.mkdir()

@@ -31,6 +31,7 @@ def default_state():
         "faults": [],
         "calls": [],
         "uploads": [],
+        "upload_cwds": [],
     }
 
 
@@ -72,6 +73,7 @@ def load(path):
     data.setdefault("faults", [])
     data.setdefault("calls", [])
     data.setdefault("uploads", [])
+    data.setdefault("upload_cwds", [])
     return data
 
 

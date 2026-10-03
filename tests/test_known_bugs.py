@@ -34,7 +34,11 @@ def _load_comparator():
     return scope
 
 
-@pytest.mark.xfail(strict=True, reason="phase-02: equal-size edit is not uploaded")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-02: equal-size edit is not uploaded",
+)
 def test_equal_size_edit_is_uploaded(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs")])
@@ -44,7 +48,11 @@ def test_equal_size_edit_is_uploaded(fake_drive, local_tree, write_mappings, eng
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"BBBB"
 
 
-@pytest.mark.xfail(strict=True, reason="phase-02: default comparator ignores equal-size content edits")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-02: default comparator ignores equal-size content edits",
+)
 def test_equal_size_edit_detected_by_comparator(tmp_path):
     scope = _load_comparator()
     folder = tmp_path / "folder"
@@ -62,20 +70,37 @@ def test_equal_size_edit_detected_by_comparator(tmp_path):
     assert check(str(path), remote) is True
 
 
-@pytest.mark.xfail(strict=True, reason="phase-02: batch recovery treats old equal-size remote content as success")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-02: batch recovery treats old equal-size remote content as success",
+)
 def test_batch_recovery_not_fooled_by_old_equal_size_remote(
         fake_drive, local_tree, write_mappings, engine):
     fake_drive.seed_file("/my-files/Backups/Docs/a.txt", b"AAAA", mtime=1_000_000_000)
     src = local_tree({"Docs/a.txt": (b"BBBB", 1_000_000_100)})
     fake_drive.add_fault(cmd="upload", match="a.txt", times=5, stderr="nope")
     cfg = write_mappings([_mapping(src / "Docs")])
-    result = engine(cfg)
+    # --verify-hash selects the equal-size edit, so the upload fault fires.
+    # Recovery then re-lists and treats the old same-size remote file as done.
+    result = engine(cfg, "--verify-hash")
+    assert any(
+        len(call) >= 2
+        and call[0] == "filesystem"
+        and call[1] == "upload"
+        and "a.txt" in call
+        for call in fake_drive.calls()
+    ), fake_drive.calls()
     content = fake_drive.content("/my-files/Backups/Docs/a.txt")
     reported = "[upload-failed]" in result.stdout
-    assert content == b"BBBB" or reported
+    assert content == b"BBBB" or reported, result.stdout + result.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="phase-03: a failed upload still exits 0")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-03: a failed upload still exits 0",
+)
 def test_upload_failure_exits_nonzero(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
     fake_drive.add_fault(cmd="upload", match="a.txt", times=5, stderr="nope")
@@ -84,7 +109,11 @@ def test_upload_failure_exits_nonzero(fake_drive, local_tree, write_mappings, en
     assert result.returncode == 5
 
 
-@pytest.mark.xfail(strict=True, reason="phase-03: a failed subpath upload still exits 0")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-03: a failed subpath upload still exits 0",
+)
 def test_subpath_upload_failure_exits_nonzero(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs")])
@@ -96,7 +125,11 @@ def test_subpath_upload_failure_exits_nonzero(fake_drive, local_tree, write_mapp
     assert result.returncode == 5
 
 
-@pytest.mark.xfail(strict=True, reason="phase-04: a later exclusion plus --delete trashes the remote copy")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-04: a later exclusion plus --delete trashes the remote copy",
+)
 def test_exclusion_added_later_keeps_remote_copy(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/secret.txt": (b"hide", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs", allow_delete=True, source_kind="local")])
@@ -113,7 +146,11 @@ def test_exclusion_added_later_keeps_remote_copy(fake_drive, local_tree, write_m
     assert fake_drive.content("/my-files/Backups/Docs/secret.txt") == b"hide"
 
 
-@pytest.mark.xfail(strict=True, reason="phase-05: headless run renames extensions when the setting is absent")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="phase-05: headless run renames extensions when the setting is absent",
+)
 def test_headless_run_does_not_rename_extensions_on_modern_cli(
         fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/IMG.JPG": (b"img", 1_000_000_000)})

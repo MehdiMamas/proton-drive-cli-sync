@@ -25,6 +25,10 @@ os.environ["HOME"] = _PYTEST_HOME
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_PYTEST_HOME, ".config")
 os.environ["XDG_STATE_HOME"] = os.path.join(_PYTEST_HOME, ".local", "state")
 os.environ["XDG_CACHE_HOME"] = os.path.join(_PYTEST_HOME, ".cache")
+_PYTEST_SETTINGS = os.path.join(_PYTEST_HOME, "settings.json")
+with open(_PYTEST_SETTINGS, "w", encoding="utf-8") as _settings_handle:
+    _settings_handle.write('{"language": "en"}\n')
+os.environ["PROTON_SYNC_SETTINGS"] = _PYTEST_SETTINGS
 
 sys.path.insert(0, str(FAKES))
 import remote_state  # noqa: E402
@@ -96,6 +100,9 @@ class FakeDrive:
     def calls(self):
         return list(self._load().get("calls") or [])
 
+    def upload_cwds(self):
+        return list(self._load().get("upload_cwds") or [])
+
     def uploads(self):
         return list(self._load().get("uploads") or [])
 
@@ -156,6 +163,7 @@ def _real_home_untouched():
         raise AssertionError("test session created " + _REAL_DATA)
     if not _REPO_SETTINGS_BEFORE and _REPO_SETTINGS.exists():
         raise AssertionError("test session created settings.json in the repo root")
+    shutil.rmtree(_PYTEST_HOME, ignore_errors=True)
 
 
 @pytest.fixture
