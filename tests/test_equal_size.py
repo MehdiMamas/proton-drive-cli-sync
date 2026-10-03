@@ -140,8 +140,15 @@ def test_equal_size_unchanged_without_remote_digest_is_skipped(
         "Docs/keep.txt": (b"AAAA", 1_000_000_000),
         "Docs/move.txt": (b"CCCC", 1_000_000_000),
     })
+    # Remote claimed mtime is not the local mtime, so row 8 cannot skip
+    # keep.txt. The first pass matches the SHA-1, does not upload, and caches
+    # the local size and mtime. After the digest is removed, only that
+    # baseline (row 6) keeps the second pass from uploading.
+    fake_drive.seed_file(
+        "/my-files/Backups/Docs/keep.txt", b"AAAA", mtime=900_000_000)
     cfg = write_mappings([_mapping(src / "Docs")])
     assert engine(cfg).returncode == 0
+    assert fake_drive.revisions("/my-files/Backups/Docs/keep.txt") == 1
     fake_drive.omit_digest("/my-files/Backups/Docs/keep.txt")
     local_tree.write("Docs/move.txt", b"DDDD", 1_000_000_100)
     assert engine(cfg).returncode == 0
@@ -167,10 +174,21 @@ def test_ignore_cache_rechecks_preserved_mtime_edit(
     src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs")])
     assert engine(cfg).returncode == 0
-    # Same size and the same mtime. The directory mtime moves, so the folder
-    # is inspected, and the baseline still says the file is unchanged.
+    # Same size and the same mtime on a.txt. Overwriting it in place does not
+    # change the directory signature, so a sibling is added to force a listing.
+    # The baseline still matches a.txt, and the normal pass leaves AAAA in place.
+    calls_before = len(fake_drive.calls())
     local_tree.write("Docs/a.txt", b"BBBB", 1_000_000_000)
+    local_tree.write("Docs/other.txt", b"x", 1_000_000_050)
     assert engine(cfg).returncode == 0
+    listed = [
+        call for call in fake_drive.calls()[calls_before:]
+        if len(call) >= 3
+        and call[0] == "filesystem"
+        and call[1] == "list"
+        and "/my-files/Backups/Docs" in call
+    ]
+    assert listed, fake_drive.calls()[calls_before:]
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"AAAA"
     assert engine(cfg, "--ignore-cache").returncode == 0
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"BBBB"
@@ -267,5 +285,12 @@ def test_remote_mtime_normalization():
     assert bare is None
     assert proton_sync._remote_mtime_seconds("not-a-date") is None
     assert proton_sync._remote_mtime_seconds(None) is None
+    # Not emitted by the pinned CLI. Covered so a bare number cannot be
+    # misread, and so bool/NaN cannot fall through the numeric branch.
+    assert proton_sync._remote_mtime_seconds(1_456_782_124) == 1_456_782_124.0
+    assert proton_sync._remote_mtime_seconds(1_456_782_124_000) == 1_456_782_124.0
+    assert proton_sync._remote_mtime_seconds(float("nan")) is None
+    assert proton_sync._remote_mtime_seconds(float("inf")) is None
+    assert proton_sync._remote_mtime_seconds(True) is None
     # Same instant, offset form, in case a Date is printed with +00:00.
     assert proton_sync._remote_mtime_seconds("2016-02-29T21:42:04.000+00:00") == expected
