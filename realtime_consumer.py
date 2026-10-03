@@ -24,7 +24,7 @@ Principes (décidés en conception) :
 
 Un démon par utilisateur (sa session, son trousseau, ses mappings).
 """
-__version__ = "1.6.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.6.2"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -1416,23 +1416,45 @@ def main():
         if status in ("locked", "busy", "account"):
             if waiting_reason != status:
                 if status == "locked":
-                    # DEUX causes, jamais une seule affirmée. `keyring_ready()`
-                    # passe par `--check-auth`, qui exécute `filesystem list /` :
-                    # un VRAI appel réseau. Une panne ou un refus du serveur
-                    # ("Too many server errors") le fait échouer exactement comme
-                    # un trousseau verrouillé. Constaté le 1er septembre : le
-                    # message est apparu deux fois pendant que Proton refusait des
-                    # envois, puis la sonde a repassé seule — sans aucune action
-                    # de l'utilisateur, qu'on envoyait pourtant se reconnecter.
-                    # Même correction que le message du moteur (27 août) : on
-                    # n'affirme pas une cause qu'on ne connaît pas.
-                    log(_("⏳ Proton unreachable — markers kept, no pass launched. "
-                          "Either this user's session is not open (locked "
-                          "keyring), or Proton itself is temporarily unavailable. "
-                          "If your session is open, wait for the next cycle: a "
-                          "temporary outage clears on its own. Otherwise run "
-                          "“proton-drive auth login” (or the “Sign in to Proton” "
-                          "button)."))
+                    # 1.6.2 — TROIS causes produisent ce code, pas deux.
+                    #
+                    # `--check-auth` contrôle le binaire AVANT de sonder le
+                    # trousseau et sort en code 2 s'il est inutilisable —
+                    # exactement le même code qu'un trousseau verrouillé. Le
+                    # message ci-dessous n'en nommait que deux : un utilisateur
+                    # dont le chemin du binaire est faux vérifiait sa session et
+                    # l'état de Proton, trouvait les deux bons, et restait sans
+                    # piste. Découvert le 2 octobre 2026 en provoquant le cas.
+                    #
+                    # Quand c'est le binaire, on le dit, et on réutilise
+                    # l'explication PARTAGÉE de config.py — déjà traduite, déjà
+                    # adaptée au vrai motif (absent / dossier au lieu du fichier
+                    # / non exécutable). Rien n'est réécrit ici.
+                    _motif_cli = (appconfig.cli_unusable_reason()
+                                  if _HAS_CONFIG else None)
+                    if _motif_cli:
+                        log(_("⛔ Proton CLI binary unusable — markers kept, "
+                              "no pass launched."))
+                        for _ligne in appconfig.cli_unusable_explanation():
+                            log(("   " + _ligne) if _ligne else "")
+                    else:
+                        # DEUX causes, jamais une seule affirmée. `keyring_ready()`
+                        # passe par `--check-auth`, qui exécute `filesystem list /` :
+                        # un VRAI appel réseau. Une panne ou un refus du serveur
+                        # ("Too many server errors") le fait échouer exactement comme
+                        # un trousseau verrouillé. Constaté le 1er septembre : le
+                        # message est apparu deux fois pendant que Proton refusait des
+                        # envois, puis la sonde a repassé seule — sans aucune action
+                        # de l'utilisateur, qu'on envoyait pourtant se reconnecter.
+                        # Même correction que le message du moteur (27 août) : on
+                        # n'affirme pas une cause qu'on ne connaît pas.
+                        log(_("⏳ Proton unreachable — markers kept, no pass launched. "
+                              "Either this user's session is not open (locked "
+                              "keyring), or Proton itself is temporarily unavailable. "
+                              "If your session is open, wait for the next cycle: a "
+                              "temporary outage clears on its own. Otherwise run "
+                              "“proton-drive auth login” (or the “Sign in to Proton” "
+                              "button)."))
                 elif status == "account":
                     log(_("⛔ Proton account changed — the cache belongs to the "
                           "previous account. Markers kept; prime the cache (or "

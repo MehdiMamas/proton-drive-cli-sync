@@ -26,7 +26,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (par défaut : ~/Logiciels/Proton-drive/proton-drive)
 """
-__version__ = "1.9.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.9.3"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -69,17 +69,12 @@ except ImportError:
     _HAS_CONFIG = False
 
 if _HAS_CONFIG:
-    CLI = appconfig.resolve_proton_cli()
     LOCK_FILE = appconfig.LOCK_FILE
     CACHE_DIR = appconfig.CACHE_DIR
     FAILURES_LOG = appconfig.FAILURES_LOG
     RENAMED_LOG = appconfig.RENAMED_LOG
     HEALTH_FILE = appconfig.HEALTH_FILE
 else:
-    CLI = os.environ.get(
-        "PROTON_DRIVE_CLI",
-        os.path.expanduser("~/Logiciels/Proton-drive/proton-drive"),
-    )
     # Verrou pour empêcher deux exécutions simultanées sous le même compte
     # Linux. Placé sous le home plutôt que /tmp/ pour que chaque utilisateur
     # (un par utilisateur) ait son propre verrou.
@@ -685,8 +680,36 @@ def _extract_remote_meta(item):
     return size, mtime, sha1
 
 
+def cli_path():
+    """Chemin du binaire CLI Proton, résolu À CHAQUE USAGE — jamais mémorisé.
+
+    1.9.2 — ce chemin était une constante de module, calculée à l'import. Pour le
+    moteur lancé en PROGRAMME c'était sans conséquence : un processus neuf à
+    chaque passage relit tout. Mais le GUI importe ce fichier comme une
+    BIBLIOTHÈQUE et l'appelle dans son propre processus — la valeur y restait
+    donc celle du démarrage du GUI. Changer le chemin dans la fenêtre
+    Configuration n'était alors pris en compte qu'au redémarrage du GUI, et ce
+    dans les DEUX SENS : ni la panne ni la réparation n'étaient vues.
+
+    Constaté le 2 octobre 2026 : chemin rendu invalide -> témoin resté vert ;
+    chemin corrigé -> témoin resté rouge ; les deux fois juste après un
+    redémarrage. C'est aussi ce qui faisait annoncer « révisions non
+    disponibles » sur la foi d'une version lue à l'ancien chemin.
+
+    Résoudre à l'usage coûte une lecture de settings.json par appel —
+    négligeable devant l'aller-retour réseau que fait chaque commande du CLI.
+    Mettre ce résultat en cache recréerait exactement le défaut corrigé ici.
+    """
+    if _HAS_CONFIG:
+        return appconfig.resolve_proton_cli()
+    return os.environ.get(
+        "PROTON_DRIVE_CLI",
+        os.path.expanduser("~/Logiciels/Proton-drive/proton-drive"),
+    )
+
+
 def run_cli(args, json_output=False, cwd=None):
-    cmd = [CLI] + list(args)
+    cmd = [cli_path()] + list(args)
     if json_output:
         cmd.append("-j")
     return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
@@ -816,7 +839,7 @@ def run_cli_watched(args, stall_minutes=None, cwd=None):
     """
     if stall_minutes is None:
         stall_minutes, _max = _stall_settings()
-    cmd = [CLI] + list(args)
+    cmd = [cli_path()] + list(args)
     if not stall_minutes:
         res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
         res.stalled = False
@@ -895,7 +918,21 @@ def run_cli_watched(args, stall_minutes=None, cwd=None):
 # validée. Mettre à jour cette constante APRÈS avoir testé une nouvelle version.
 CLI_TESTED_VERSION = "0.8.0"
 
-_cli_version_cache = []          # [] = pas encore sondé ; [valeur] = sondé
+# 1.9.3 — CLÉ = L'EMPREINTE DU BINAIRE, comme le cache disque.
+#
+# C'était une simple liste : une fois remplie, elle répondait la même version
+# pour toujours, quel que soit le binaire. Sans conséquence pour le moteur lancé
+# en programme (un processus neuf par passage), mais le GUI vit des heures : il
+# continuait d'annoncer la version du démarrage après un changement de chemin
+# dans Configuration, ou après un remplacement du binaire en place — le cas
+# NORMAL de la procédure de déploiement (renommer l'ancien, copier le nouveau).
+#
+# Le cache DISQUE, lui, était déjà correct : il porte (chemin, date, taille) et
+# se réinvalide seul. Le cache mémoire court-circuitait avant de l'atteindre.
+#
+# ET ON NE MÉMORISE QUE LES SUCCÈS : une sonde qui échoue n'est jamais figée
+# (règle du projet), la consultation suivante resonde.
+_cli_version_cache = {}          # empreinte -> version ; absent = pas encore su
 
 # Cache PERSISTANT de la version du CLI. Sonder coûte cher : `proton-drive
 # --version` démarre un binaire Bun qui initialise tout le SDK avant de répondre
@@ -910,8 +947,9 @@ CLI_VERSION_CACHE = os.path.expanduser("~/.proton_sync/cli-version.json")
 def _cli_fingerprint():
     """(chemin, date de modification, taille) du binaire, ou None si absent."""
     try:
-        st = os.stat(CLI)
-        return [CLI, int(st.st_mtime), int(st.st_size)]
+        chemin = cli_path()
+        st = os.stat(chemin)
+        return [chemin, int(st.st_mtime), int(st.st_size)]
     except OSError:
         return None
 
@@ -951,9 +989,14 @@ def cli_version():
 
     Deux niveaux de cache : mémoire (par processus) puis disque (par binaire).
     Ne lève JAMAIS — binaire absent, muet ou format changé donnent None."""
-    if _cli_version_cache:
-        return _cli_version_cache[0]
     fingerprint = _cli_fingerprint()
+    if fingerprint is None:
+        # Binaire absent : rien à sonder, et rien à mémoriser — dès qu'il
+        # apparaîtra, l'empreinte existera et la sonde partira d'elle-même.
+        return None
+    cle = tuple(fingerprint)
+    if cle in _cli_version_cache:
+        return _cli_version_cache[cle]
     version = _cli_version_from_disk(fingerprint)
     if version is None:
         try:
@@ -965,7 +1008,8 @@ def cli_version():
                 _cli_version_to_disk(fingerprint, version)
         except Exception:
             version = None
-    _cli_version_cache.append(version)
+    if version is not None:
+        _cli_version_cache[cle] = version
     return version
 
 
@@ -2490,8 +2534,9 @@ def main():
     # l'acquisition du verrou, exprès : sinon la sonde échouerait dès qu'un vrai
     # passage tourne, ce qui n'a rien à voir avec l'état du trousseau.
     if args.check_auth:
-        if not (appconfig.cli_is_usable(CLI) if _HAS_CONFIG else os.path.isfile(CLI)):
-            print(_("❌ proton-drive binary not found at {p}").format(p=CLI))
+        _cli = cli_path()
+        if not (appconfig.cli_is_usable(_cli) if _HAS_CONFIG else os.path.isfile(_cli)):
+            print(_("❌ proton-drive binary not found at {p}").format(p=_cli))
             sys.exit(2)
         ok, _err = check_auth()
         sys.exit(0 if ok else 2)
@@ -2530,15 +2575,16 @@ def main():
         print(_("   (If you are sure no other instance is running, delete this file.)"))
         sys.exit(1)
 
-    if not (appconfig.cli_is_usable(CLI) if _HAS_CONFIG else os.path.isfile(CLI)):
+    _cli = cli_path()
+    if not (appconfig.cli_is_usable(_cli) if _HAS_CONFIG else os.path.isfile(_cli)):
         # Explication PARTAGÉE avec le GUI (config.cli_unusable_explanation) :
         # l'ancien texte ne parlait que de PROTON_DRIVE_CLI, alors qu'un
         # utilisateur du GUI n'a pas besoin de cette variable — le champ de la
         # fenêtre Configuration lui suffit. Trois messages divergents pour un
         # même problème, c'était le défaut.
-        print(_("❌ Proton CLI binary unusable: {p}").format(p=CLI))
+        print(_("❌ Proton CLI binary unusable: {p}").format(p=_cli))
         if _HAS_CONFIG:
-            for line in appconfig.cli_unusable_explanation(CLI)[1:]:
+            for line in appconfig.cli_unusable_explanation(_cli)[1:]:
                 print(("   " + line) if line else "")
         sys.exit(1)
 

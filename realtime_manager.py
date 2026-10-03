@@ -24,7 +24,7 @@ Tout est centré sur l'utilisateur courant et son fichier de mappings actif.
 Conçu pour tourner SANS privilèges (session utilisateur). Le linger (sudo) est
 seulement LU et rappelé, jamais modifié ici.
 """
-__version__ = "1.6.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.6.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
@@ -78,8 +78,16 @@ ENGINE = os.path.join(APP_DIR, "proton_sync.py")
 # Binaire proton-drive (CLI officiel). Résolution PARTAGÉE (config.py) : la
 # variable d'environnement PROTON_DRIVE_CLI prime, sinon le réglage persistant,
 # sinon le défaut dans APP_DIR.
-PROTON_CLI = appconfig.resolve_proton_cli() if _HAS_CONFIG else os.environ.get(
-    "PROTON_DRIVE_CLI", os.path.join(APP_DIR, "proton-drive"))
+# 1.6.1 — RÉSOLU À L'USAGE, plus figé à l'import. Ce module est importé par le
+# GUI, qui vit des heures : une constante calculée au démarrage ne voyait jamais
+# un chemin modifié depuis la fenêtre Configuration. Conséquence la plus
+# gênante : les boutons « Se connecter » / « Se déconnecter » lançaient l'ANCIEN
+# binaire après que l'utilisateur ait corrigé le chemin. Constaté le 2 oct. 2026.
+def proton_cli():
+    """Chemin du binaire CLI, relu à chaque appel (voir la note ci-dessus)."""
+    if _HAS_CONFIG:
+        return appconfig.resolve_proton_cli()
+    return os.environ.get("PROTON_DRIVE_CLI", os.path.join(APP_DIR, "proton-drive"))
 
 # État local du temps réel — dossier de données UNIFIÉ (config.py), avec
 # migration automatique et sûre depuis l'ancien ~/.proton_sync (voir config.py).
@@ -934,7 +942,7 @@ def check_auth():
     False (on considère l'auth indisponible plutôt que de faire échouer le GUI)."""
     try:
         env = dict(os.environ)
-        env["PROTON_DRIVE_CLI"] = PROTON_CLI
+        env["PROTON_DRIVE_CLI"] = proton_cli()
         r = subprocess.run(
             ["python3", ENGINE, "--check-auth"],
             capture_output=True, text=True, timeout=60, env=env)
@@ -948,14 +956,14 @@ def auth_login_command():
     ouvre le navigateur et attend ; aucun mot de passe ne transite par ce logiciel).
     Le GUI lance cette commande et diffuse sa sortie (URL de secours + message de
     succès) sans jamais manipuler d'identifiant."""
-    return [PROTON_CLI, "auth", "login"]
+    return [proton_cli(), "auth", "login"]
 
 
 def auth_logout():
     """Déconnecte la session Proton du CLI (utile pour TESTER le flux de reconnexion,
     ou pour repartir propre). Retourne (ok, message)."""
     try:
-        r = subprocess.run([PROTON_CLI, "auth", "logout"],
+        r = subprocess.run([proton_cli(), "auth", "logout"],
                            capture_output=True, text=True, timeout=60)
         if r.returncode == 0:
             return True, _("Signed out of Proton.")
