@@ -24,7 +24,7 @@ Principes (décidés en conception) :
 
 Un démon par utilisateur (sa session, son trousseau, ses mappings).
 """
-__version__ = "1.6.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.6.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -1370,6 +1370,33 @@ def main():
             # le « ✓ Pass finished » quand le passage aboutit enfin (status done).
             if _wr == "locked":
                 log(_("🔓 Session opened — starting the pass."))
+                # 1.6.1 — PRÉVENIR AUSSI L'ICÔNE, au même instant.
+                #
+                # On arrive ici parce que `auth_check` vient de passer : à cette
+                # seconde, on SAIT que Proton répond. Jusqu'ici l'information
+                # n'allait qu'au JOURNAL. Le battement de cœur, lui, continuait
+                # de publier `auth_ok=False` : il n'est mis à jour qu'à la FIN du
+                # cycle, après le retour de `run_once`. L'icône de la barre des
+                # tâches affichait donc « session expirée » pendant TOUTE la
+                # durée du passage, alors que la synchro se déroulait sous les
+                # yeux de l'utilisateur dans la fenêtre Temps réel.
+                #
+                # Constaté le 2 octobre 2026 : rouge de 19:17:27 à 19:20:59,
+                # soit 3 min 32 — exactement la durée du passage. Le défaut
+                # grandit avec le passage : un réamorçage de plusieurs heures
+                # aurait affiché « session expirée » pendant des heures.
+                #
+                # Aucune sonde n'est ajoutée : l'information existait déjà, elle
+                # n'était pas transmise. Et le cas « rien ne relance jamais la
+                # vérification » n'existe pas — quand l'auth échoue, marqueurs et
+                # entrées de debounce sont CONSERVÉS mûrs, donc le cycle suivant
+                # resonde de lui-même (voir la docstring de run_once).
+                #
+                # Seul « locked » est traité : « busy » ne touche pas à auth_ok,
+                # et « account » reste volontairement collant, pour la raison
+                # expliquée juste au-dessus.
+                hb.update(auth_ok=True)
+                hb.beat_now()
             elif _wr == "busy":
                 log(_("🔓 Lock released — starting the pass."))
 
