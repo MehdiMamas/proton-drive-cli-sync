@@ -28,7 +28,16 @@ import os
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCALE_DIR = os.path.join(APP_DIR, "locale")
-SETTINGS_PATH = os.path.join(APP_DIR, "settings.json")
+# PROTON_SYNC_SETTINGS : chemin alternatif de settings.json, figé à l'import
+# comme le chemin historique. Sert aux tests (réglages isolés) et au
+# paquetage (la phase 5 s'en sert). config.py lit ce fichier À TRAVERS
+# i18n quand ce module est présent, donc les deux chemins doivent suivre
+# la même variable. Absente ou vide = APP_DIR/settings.json.
+_settings_override = os.environ.get("PROTON_SYNC_SETTINGS", "").strip()
+if _settings_override:
+    SETTINGS_PATH = _settings_override
+else:
+    SETTINGS_PATH = os.path.join(APP_DIR, "settings.json")
 DOMAIN = "proton-sync"
 
 SUPPORTED = ("en", "fr", "de", "es", "it", "pt")

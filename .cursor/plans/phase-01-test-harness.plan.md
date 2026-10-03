@@ -4,46 +4,46 @@ overview: "Phase 1 of 6. Test harness with a fake Proton CLI. Scope is limited t
 todos:
   - id: p01-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 1; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §4, §8, Appendix A"
-    status: pending
+    status: completed
   - id: p01-0b-wsl
     content: "Finish WSL setup on this PC (section 'WSL setup after the restart'): Ubuntu on WSL2, non-root default user, python3/venv/pip/gettext; record the distro in PROGRESS.md"
-    status: pending
+    status: completed
     dependencies: [p01-0-preflight]
   - id: p01-1-task
     content: "PROTON_SYNC_SETTINGS env override in config.py and i18n.py (task 1)"
-    status: pending
+    status: completed
     dependencies: [p01-0b-wsl]
   - id: p01-2-task
     content: "scripts/test.sh, requirements-dev.txt, pytest.ini, .gitignore (tasks 2-3)"
-    status: pending
+    status: completed
     dependencies: [p01-1-task]
   - id: p01-3-task
     content: "Fake CLI and fixtures per .cursor/skills/fake-cli-testing (task 4)"
-    status: pending
+    status: completed
     dependencies: [p01-2-task]
   - id: p01-4-task
     content: "Fake CLI self-tests (task 5)"
-    status: pending
+    status: completed
     dependencies: [p01-3-task]
   - id: p01-5-task
     content: "Characterization tests of current behavior (task 6)"
-    status: pending
+    status: completed
     dependencies: [p01-4-task]
   - id: p01-6-task
     content: "Strict-xfail known-bug tests (task 7)"
-    status: pending
+    status: completed
     dependencies: [p01-5-task]
   - id: p01-7-task
     content: "docs/dev/TESTING.md (task 8)"
-    status: pending
+    status: completed
     dependencies: [p01-6-task]
   - id: p01-8-gate
     content: "Verify gate: `wsl -- bash scripts/test.sh` exits 0 with 0 failed, 0 xpassed and exactly 7 xfailed, and `git diff origin/main -- proton_sync.py` is empty"
-    status: pending
+    status: completed
     dependencies: [p01-7-task]
   - id: p01-9-handoff
     content: "Record gate evidence in PROGRESS.md, mark Phase 1 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
-    status: pending
+    status: completed
     dependencies: [p01-8-gate]
 ---
 
