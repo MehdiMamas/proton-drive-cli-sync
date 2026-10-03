@@ -69,6 +69,9 @@ try:
 except ImportError:
     _HAS_CONFIG = False
 
+# Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
+from mapping_keys import carry_unknown_keys
+
 # Moteur importé comme MODULE pour réutiliser get_remote_listing (navigateur de
 # destinations Proton) — aucune logique de parsing parallèle. Import tolérant :
 # sans lui, le bouton « Parcourir Proton… » affiche simplement une erreur.
@@ -2597,6 +2600,10 @@ class MappingEditor(tk.Tk):
                             ok_text=_("Add anyway"), cancel_text=_("Cancel")):
                             return
 
+            # Clés inconnues du dialogue (excluded_remote, max_delete_*, …) :
+            # reportées telles quelles, sinon l'édition d'un mapping les perdrait.
+            if is_edit:
+                carry_unknown_keys(mapping, new_m)
             result["value"] = new_m
             dlg.destroy()
 

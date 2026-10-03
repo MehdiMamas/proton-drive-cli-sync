@@ -729,6 +729,7 @@ def _partial_failure_detail(output):
         "folders_permission_denied",
         "folders_stall_skipped",
         "trash_failed",
+        "deletions_refused",
         "sources_missing",
     ):
         value = payload.get(key)

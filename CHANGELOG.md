@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed (safety)
+
+- Remote copies of excluded items are now kept by default. Before, adding an exclusion and running with `--delete` sent the already-uploaded copy to the Proton trash. The new mapping key `excluded_remote` is `"keep"` (default) or `"prune"`. Migration: nothing to do to get the safer behavior; set `"excluded_remote": "prune"` on a mapping to get the old behavior back. Unknown values act as `"keep"` and print a warning. The mapping editor now keeps keys it does not edit (`excluded_remote`, `max_delete_*`) when you edit a mapping.
+- `mappings.example.json` no longer shows `"delete_mode": "permanent"`; the CLI only trashes, so the example uses `"trash"`. `--subpath` help no longer calls it purely additive.
+
+### Added
+
+- Mass-deletion guard: in one remote folder, a pass that would trash at least 20 items and more than half of the folder's remote children trashes nothing there, prints `[delete-guard]`, counts `deletions_refused` in `[run-result]` and exits 5. Thresholds: `max_delete_min` and `max_delete_ratio` in `settings.json`, overridable per mapping. `--allow-mass-delete` turns the guard off for one run.
+- The mount guard is re-checked before each folder's deletions. If it fails mid-pass, deletions stop for the rest of that mapping (uploads continue) and the pass exits 5.
+
 ### Fixed
 
 - A pass that finished with failed uploads, a failed remote listing, an unreadable folder, a missing source, a failed trash, or a folder skipped after repeated stalls used to exit 0. systemd and the real-time consumer treated that as success, and the consumer deleted the markers for work that never reached Drive. The pass now exits 5. Exit codes 0–4 are unchanged. Code 3 (a cold `--subpath`, nothing attempted) still wins over 5. Dry-run uses the same rule and does not write `last-run.json`. Existing systemd units do not contain `RestartPreventExitStatus=5` until they are rewritten: run `python3 schedule_manager.py --refresh-units` once per user so a partial failure shows as a failed unit and is not restarted six times an hour. The next timer or the real-time cycle retries it. The real-time consumer now waits 60 seconds, then 120 seconds, doubling up to 30 minutes, before relaunching a target that exited 1, 5, or another non-success code. A later success resets that wait. Exit 2 is unchanged and does not use this wait. The GUI shows "finished with failures (code 5)" for that exit, as a warning rather than a crash or a success.

@@ -4,38 +4,38 @@ overview: "Phase 4 of 6. Deletion and exclusion safety. Scope is limited to this
 todos:
   - id: p04-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 4 and the Phase 3 gate is recorded with command output; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §4, §5, §9"
-    status: pending
+    status: completed
   - id: p04-1-task
     content: "excluded_remote mapping key, default keep (task 1)"
-    status: pending
+    status: completed
     dependencies: [p04-0-preflight]
   - id: p04-2-task
     content: "Mass-deletion guard, overrides, --allow-mass-delete (task 2)"
-    status: pending
+    status: completed
     dependencies: [p04-1-task]
   - id: p04-3-task
     content: "Per-folder mount re-check with latch (task 3)"
-    status: pending
+    status: completed
     dependencies: [p04-2-task]
   - id: p04-4-task
     content: "GUI preserves unknown mapping keys (task 4)"
-    status: pending
+    status: completed
     dependencies: [p04-3-task]
   - id: p04-5-task
     content: "Help text, example mappings, README, CHANGELOG (task 5)"
-    status: pending
+    status: completed
     dependencies: [p04-4-task]
   - id: p04-6-task
     content: "Remove the phase-04 xfail marker (task 6)"
-    status: pending
+    status: completed
     dependencies: [p04-5-task]
   - id: p04-8-gate
     content: "Verify gate: `wsl -- bash scripts/test.sh` exits 0 with 0 failed, 0 xpassed and exactly 1 xfailed (owned by phase 5)"
-    status: pending
+    status: completed
     dependencies: [p04-6-task]
   - id: p04-9-handoff
     content: "Record gate evidence in PROGRESS.md, mark Phase 4 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
-    status: pending
+    status: completed
     dependencies: [p04-8-gate]
 ---
 
