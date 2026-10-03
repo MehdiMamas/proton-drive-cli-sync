@@ -43,6 +43,6 @@ Phase 3 adds code 5 (completed with failures). Any change to this table updates 
 - Never auto-commit, auto-resume side-effecting actions, or loop verify/fix without a hard cap.
 
 ## Workflow
-- Implement only the active phase in `PROGRESS.md`, using its plan. Meet its **Gate**, record the evidence in `PROGRESS.md`, get the PR through the review loop and merged (see `.cursor/skills/phase/SKILL.md`), then stop and wait for the user.
+- Implement only the active phase in `PROGRESS.md`, using its plan. Meet its **Gate**, record the evidence in `PROGRESS.md`, get the PR through the review loop and merged (see `.cursor/skills/phase/SKILL.md`), then hand off to a new headless session with `next-phase.sh`.
 - The dev machine is Windows. All Python execution and tests run in **WSL** (`wsl -- bash scripts/test.sh`). Git, `gh` and the review script run on Windows.
 - Area rules: `10-engine-safety.mdc`, `50-testing.mdc`, `55-python-style-i18n.mdc`, `60-build-release.mdc`. Testing helpers: `.cursor/skills/fake-cli-testing/SKILL.md`.

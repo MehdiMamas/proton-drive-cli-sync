@@ -24,13 +24,13 @@ Read this file **before** any work. It is the single source of truth for which p
 **Who does what**
 - Cursor: code changes, using `/phase <N>` or `/phase <N> resume`.
 - Claude Code: orchestration. Checks PR and review state, decides the next step, and updates this file and the plans.
-- User: approves pushes, posts anything public, and decides when the next phase starts.
+- User: approves pushes, posts anything public, and can stop the automatic hand-off with `PHASE_AUTOCHAIN=0` (after each merge `next-phase.sh` starts the next phase in a new headless Cursor CLI session; log in `.git/phase-runs/`).
 
 **Prompt to give Cursor**
 ```
 /phase 1
 
-Build the test harness from .cursor/plans/phase-01-test-harness.plan.md: fake proton-drive CLI, hermetic pytest fixtures, scripts/test.sh for WSL, baseline tests and the 7 strict-xfail known-bug tests. Do not change proton_sync.py. Run `wsl -- bash scripts/test.sh`, record the summary line and the WSL distro in this file, open the PR, run the local review loop, and stop after the merge.
+Build the test harness from .cursor/plans/phase-01-test-harness.plan.md: fake proton-drive CLI, hermetic pytest fixtures, scripts/test.sh for WSL, baseline tests and the 7 strict-xfail known-bug tests. Do not change proton_sync.py. Run `wsl -- bash scripts/test.sh`, record the summary line and the WSL distro in this file, open the PR, run the local review loop, merge, and hand off with next-phase.sh.
 ```
 
 ## Deferred
