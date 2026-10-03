@@ -4,42 +4,42 @@ overview: "Phase 2 of 6. Detect equal-size edits. Scope is limited to this phase
 todos:
   - id: p02-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 2 and the Phase 1 gate is recorded with command output; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §4, Appendix A"
-    status: pending
+    status: completed
   - id: p02-1-task
     content: "Investigate the CLI's claimedModificationTime at the pinned SDK commit, record it, align the fake (task 1)"
-    status: pending
+    status: completed
     dependencies: [p02-0-preflight]
   - id: p02-2-task
     content: "Cache.file_baseline() (task 2)"
-    status: pending
+    status: completed
     dependencies: [p02-1-task]
   - id: p02-3-task
     content: "upload_decision() + needs_upload wrapper + sync_folder wiring (task 3)"
-    status: pending
+    status: completed
     dependencies: [p02-2-task]
   - id: p02-4-task
     content: "Batch recovery fix in upload_batch (task 4)"
-    status: pending
+    status: completed
     dependencies: [p02-3-task]
   - id: p02-5-task
     content: "sync_file uses the new comparator (task 5)"
-    status: pending
+    status: completed
     dependencies: [p02-4-task]
   - id: p02-6-task
     content: "Remove the three phase-02 xfail markers (task 6)"
-    status: pending
+    status: completed
     dependencies: [p02-5-task]
   - id: p02-7-task
     content: "CHANGELOG.md + docs/change-detection.md (task 7)"
-    status: pending
+    status: completed
     dependencies: [p02-6-task]
   - id: p02-8-gate
     content: "Verify gate: `wsl -- bash scripts/test.sh` exits 0 with 0 failed, 0 xpassed and exactly 4 xfailed (owned by phases 3-5)"
-    status: pending
+    status: completed
     dependencies: [p02-7-task]
   - id: p02-9-handoff
     content: "Record gate evidence in PROGRESS.md, mark Phase 2 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
-    status: pending
+    status: completed
     dependencies: [p02-8-gate]
 ---
 

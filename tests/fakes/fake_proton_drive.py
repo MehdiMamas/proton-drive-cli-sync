@@ -146,7 +146,8 @@ def _upload(state, args):
         try:
             with open(name, "rb") as handle:
                 data = handle.read()
-            mtime = int(os.stat(name).st_mtime)
+            # POSIX seconds, including the fraction. list -j emits ISO-8601.
+            mtime = os.stat(name).st_mtime
         except OSError as exc:
             print("- {name}: {exc}".format(name=stored, exc=exc))
             failed.append(stored)

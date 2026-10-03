@@ -46,9 +46,11 @@ makes that probe exit 1. `filesystem list <path> -j` returns a JSON array of
 direct children that are not trashed. Fields the engine unwraps (`type`,
 `keyAuthor`, `activeRevision`) use `{"ok": true, "value": ...}`. File items
 carry `claimedSize`, `claimedModificationTime` and `claimedDigests.sha1`.
-`claimedModificationTime` is the local file's mtime in POSIX seconds at the
-moment of upload. Phase 2 checks whether the real CLI does the same and
-updates the fake if it does not.
+`claimedModificationTime` is an ISO-8601 UTC string with milliseconds
+(`Date.toISOString()`, for example `2001-09-09T01:46:40.000Z`). That is what
+`filesystem list -j` returns at SDK commit `28ac9cdc`: upload sends the
+local file's modification time, and JSON serialization turns the Date into
+that string. The state file stores POSIX seconds; the listing converts them.
 
 Uploads read names relative to the process cwd, which is how the engine
 calls the CLI. Glob escapes are undone first (`a[[]b.txt` is the file
@@ -90,9 +92,9 @@ and `[auth-failed]` are part of the API and may be asserted. Do not assert
 on translated sentences.
 
 Import `proton_sync` in-process only for a pure helper. The equal-size
-comparator test does not import the module: it execs the three functions the
-way Appendix A of the briefing does, so importing the engine cannot create
-directories as a side effect of that test.
+comparator test does not import the module: it execs the comparison helpers
+the way Appendix A of the briefing does, so importing the engine cannot
+create directories as a side effect of that test.
 
 ## Known bugs (strict xfail)
 
@@ -102,11 +104,11 @@ the behavior we want. On today's code it fails, and strict mode records that
 as an expected failure. A phase that fixes the bug removes the marker in the
 same change. Leaving the marker on a test that now passes fails the suite.
 
+Phase 2 removed the three equal-size markers and moved those tests to
+`tests/test_equal_size.py`.
+
 | Test | Removed by |
 |---|---|
-| `test_equal_size_edit_is_uploaded` | phase 2 |
-| `test_equal_size_edit_detected_by_comparator` | phase 2 |
-| `test_batch_recovery_not_fooled_by_old_equal_size_remote` | phase 2 |
 | `test_upload_failure_exits_nonzero` | phase 3 |
 | `test_subpath_upload_failure_exits_nonzero` | phase 3 |
 | `test_exclusion_added_later_keeps_remote_copy` | phase 4 |

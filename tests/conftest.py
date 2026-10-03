@@ -74,14 +74,23 @@ class FakeDrive:
     def _load(self):
         return remote_state.load(str(self.state_path))
 
-    def seed_file(self, remote_path, data, mtime=1_000_000_000):
+    def seed_file(self, remote_path, data, mtime=1_000_000_000, digest=True):
         def mutate(state):
-            remote_state.store_file(state, remote_path, data, int(mtime))
+            remote_state.store_file(state, remote_path, data, mtime)
             # seed is not an upload the engine performed
             if state["uploads"] and state["uploads"][-1] == remote_state.normalize(remote_path):
                 state["uploads"].pop()
             node = state["nodes"][remote_state.normalize(remote_path)]
             node["revisions"] = 1
+            if not digest:
+                node["remove_digest"] = True
+        self._update(mutate)
+
+    def omit_digest(self, remote_path):
+        """Drop claimedDigests on the next listing. The stored bytes stay."""
+        def mutate(state):
+            node = state["nodes"][remote_state.normalize(remote_path)]
+            node["remove_digest"] = True
         self._update(mutate)
 
     def seed_folder(self, remote_path):
