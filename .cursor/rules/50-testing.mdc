@@ -1,0 +1,28 @@
+---
+description: How to write and run tests (WSL, pytest, fake proton-drive CLI, isolation)
+globs: tests/**,scripts/test.sh,requirements-dev.txt,pytest.ini,conftest.py
+alwaysApply: false
+---
+
+# Testing rules
+
+## Running
+- Always run tests in **WSL** from the repo root: `wsl -- bash scripts/test.sh` (from PowerShell)
+  or `bash scripts/test.sh` (inside WSL). Pass pytest args through: `wsl -- bash scripts/test.sh -k equal_size -vv`.
+- `scripts/test.sh` creates/uses `.venv-wsl/` inside WSL and installs `requirements-dev.txt`.
+- Never run the suite with Windows Python: `fcntl` does not exist there and results are meaningless.
+- The gate cell in `PROGRESS.md` and the PR's "How to test" section get the command and the final pytest summary line from WSL, plus the distro name.
+
+## Writing
+- Use the fake CLI (`tests/fakes/fake_proton_drive.py`) through the fixtures in `tests/conftest.py`.
+  It is a real executable the engine calls via `PROTON_DRIVE_CLI`, so tests cover argument building,
+  JSON parsing and exit-code handling. Do not monkeypatch `run_cli`/`needs_upload` to test themselves.
+- Pure unit tests of small helpers are fine without the fake CLI.
+- Every test must be hermetic: `tmp_path` for local trees, `HOME` and `XDG_*` redirected to tmp,
+  `config._SETTINGS_PATH` redirected, no network, no real keyring, no real `~/.proton-drive-sync`.
+  The autouse isolation fixture in `conftest.py` does this. Never remove it.
+- Control time explicitly with `os.utime(path, ns=(…))`. No `time.sleep` in tests.
+- A regression test must fail on the code before the fix. When fixing a bug, first add the test,
+  run it, and confirm it fails (or convert the existing `xfail(strict=True)` marker). Mention this in the PR.
+- Name tests after behavior: `test_equal_size_edit_is_uploaded`, not `test_needs_upload_2`.
+- Keep test runtime under ~60 s total. Mark anything slower `@pytest.mark.slow` (skipped by default).

@@ -1,0 +1,23 @@
+---
+description: Python style, comment language, and i18n conventions for this codebase
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python style and i18n
+
+- Python 3.9+ compatible syntax (Arch ships newer, but users on other distros run this too). Standard library
+  only in runtime modules unless a plan adds a dependency. Test-only deps go in `requirements-dev.txt`.
+- Match the surrounding code: module-level functions, explicit names, long explanatory comments for
+  non-obvious decisions. Do not reformat untouched code (no black/isort sweeps). Keep diffs minimal.
+- **Comment language**: existing modules are commented in French. When editing inside an existing module, write
+  new comments in French to match, short and precise. New files (tests, scripts, packaging) use English.
+- **User-facing strings**: English source text wrapped in `_()` (the i18n source language is English).
+  Use `.format()` named placeholders like the existing code: `_("… {p}").format(p=path)`.
+  Do not edit translated `.po`/`.mo` files; missing translations fall back to English.
+  If you add `_()` strings, run `wsl -- bash build_locales.sh --pot` only if a plan asks; otherwise mention the new
+  strings in the PR under "i18n".
+- Stable machine tags (`[upload-failed]` etc.) stay OUTSIDE `_()`: `print("[tag] " + _("message"))`.
+- Bump `__version__` in a module only if the plan says so (packaging phase handles versions).
+- No bare `except:`. Catch the narrowest exception; if a broad catch is needed to keep a daemon alive, log the error.
+- File writes that other processes read (cache, health, last-run, settings) must be atomic: write `tmp` then `os.replace`.

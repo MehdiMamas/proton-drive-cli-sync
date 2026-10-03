@@ -1,0 +1,48 @@
+---
+description: Proton Drive Sync core product contract, architecture boundaries and phase workflow
+globs:
+alwaysApply: true
+---
+
+# Proton Drive Sync – core rules
+
+The build is split into one plan per phase: `.cursor/plans/phase-NN-*.plan.md`. `.cursor/plans/00-roadmap.plan.md` is the index, and `PROGRESS.md` names the active phase. Phase discipline is defined in `05-phase-discipline.mdc`. The long-form spec is `PROTON_DRIVE_SYNC_MASTER_PLAN.md`, and plan items cite it as §N. Read the cited sections before implementing a phase.
+
+## Product contract
+- A **one-way local → Proton Drive** backup tool for Linux, forked from `lafontaj/proton-drive-cli-sync` at `5a852e2`. It never downloads remote changes and never claims two-way sync.
+- All Drive access goes through Proton's official `proton-drive` CLI (tested 0.8.0). We own the mapping policy, change detection, scheduling and reporting. We never reimplement the Drive protocol or handle Proton credentials.
+- **Data safety first.** The worst bugs are: skipping changed content, reporting success when files did not reach Drive, trashing remote data the user expected to keep, renaming local files. When unsure, pick the conservative behavior (upload again, keep markers, refuse deletion) and record it in `PROGRESS.md` under Notes / decisions.
+- **Backward compatibility.** Existing `mappings*.json`, `settings.json`, caches under `~/.proton-drive-sync/` and installed systemd units keep working. Unknown keys are preserved. Every intentional behavior change gets a `CHANGELOG.md` entry with a migration note.
+- Never: real Proton access from tests, permanent deletion, personal data in the repo (real mappings, settings, logs, emails, someone's paths), presenting the fork as an official Proton product.
+
+## Architecture boundaries
+- Only `proton_sync.py` (via `run_cli` / `run_cli_watched`) runs the Proton CLI for transfers, listings and trashing. GUI, consumer and managers run the **engine**, not the CLI, except the existing auth/version probes.
+- Settings and state paths come from `config.py` (one source of truth). No module hard-codes `~/.proton-drive-sync` or the settings path.
+- systemd unit text is generated only in `schedule_manager.py` / `realtime_manager.py`.
+- The engine's **exit codes and stable output tags are an API** consumed by `realtime_consumer.py`, `schedule_manager.py` and the GUI (`10-engine-safety.mdc`).
+
+### Exit-code contract (`proton_sync.py`)
+
+| Code | Meaning | Consumers |
+| --- | --- | --- |
+| 0 | Pass completed | systemd success; consumer acks markers |
+| 1 | Lock contention, usage error, unusable CLI | systemd restarts (bounded) |
+| 2 | Auth probe failed (keyring locked OR network/Proton outage) | `SuccessExitStatus`, no restart |
+| 3 | `--subpath` target cold (not fully indexed) | consumer keeps markers, cold backoff |
+| 4 | Proton account changed vs cache stamp | `SuccessExitStatus`, consumer keeps markers |
+| 128+n | Killed by signal n | |
+
+Phase 3 adds code 5 (completed with failures). Any change to this table updates `realtime_consumer.py`, `schedule_manager.py` (`build_service_text`, `_parse_result`, `_result_label`), the GUI, docs and this rule in the same PR.
+
+## Hygiene
+- This is a fork: editing upstream files is expected when a plan says so, but keep each edit minimal and list every touched upstream file in `UPSTREAM.md` (file, phase, why). New behavior that can live in a new module goes in a new module.
+- Follow the existing conventions: French comments inside existing modules, English user-facing strings in `_()`, stable tags outside `_()` (`55-python-style-i18n.mdc`).
+
+## Reliability
+- Fail closed and locally. Never invent data the CLI does not provide (missing size/digest/mtime → conservative path).
+- Never auto-commit, auto-resume side-effecting actions, or loop verify/fix without a hard cap.
+
+## Workflow
+- Implement only the active phase in `PROGRESS.md`, using its plan. Meet its **Gate**, record the evidence in `PROGRESS.md`, get the PR through the review loop and merged (see `.cursor/skills/phase/SKILL.md`), then stop and wait for the user.
+- The dev machine is Windows. All Python execution and tests run in **WSL** (`wsl -- bash scripts/test.sh`). Git, `gh` and the review script run on Windows.
+- Area rules: `10-engine-safety.mdc`, `50-testing.mdc`, `55-python-style-i18n.mdc`, `60-build-release.mdc`. Testing helpers: `.cursor/skills/fake-cli-testing/SKILL.md`.
