@@ -2,15 +2,15 @@
 
 Read this file **before** any work. It is the single source of truth for which phase is active. Rules: `.cursor/rules/05-phase-discipline.mdc`. Roadmap: `.cursor/plans/00-roadmap.plan.md`.
 
-**Active phase:** 4 – Deletion safety (not started) → `.cursor/plans/phase-04-deletion-safety.plan.md`
-**Next:** 5 – Headless defaults and paths (not started)
+**Active phase:** 5 – Headless defaults and paths (not started) → `.cursor/plans/phase-05-headless-defaults-and-paths.plan.md`
+**Next:** 6 – Arch packaging and release (not started)
 
 | Phase | Plan | Status | Gate evidence | Date |
 |---|---|---|---|---|
 | 1 | `phase-01-test-harness.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `28 passed, 7 xfailed in 12.70s` (0 failed, 0 xpassed). `git diff origin/main -- proton_sync.py` empty. Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 2 | `phase-02-equal-size-edits.plan.md` | completed | `wsl -- bash scripts/test.sh -ra --tb=line` exit 0: `40 passed, 4 xfailed in 14.91s` (0 failed, 0 xpassed). The 4 xfailed are phase 3 (upload and subpath exit codes), phase 4 (exclusion plus delete), and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 3 | `phase-03-run-results.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `63 passed, 2 xfailed in 23.67s` (0 failed, 0 xpassed). The 2 xfailed are phase 4 (exclusion plus delete) and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
-| 4 | `phase-04-deletion-safety.plan.md` | not started | | |
+| 4 | `phase-04-deletion-safety.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `76 passed, 1 xfailed in 31.30s` (0 failed, 0 xpassed). The 1 xfailed is phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 5 | `phase-05-headless-defaults-and-paths.plan.md` | not started | | |
 | 6 | `phase-06-arch-packaging-release.plan.md` | not started | | |
 
@@ -19,7 +19,7 @@ Read this file **before** any work. It is the single source of truth for which p
 **Where we are**
 - Fork of `lafontaj/proton-drive-cli-sync` at `5a852e2`. The phasing setup is merged into `main` (PR #1, `f9f186e`).
 - No CI on pull requests. `.github/workflows/tests.yml` is manual (`workflow_dispatch`) only. Reviews run locally via `.cursor/skills/phase/review.sh`.
-- Phase 3 is done on this branch: a pass that finishes with failures exits 5, `[run-result]` and `last-run.json` record it, and the consumer keeps markers. Two strict xfails remain (phases 4 and 5).
+- Phase 4 is done on this branch: excluded remote copies are kept by default, a mass deletion in one folder is refused, and a mount loss mid-pass stops later deletions in that mapping. One strict xfail remains (phase 5).
 - WSL is ready on this PC (see Notes). The gate ran there.
 
 **Who does what**
@@ -29,9 +29,9 @@ Read this file **before** any work. It is the single source of truth for which p
 
 **Prompt to give Cursor**
 ```
-/phase 4
+/phase 5
 
-Deletion safety from .cursor/plans/phase-04-deletion-safety.plan.md. The phase 3 gate is recorded in this file. Do not start phase 5.
+Headless defaults and paths from .cursor/plans/phase-05-headless-defaults-and-paths.plan.md. The phase 4 gate is recorded in this file. Do not start phase 6.
 ```
 
 ## Deferred
@@ -40,6 +40,8 @@ Deletion safety from .cursor/plans/phase-04-deletion-safety.plan.md. The phase 3
 - [Human, any time] Run the read-only inventory from spec §5 on Nizar's machine (after phase 6: `proton-drive-sync-doctor --redact`) to learn whether deletion, rename-ext or equal-size edits affect his setup. Noticed while planning, 2026-10-03.
 
 ## Notes / decisions
+- 2026-10-03: Phase 4 mount re-check. `detect_source_kind` reads `/proc/mounts`, so a positive verdict is reused for 5 seconds (`_MOUNT_RECHECK_TTL`). A refusal is never cached. The latch (`mount_lost` on the mapping's delete options) still stops every later folder in that pass after the first failure.
+- 2026-10-03: Phase 4 exclusion fingerprint. The signature still includes the exclusion fingerprint, so a change still forces one listing. Under the default `excluded_remote: "keep"` that listing does not trash excluded names. `"prune"` is the old cleanup.
 - 2026-10-03: Phase 3 review round 1. Exit 5 still records `[unreadable]` paths on the consumer (`clear_unreadable` then `note_unreadable`) so the tray can name them before the next full pass. `[run-result]` is printed after the last-run write so a write error is not the last line. `00-core` and this file keep the existing hand-off: `next-phase.sh` starts the next session.
 - 2026-10-03: Phase 3 code 2 (auth). `run_once` already refuses to launch when `keyring_ready` is false, so a locked keyring never reaches the engine. If the engine still exits 2, `process_ready` keeps the previous path: markers restored, no exponential backoff. Backoff applies to exit 1, 5 and any other non-success code. Exits 3 and 4 keep the cold mechanism.
 - 2026-10-03: Phase 3 trash counters. `items_trashed` and `trash_failed` are incremented in `remote_trash`, which `delete_orphans` and `_wipe_mapping_remote` both call. A failed wipe is therefore a pass failure even though `main` ignores the wipe's return value. Dry-run returns before those counters.

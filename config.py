@@ -109,6 +109,12 @@ DEFAULTS = {
     # 0 = illimité (défaut) : le moteur réessaie indéfiniment, ce qui est le
     # comportement sûr tant qu'on n'a pas observé de blocage systématique.
     "cli_stall_max_kills": 0,
+    # Garde-fou de suppression de masse (par dossier distant) : un passage qui
+    # enverrait à la corbeille au moins `max_delete_min` éléments ET plus de
+    # `max_delete_ratio` des enfants distants du dossier est refusé. Surchargeable
+    # par mapping (clés du même nom) ; --allow-mass-delete le coupe pour un passage.
+    "max_delete_min": 20,
+    "max_delete_ratio": 0.5,
     "tray_enabled": False,            # icône d'état dans la barre des tâches (tray_indicator.py)
     "account_name": None,             # identité NAS stable (None = auto : amorçage intelligent)
     # Correspondance des chemins de DONNÉES entre cette machine (desktop) et le
@@ -476,6 +482,28 @@ def cli_stall_max_kills():
     except (TypeError, ValueError):
         return DEFAULTS["cli_stall_max_kills"]
     return n if n >= 0 else DEFAULTS["cli_stall_max_kills"]
+
+
+def max_delete_min():
+    """Nombre minimal d'orphelins (dans un dossier) pour armer le garde-fou de
+    suppression de masse. Valeur illisible ou négative -> défaut."""
+    v = get("max_delete_min")
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return DEFAULTS["max_delete_min"]
+    return n if n >= 0 else DEFAULTS["max_delete_min"]
+
+
+def max_delete_ratio():
+    """Part maximale (0..1) des enfants distants d'un dossier qu'un passage peut
+    envoyer à la corbeille. Valeur illisible ou hors [0, 1] -> défaut."""
+    v = get("max_delete_ratio")
+    try:
+        r = float(v)
+    except (TypeError, ValueError):
+        return DEFAULTS["max_delete_ratio"]
+    return r if 0.0 <= r <= 1.0 else DEFAULTS["max_delete_ratio"]
 
 
 def set_cli_stall_max_kills(value):

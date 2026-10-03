@@ -17,4 +17,9 @@ separate pull requests. New files added by the fork are not listed.
 | `realtime_consumer.py` | 3 | Exit 0 was the only signal that markers could be deleted, so a partial failure was acknowledged. Exit 5 keeps markers and backs off |
 | `schedule_manager.py` | 3 | A partial failure must show as a failed unit without a restart storm (`RestartPreventExitStatus=5`, `--refresh-units`) |
 | `proton_mapping_editor.py` | 3 | Exit 5 was shown like any other non-zero code. The GUI now treats it as finished with failures |
+| `proton_sync.py` | 4 | Exclusions trashed already-uploaded remote copies and nothing limited a mass deletion. Adds `excluded_remote`, the `[delete-guard]` mass-deletion guard, `--allow-mass-delete`, and a mount re-check per folder |
+| `config.py` | 4 | `max_delete_min` and `max_delete_ratio` settings with typed getters |
+| `realtime_consumer.py` | 4 | Names `deletions_refused` in the failure summary of a kept marker |
+| `proton_mapping_editor.py` | 4 | Editing a mapping dropped keys the dialog does not know; they are carried over now |
+| `README.md`, `README_fr.md`, `mappings.example.json` | 4 | Exclusion semantics, mass-deletion guard, `"permanent"` example replaced by `"trash"` |
 | `INSTALLATION-systemd.md` | 3 | Exit-code table and the `--refresh-units` step for units already installed |

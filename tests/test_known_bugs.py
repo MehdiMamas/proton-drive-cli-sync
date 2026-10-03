@@ -2,6 +2,7 @@
 
 Phase 2 moved the equal-size tests to tests/test_equal_size.py and removed their markers.
 Phase 3 removed the upload-failure markers: those passes now exit 5.
+Phase 4 removed the exclusion-plus-delete marker.
 """
 
 import pytest
@@ -36,11 +37,6 @@ def test_subpath_upload_failure_exits_nonzero(fake_drive, local_tree, write_mapp
     assert result.returncode == 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="phase-04: a later exclusion plus --delete trashes the remote copy",
-)
 def test_exclusion_added_later_keeps_remote_copy(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/secret.txt": (b"hide", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs", allow_delete=True, source_kind="local")])
