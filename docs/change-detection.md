@@ -43,3 +43,11 @@ A file edited while it was excluded is not re-checked when the exclusion is remo
 Unchanged files in a folder mapping are not hashed. Hashing runs only for an equal-size file that this pass actually has to check: `--verify-hash` asked for it, or the previous pass's record is missing or different and the listing includes a SHA-1. A folder skipped by the cache never reaches this check.
 
 A single-file mapping has no previous-pass record. When Drive reports a SHA-1, that equal-size file is hashed on every pass.
+
+## Symbolic links
+
+A symbolic link to a file is uploaded as the target's content. The target may sit outside the mapped folder. The cache records that link as a file, using the target's size and modification time, so a change to the target is noticed.
+
+A symbolic link to a directory is not followed. The directory it points at is not walked, and the files inside it are not uploaded.
+
+A broken symbolic link is ignored. It is not uploaded and it is not treated as a local file to reconcile.

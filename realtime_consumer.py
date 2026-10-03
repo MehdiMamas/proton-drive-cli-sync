@@ -82,7 +82,7 @@ if _HAS_CONFIG:
     LOCAL_QUEUE = appconfig.QUEUE_DIR
     CONFIG_FILE = appconfig.REALTIME_CONF
 else:
-    BASE_DIR = os.path.expanduser("~/.proton_sync")
+    BASE_DIR = os.path.expanduser("~/.proton-drive-sync")
     LOCAL_QUEUE = os.path.join(BASE_DIR, "queue")
     CONFIG_FILE = os.path.join(BASE_DIR, "realtime.conf")
 
@@ -1193,7 +1193,8 @@ def _count_ready_mappings(config_path):
         return (0, 0)
     # Cache au NOUVEL emplacement unifié (config.py) — sinon, après migration,
     # ce compte lirait l'ancien dossier vide et afficherait toujours 0.
-    cache_dir = appconfig.CACHE_DIR if _HAS_CONFIG else os.path.expanduser("~/.proton_sync_cache")
+    cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
+                 else os.path.expanduser("~/.proton-drive-sync/cache"))
     name = os.path.basename(config_path).replace(".json", "") + ".cache"
     try:
         with open(os.path.join(cache_dir, name), "r", encoding="utf-8") as f:

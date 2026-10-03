@@ -124,6 +124,13 @@ class FakeDrive:
         node = self._load()["nodes"].get(remote_state.normalize(remote_path))
         return bool(isinstance(node, dict) and node.get("trashed"))
 
+    def set_version(self, version):
+        text = "Proton Drive CLI cli-drive@{v}+fake\n".format(v=version)
+
+        def mutate(state):
+            state["version_text"] = text
+        self._update(mutate)
+
     def revisions(self, remote_path):
         node = self._load()["nodes"].get(remote_state.normalize(remote_path))
         if not isinstance(node, dict):
@@ -192,6 +199,7 @@ def _isolate(monkeypatch, isolated_home, tmp_path):
     monkeypatch.delenv("PROTON_SYNC_DEBUG", raising=False)
     settings = tmp_path / "isolate-settings.json"
     settings.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("PROTON_SYNC_SETTINGS", str(settings))
     for module_name, attr in (("config", "_SETTINGS_PATH"), ("i18n", "SETTINGS_PATH")):
         module = sys.modules.get(module_name)
         if module is not None and hasattr(module, attr):
@@ -213,7 +221,7 @@ def _isolate(monkeypatch, isolated_home, tmp_path):
             "RENAMED_LOG": base / "renamed-extensions.log",
             "HEALTH_FILE": base / "health.json",
             "LAST_RUN_FILE": base / "last-run.json",
-            "CLI_VERSION_CACHE": isolated_home / ".proton_sync" / "cli-version.json",
+            "CLI_VERSION_CACHE": base / "cli-version.json",
         }
         for name in names:
             if hasattr(module, name):
@@ -256,7 +264,9 @@ def engine(fake_drive, isolated_home, tmp_path):
     settings = tmp_path / "engine-settings.json"
     settings.write_text('{"language": "en"}\n', encoding="utf-8")
 
-    def run(mappings, *args):
+    def run(mappings, *args, settings_doc=None):
+        if settings_doc is not None:
+            settings.write_text(json.dumps(settings_doc) + "\n", encoding="utf-8")
         cli = os.environ.get("PROTON_DRIVE_CLI")
         if not cli:
             raise RuntimeError(

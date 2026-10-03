@@ -149,7 +149,7 @@ journalctl --user -u proton-sync.service | grep -i "authenticat"
 ## Collision with real-time (automatic retry)
 
 The scheduled pass and the **real-time consumer** share the lock
-`~/.proton_sync.lock`: never two passes in parallel. If the consumer holds the
+`~/.proton-drive-sync/proton_sync.lock`: never two passes in parallel. If the consumer holds the
 lock when the timer fires (e.g. a phone backup in the middle of the night woke
 up the real-time layer), the scheduled engine exits with **failure (code 1)**.
 

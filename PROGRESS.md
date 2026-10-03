@@ -2,8 +2,8 @@
 
 Read this file **before** any work. It is the single source of truth for which phase is active. Rules: `.cursor/rules/05-phase-discipline.mdc`. Roadmap: `.cursor/plans/00-roadmap.plan.md`.
 
-**Active phase:** 5 – Headless defaults and paths (not started) → `.cursor/plans/phase-05-headless-defaults-and-paths.plan.md`
-**Next:** 6 – Arch packaging and release (not started)
+**Active phase:** 6 – Arch packaging and release (not started) → `.cursor/plans/phase-06-arch-packaging-release.plan.md`
+**Next:** none (phase 6 is the last planned phase)
 
 | Phase | Plan | Status | Gate evidence | Date |
 |---|---|---|---|---|
@@ -11,7 +11,7 @@ Read this file **before** any work. It is the single source of truth for which p
 | 2 | `phase-02-equal-size-edits.plan.md` | completed | `wsl -- bash scripts/test.sh -ra --tb=line` exit 0: `40 passed, 4 xfailed in 14.91s` (0 failed, 0 xpassed). The 4 xfailed are phase 3 (upload and subpath exit codes), phase 4 (exclusion plus delete), and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 3 | `phase-03-run-results.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `63 passed, 2 xfailed in 23.67s` (0 failed, 0 xpassed). The 2 xfailed are phase 4 (exclusion plus delete) and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 4 | `phase-04-deletion-safety.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `76 passed, 1 xfailed in 31.30s` (0 failed, 0 xpassed). The 1 xfailed is phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
-| 5 | `phase-05-headless-defaults-and-paths.plan.md` | not started | | |
+| 5 | `phase-05-headless-defaults-and-paths.plan.md` | completed | `wsl -- bash scripts/test.sh -ra --tb=line` exit 0: `91 passed in 32.37s` (0 failed, 0 xfailed). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 6 | `phase-06-arch-packaging-release.plan.md` | not started | | |
 
 ## Handoff (2026-10-03)
@@ -19,7 +19,7 @@ Read this file **before** any work. It is the single source of truth for which p
 **Where we are**
 - Fork of `lafontaj/proton-drive-cli-sync` at `5a852e2`. The phasing setup is merged into `main` (PR #1, `f9f186e`).
 - No CI on pull requests. `.github/workflows/tests.yml` is manual (`workflow_dispatch`) only. Reviews run locally via `.cursor/skills/phase/review.sh`.
-- Phase 4 is done on this branch: excluded remote copies are kept by default, a mass deletion in one folder is refused, and a mount loss mid-pass stops later deletions in that mapping. One strict xfail remains (phase 5).
+- Phase 5 is done on this branch: a headless run does not rename extensions on CLI ≥ 0.5.0 unless settings say so, settings live under `~/.config/proton-drive-sync/`, and `proton-drive` is found on `PATH`. No xfails remain.
 - WSL is ready on this PC (see Notes). The gate ran there.
 
 **Who does what**
@@ -29,9 +29,9 @@ Read this file **before** any work. It is the single source of truth for which p
 
 **Prompt to give Cursor**
 ```
-/phase 5
+/phase 6
 
-Headless defaults and paths from .cursor/plans/phase-05-headless-defaults-and-paths.plan.md. The phase 4 gate is recorded in this file. Do not start phase 6.
+Arch packaging and release from .cursor/plans/phase-06-arch-packaging-release.plan.md. The phase 5 gate is recorded in this file. Do not start work past phase 6.
 ```
 
 ## Deferred
@@ -40,6 +40,8 @@ Headless defaults and paths from .cursor/plans/phase-05-headless-defaults-and-pa
 - [Human, any time] Run the read-only inventory from spec §5 on Nizar's machine (after phase 6: `proton-drive-sync-doctor --redact`) to learn whether deletion, rename-ext or equal-size edits affect his setup. Noticed while planning, 2026-10-03.
 
 ## Notes / decisions
+- 2026-10-03: Phase 5 GUI migration. `_maybe_disable_rename_ext` still writes settings, once: if `effective_rename_ext` is off and the stored value is on, it sets `rename_ext_enabled` false and `rename_ext_auto_disabled` true, then shows the existing dialog. If the stored value is already off, it only sets the flag and does not show the dialog. If the helper says the workaround stays (old CLI), it writes nothing. The engine never writes these keys. A missing key uses `DEFAULTS["rename_ext_enabled"]` (true) only for that stored-value check; the headless decision does not.
+- 2026-10-03: `~/.proton_sync` leftovers that stay. Runtime paths now use `~/.proton-drive-sync`. The only `expanduser("~/.proton_sync…")` calls are `config.py`'s `_LEGACY_CACHE_DIR`, `_LEGACY_BASE_DIR`, and `_LEGACY_LOCK_FILE`. Comments that name the old paths stay because they describe that migration (`config.py`, `local_watcher.py`, `realtime_consumer.py`, `realtime_manager.py`). README and README_fr migration paragraphs name the same legacy locations. The phase 5 plan text and `PROTON_DRIVE_SYNC_MASTER_PLAN.md` still describe the pre-change snapshot. The phase 3 note below that names `~/.proton_sync/last-run.json` as the no-config fallback is superseded: that fallback is `~/.proton-drive-sync/last-run.json`. No `-dev` or leading-dot sibling of `~/.config/proton-drive-sync/settings.json` or `cli-version.json`.
 - 2026-10-03: Phase 4 mount re-check. `detect_source_kind` reads `/proc/mounts`, so a positive verdict is reused for 5 seconds (`_MOUNT_RECHECK_TTL`). A refusal is never cached. The latch (`mount_lost` on the mapping's delete options) still stops every later folder in that pass after the first failure.
 - 2026-10-03: Phase 4 exclusion fingerprint. The signature still includes the exclusion fingerprint, so a change still forces one listing. Under the default `excluded_remote: "keep"` that listing does not trash excluded names. `"prune"` is the old cleanup.
 - 2026-10-03: Phase 3 review round 1. Exit 5 still records `[unreadable]` paths on the consumer (`clear_unreadable` then `note_unreadable`) so the tray can name them before the next full pass. `[run-result]` is printed after the last-run write so a write error is not the last line. `00-core` and this file keep the existing hand-off: `next-phase.sh` starts the next session.
