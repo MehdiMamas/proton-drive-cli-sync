@@ -2709,14 +2709,15 @@ def _finish_pass(exit_code, mode, dry_run, completed):
 
     « Done. » seulement si la boucle est allée au bout (codes 0 et 5) : le
     parseur de journal de schedule_manager.py s'appuie sur ce mot.
-    [run-result] est toujours la dernière ligne. last-run.json pour 0, 2, 4
-    et 5, jamais en dry-run."""
+    last-run.json pour 0, 2, 4 et 5, jamais en dry-run. L'écriture a lieu
+    AVANT les lignes de fin : un échec d'écriture ne doit pas passer après
+    [run-result], qui reste toujours la dernière ligne."""
+    if not dry_run and exit_code in (0, 2, 4, 5):
+        _write_last_run(exit_code, mode)
     if completed and exit_code in (0, 5):
         print("\n" + _("Done."))
     print(_summary_line())
     _emit_run_result(exit_code, mode)
-    if not dry_run and exit_code in (0, 2, 4, 5):
-        _write_last_run(exit_code, mode)
     sys.exit(exit_code)
 
 

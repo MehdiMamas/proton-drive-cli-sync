@@ -910,7 +910,7 @@ def process_ready(state, target_dir, mappings, config_path, log, runner=None,
                   now=None):
     """Traite UN dossier mûr : trouve son mapping, lance le moteur, nettoie les
     marqueurs. Robuste : dossier disparu / hors mapping -> marqueurs nettoyés et
-    on passe.     Retourne True si une synchro a été lancée, False sinon.
+    on passe. Retourne True si une synchro a été lancée, False sinon.
 
     `now` est l'horloge monotone du cycle (injectable dans les tests). Elle
     sert à la rampe d'échec. Le mécanisme froid garde time.monotonic()."""
@@ -1045,6 +1045,12 @@ def process_ready(state, target_dir, mappings, config_path, log, runner=None,
         # La rampe espace les relances ; le code 0 seul la remet à zéro.
         _restore_markers(markers, log=log)
         state.clear(target_dir)
+        # Un code 5 n'est pas un succès, mais le passage a quand même nommé les
+        # dossiers illisibles. On oublie d'abord l'ancienne liste sous cette
+        # cible, puis on reprend ce que CE passage a imprimé : sinon l'alerte
+        # du plateau reste vide jusqu'au prochain passage complet.
+        state.clear_unreadable(target_dir)
+        state.note_unreadable(parse_unreadable(output))
         state.note_failure(target_dir, now)
         log(_("    ⚠ partial failure, markers kept")
             + _partial_failure_detail(output))

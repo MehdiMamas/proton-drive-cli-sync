@@ -53,9 +53,69 @@ def test_clean_pass_exits_0_with_run_result_line(
     assert payload["mappings_total"] == 1
     assert payload["mappings_complete"] == 1
     lines = result.stdout.splitlines()
+    assert lines[-1].startswith("[run-result] ")
     index = next(i for i, line in enumerate(lines) if line.startswith("[run-result] "))
     assert lines[index - 1].startswith("Summary:")
     assert "Done." in lines[:index]
+
+
+def test_run_result_stays_last_when_last_run_unwritable(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
+    blocked = isolated_home / ".proton-drive-sync" / "last-run.json"
+    blocked.parent.mkdir(parents=True, exist_ok=True)
+    blocked.mkdir()
+    cfg = write_mappings([_mapping(src / "Docs")])
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-1].startswith("[run-result] ")
+    assert "Could not write the last-run file" in result.stdout
+
+
+def test_permission_denied_exits_5(fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
+    fake_drive.add_fault(
+        cmd="create-folder",
+        match="/my-files/Backups",
+        stderr="Vous n'avez pas l'autorisation d'effectuer cette action.",
+    )
+    cfg = write_mappings([_mapping(src / "Docs")])
+    result = engine(cfg)
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert _run_result(result.stdout)["folders_permission_denied"] >= 1
+    assert fake_drive.content("/my-files/Backups/Docs/a.txt") is None
+
+
+def test_file_mapping_upload_failure_exits_5(fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"notes.txt": (b"hello", 1_000_000_000)})
+    fake_drive.add_fault(cmd="upload", match="notes.txt", times=5, stderr="nope")
+    cfg = write_mappings([{
+        "type": "file",
+        "source": str(src / "notes.txt"),
+        "dest_parent": "/my-files/Backups",
+    }])
+    result = engine(cfg)
+    assert result.returncode == 5, result.stdout + result.stderr
+    payload = _run_result(result.stdout)
+    assert payload["files_failed"] >= 1
+    assert payload["mappings_complete"] == 0
+
+
+def test_stall_skip_exits_5(
+        fake_drive, local_tree, write_mappings, engine, isolated_home, tmp_path):
+    src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
+    settings = tmp_path / "engine-settings.json"
+    settings.write_text(
+        json.dumps({"language": "en", "cli_stall_max_kills": 2}) + "\n",
+        encoding="utf-8",
+    )
+    stall = isolated_home / ".proton-drive-sync" / "upload-stalls.json"
+    stall.parent.mkdir(parents=True, exist_ok=True)
+    stall.write_text(json.dumps({"/my-files/Backups/Docs": 2}) + "\n", encoding="utf-8")
+    cfg = write_mappings([_mapping(src / "Docs")])
+    result = engine(cfg)
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert _run_result(result.stdout)["folders_stall_skipped"] == 1
 
 
 def test_listing_failure_exits_5(fake_drive, local_tree, write_mappings, engine):
@@ -202,7 +262,6 @@ def test_last_run_written_on_auth_and_account(
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps({"__meta__": {"account": "other@example.com"}}),
                      encoding="utf-8")
-    # The auth fault was consumed. A fresh fault must not be left in place.
     changed = engine(cfg)
     assert changed.returncode == 4, changed.stdout + changed.stderr
     data = json.loads(_last_run_path(isolated_home).read_text(encoding="utf-8"))
@@ -241,6 +300,24 @@ def test_consumer_keeps_markers_on_exit_5(tmp_path):
     inflight = queue / "inflight"
     if inflight.exists():
         assert list(inflight.iterdir()) == []
+
+
+def test_consumer_records_unreadable_on_exit_5(tmp_path):
+    target, _queue, marker, state, mappings = _consumer_case(tmp_path)
+    hidden = str(target) + "/hidden"
+    logs = []
+
+    def runner(cmd):
+        return 5, (
+            "  ❌ [unreadable] " + hidden + "\n"
+            '[run-result] {"exit": 5, "mode": "subpath", "folders_unreadable": 1}\n'
+        )
+
+    launched = realtime_consumer.process_ready(
+        state, str(target), mappings, "unused.json", logs.append, runner=runner, now=0)
+    assert launched is False
+    assert hidden in state.known_unreadable()
+    assert marker.is_file()
 
 
 def test_consumer_acks_markers_on_exit_0(tmp_path):

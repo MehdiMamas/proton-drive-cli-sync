@@ -9,7 +9,7 @@ Read this file **before** any work. It is the single source of truth for which p
 |---|---|---|---|---|
 | 1 | `phase-01-test-harness.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `28 passed, 7 xfailed in 12.70s` (0 failed, 0 xpassed). `git diff origin/main -- proton_sync.py` empty. Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 2 | `phase-02-equal-size-edits.plan.md` | completed | `wsl -- bash scripts/test.sh -ra --tb=line` exit 0: `40 passed, 4 xfailed in 14.91s` (0 failed, 0 xpassed). The 4 xfailed are phase 3 (upload and subpath exit codes), phase 4 (exclusion plus delete), and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
-| 3 | `phase-03-run-results.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `58 passed, 2 xfailed in 30.37s` (0 failed, 0 xpassed). The 2 xfailed are phase 4 (exclusion plus delete) and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
+| 3 | `phase-03-run-results.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `63 passed, 2 xfailed in 23.67s` (0 failed, 0 xpassed). The 2 xfailed are phase 4 (exclusion plus delete) and phase 5 (headless extension rename). Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 4 | `phase-04-deletion-safety.plan.md` | not started | | |
 | 5 | `phase-05-headless-defaults-and-paths.plan.md` | not started | | |
 | 6 | `phase-06-arch-packaging-release.plan.md` | not started | | |
@@ -25,7 +25,7 @@ Read this file **before** any work. It is the single source of truth for which p
 **Who does what**
 - Cursor: code changes, using `/phase <N>` or `/phase <N> resume`.
 - Claude Code: orchestration. Checks PR and review state, decides the next step, and updates this file and the plans.
-- User: approves pushes, posts anything public, and starts each phase.
+- User: approves pushes, posts anything public, and can stop the automatic hand-off with `PHASE_AUTOCHAIN=0` (after each merge `next-phase.sh` starts the next phase in a new headless Cursor CLI session; log in `.git/phase-runs/`).
 
 **Prompt to give Cursor**
 ```
@@ -40,6 +40,7 @@ Deletion safety from .cursor/plans/phase-04-deletion-safety.plan.md. The phase 3
 - [Human, any time] Run the read-only inventory from spec §5 on Nizar's machine (after phase 6: `proton-drive-sync-doctor --redact`) to learn whether deletion, rename-ext or equal-size edits affect his setup. Noticed while planning, 2026-10-03.
 
 ## Notes / decisions
+- 2026-10-03: Phase 3 review round 1. Exit 5 still records `[unreadable]` paths on the consumer (`clear_unreadable` then `note_unreadable`) so the tray can name them before the next full pass. `[run-result]` is printed after the last-run write so a write error is not the last line. `00-core` and this file keep the existing hand-off: `next-phase.sh` starts the next session.
 - 2026-10-03: Phase 3 code 2 (auth). `run_once` already refuses to launch when `keyring_ready` is false, so a locked keyring never reaches the engine. If the engine still exits 2, `process_ready` keeps the previous path: markers restored, no exponential backoff. Backoff applies to exit 1, 5 and any other non-success code. Exits 3 and 4 keep the cold mechanism.
 - 2026-10-03: Phase 3 trash counters. `items_trashed` and `trash_failed` are incremented in `remote_trash`, which `delete_orphans` and `_wipe_mapping_remote` both call. A failed wipe is therefore a pass failure even though `main` ignores the wipe's return value. Dry-run returns before those counters.
 - 2026-10-03: `last-run.json` is a new file, not a renamed path. Writer: `proton_sync._write_last_run` (tmp + `os.replace`). Path constant: `config.LAST_RUN_FILE`, with the no-config fallback `~/.proton_sync/last-run.json`. No other runtime reader. The GUI does not display it (out of scope). Phase 6's doctor plan is the later reader. No `-dev` or leading-dot sibling of this path. Hits that stay: tests, `CHANGELOG.md`, `INSTALLATION-systemd.md`, and the phase 6 plan text.
