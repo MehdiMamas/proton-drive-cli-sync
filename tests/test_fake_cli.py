@@ -23,6 +23,8 @@ def test_list_json_shape(fake_drive):
     revision = proton_sync._unwrap(item["activeRevision"])
     assert revision["claimedSize"] == 5
     assert revision["claimedDigests"]["sha1"] == hashlib.sha1(b"hello").hexdigest()
+    # 1_000_000_000 seconds, the shape Date.toISOString() produces.
+    assert revision["claimedModificationTime"] == "2001-09-09T01:46:40.000Z"
     assert "activeRevision" not in json.loads(
         fake_drive.run("filesystem", "list", "/my-files", "-j").stdout
     )[0]

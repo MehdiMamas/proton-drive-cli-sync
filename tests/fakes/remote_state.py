@@ -1,16 +1,19 @@
 """JSON remote-drive state shared by the fake proton-drive CLI and the tests.
 
-`claimedModificationTime` is the local file's `st_mtime` in POSIX seconds,
-captured when the fake stores the upload. That mirrors a plausible CLI
-behaviour and is enough for the phase 1 harness. Phase 2 has to check what
-the real `proton-drive` binary actually puts in that field (local mtime,
-server time, or nothing) and update the fake to match.
+`claimedModificationTime` mirrors Proton's CLI at SDK commit
+28ac9cdc258737375692d1751dd9c7edcfb96708. Upload sends the local file's
+modification time (`Bun.file().lastModified`, milliseconds, wrapped in
+`new Date`). `filesystem list -j` JSON-serializes that Date, so the field
+is an ISO-8601 UTC string with milliseconds, the same shape as
+`Date.toISOString()` (for example `2001-09-09T01:46:40.000Z`). The state
+file keeps POSIX seconds; `list_item` converts them on the way out.
 """
 
 import base64
 import hashlib
 import json
 import os
+from datetime import datetime, timezone
 
 # Encrypted size is larger than the original. The engine prefers claimedSize
 # and only falls back to totalStorageSize, so the overhead must not leak into
@@ -116,6 +119,17 @@ def direct_children(state, path):
     return found
 
 
+def claimed_modification_time(mtime):
+    """POSIX seconds → the ISO string `filesystem list -j` returns.
+
+    Matches `Date.toISOString()`: millisecond precision and a trailing Z.
+    """
+    if mtime is None:
+        return None
+    moment = datetime.fromtimestamp(float(mtime), tz=timezone.utc)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def list_item(name, node, account):
     """One `filesystem list -j` element, in the shape `_unwrap` expects."""
     item = {
@@ -131,7 +145,9 @@ def list_item(name, node, account):
     # fallback, so the engine sees an unknown size and chooses to re-send.
     if not node.get("remove_size_meta"):
         item["totalStorageSize"] = size + STORAGE_OVERHEAD
-    revision = {"claimedModificationTime": node.get("mtime")}
+    revision = {
+        "claimedModificationTime": claimed_modification_time(node.get("mtime")),
+    }
     if not node.get("remove_size_meta"):
         revision["claimedSize"] = size
     if not node.get("remove_digest"):
@@ -189,7 +205,7 @@ def store_file(state, remote_path, data, mtime):
     state["nodes"][remote_path] = {
         "type": "file",
         "content_b64": base64.b64encode(data).decode("ascii"),
-        "mtime": int(mtime),
+        "mtime": float(mtime),
         "revisions": revisions,
         "trashed": False,
     }

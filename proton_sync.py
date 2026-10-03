@@ -3,10 +3,10 @@
 Moteur de synchro Proton Drive (NAS -> Proton, à sens unique).
 
 Lit un fichier JSON de mappings (voir proton_mapping_editor.py) et, pour
-chaque entrée, n'envoie que les fichiers nouveaux ou modifiés — en
-s'appuyant sur la taille (et la date de modification si disponible)
-plutôt que de tout réenvoyer comme le ferait `upload --conflict-strategy
-replace` seul.
+chaque entrée, n'envoie que les fichiers nouveaux ou modifiés. À taille
+égale, la décision s'appuie sur l'empreinte du dernier passage réussi,
+puis sur le SHA-1 distant s'il existe, puis sur la date déclarée à
+l'envoi. Sans aucune de ces preuves, le fichier est renvoyé.
 
 Cache local : pour éviter un appel `filesystem list` côté Proton sur
 chaque sous-dossier à chaque passage (très coûteux sur une arborescence
@@ -371,6 +371,37 @@ class Cache:
         # Ancien format : la valeur EST la signature ; jamais réconcilié pour delete.
         return raw, False
 
+    def file_baseline(self, local_dir):
+        """(taille, mtime) de chaque fichier direct au dernier passage réussi.
+
+        None s'il n'y a pas d'entrée, si l'entrée est un ancien cache nu (la
+        signature sans enveloppe ``sig``), ou si ``files`` manque. Une liste
+        ``files`` vide donne ``{}`` : le dossier a réussi, mais aucun fichier
+        direct n'y était. Les lignes illisibles sont ignorées. ``__meta__``
+        n'est pas une empreinte de dossier et donne None.
+        """
+        raw = self.data.get(local_dir)
+        if not isinstance(raw, dict) or "sig" not in raw:
+            return None
+        sig = raw.get("sig")
+        if not isinstance(sig, dict):
+            return None
+        files = sig.get("files")
+        if not isinstance(files, list):
+            return None
+        baseline = {}
+        for item in files:
+            if not isinstance(item, (list, tuple)) or len(item) < 3:
+                continue
+            name = item[0]
+            if not isinstance(name, str) or not name:
+                continue
+            try:
+                baseline[name] = (int(item[1]), float(item[2]))
+            except (TypeError, ValueError):
+                continue
+        return baseline
+
     def is_fresh(self, local_dir, current_signature):
         """True si l'empreinte locale correspond à celle en cache (côté upload)."""
         cached_sig, _ds = self._entry(self.data.get(local_dir))
@@ -658,25 +689,78 @@ def _local_signature(local_dir, remote_folder, excl_fp=None):
 # jamais exactement à la taille locale) -> ne pas utiliser pour comparer.
 # activeRevision.value.claimedSize = vraie taille du fichier original -> à utiliser.
 # activeRevision.value.claimedDigests.sha1 = hash du contenu original -> vérif optionnelle.
+#
+# claimedModificationTime, au commit SDK 28ac9cdc258737375692d1751dd9c7edcfb96708 :
+# l'upload envoie la date locale du fichier. Bun expose lastModified en
+# millisecondes ; le CLI le passe tel quel :
+#   modificationTime: file.lastModified && file.lastModified !== 0
+#     ? new Date(file.lastModified) : undefined
+#   https://github.com/ProtonDriveApps/sdk/blob/28ac9cdc258737375692d1751dd9c7edcfb96708/cli/src/commands/fileSystem/commandFileSystemUpload.ts#L331
+# Cette Date est stockée dans les attributs étendus en ISO-8601 UTC
+# (Date.toISOString) :
+#   https://github.com/ProtonDriveApps/sdk/blob/28ac9cdc258737375692d1751dd9c7edcfb96708/client/js/src/internal/nodes/extendedAttributes.ts#L65
+# `filesystem list -j` renvoie l'objet nœud (claimedModificationTime est un
+# Date) sérialisé en JSON, donc une chaîne ISO-8601 avec millisecondes et Z,
+# par ex. "2016-02-29T21:42:04.000Z" (confirmé aussi dans README.md) :
+#   https://github.com/ProtonDriveApps/sdk/blob/28ac9cdc258737375692d1751dd9c7edcfb96708/client/js/src/transformers.ts#L168
+#   https://github.com/ProtonDriveApps/sdk/blob/28ac9cdc258737375692d1751dd9c7edcfb96708/client/js/src/interface/nodes.ts#L104
+# modificationTime (premier niveau) est l'horloge SERVEUR, pas la date locale :
+# on ne l'utilise pas pour décider d'un envoi.
 REMOTE_NAME_KEYS = ("name",)
+
+# Écart toléré entre le mtime local et claimedModificationTime (secondes).
+_MTIME_MATCH_SECONDS = 2.0
+
+
+def _remote_mtime_seconds(value):
+    """claimedModificationTime → secondes POSIX (float), ou None si inutilisable.
+
+    Format observé : chaîne ISO-8601 UTC produite par Date.toISOString()
+    (millisecondes + Z). Un nombre est accepté par prudence (secondes, ou
+    millisecondes si la valeur absolue est >= 1e11, comme Bun lastModified) ;
+    le CLI épinglé n'en émet pas dans `filesystem list -j`.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if number != number or number in (float("inf"), float("-inf")):
+            return None
+        if abs(number) >= 1e11:
+            return number / 1000.0
+        return number
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.timestamp()
 
 
 def _extract_remote_meta(item):
     """Extrait (size, mtime, sha1) en privilégiant les champs 'claimed*' (fichier
-    original), avec repli sur les champs de premier niveau si activeRevision est
-    absent (ex. ancienne version du CLI, ou structure différente)."""
+    original). mtime est en secondes POSIX, ou None si claimedModificationTime
+    est absent ou illisible. Pas de repli sur modificationTime (horloge serveur)."""
     size = item.get("totalStorageSize")
-    mtime = item.get("modificationTime")
+    mtime = None
     sha1 = None
     active_rev = _unwrap(item.get("activeRevision"))
     if isinstance(active_rev, dict):
         if active_rev.get("claimedSize") is not None:
             size = active_rev.get("claimedSize")
         if active_rev.get("claimedModificationTime") is not None:
-            mtime = active_rev.get("claimedModificationTime")
+            mtime = _remote_mtime_seconds(active_rev.get("claimedModificationTime"))
         digests = active_rev.get("claimedDigests")
         if isinstance(digests, dict):
-            sha1 = digests.get("sha1")
+            sha1 = digests.get("sha1") or None
     return size, mtime, sha1
 
 
@@ -1275,6 +1359,8 @@ class RemoteListing(dict):
 
 def get_remote_listing(remote_path, verbose=False):
     """Retourne {nom: {"size", "mtime", "sha1", "type"}} pour un dossier distant.
+
+    `mtime` est claimedModificationTime en secondes POSIX, ou None.
     Le champ "type" ("file"/"folder") permet de choisir la bonne opération de
     suppression (trash/delete) et de descendre dans les dossiers orphelins.
 
@@ -1313,29 +1399,93 @@ def _local_sha1(path, chunk_size=1024 * 1024):
     return h.hexdigest()
 
 
-def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
+def upload_decision(local_path, remote_info, baseline=None, verify_hash=False):
+    """Décide si un fichier régulier doit être envoyé.
+
+    Retourne (envoyer, raison). `baseline` est le dict de Cache.file_baseline
+    (None = pas de cache fiable, ou --ignore-cache). L'ordre est celui du plan
+    de la phase 2 : en cas de doute à taille égale, on envoie.
+    """
     if remote_info is None:
-        return True
+        return True, "new"
     try:
-        local_size = os.path.getsize(local_path)
+        st = os.stat(local_path)
     except OSError:
-        return True
-    remote_size = remote_info.get("size")
+        return True, "local-unreadable"
+    remote_size = remote_info.get("size") if isinstance(remote_info, dict) else None
     if remote_size is None:
-        # Champ taille introuvable dans la réponse -> comparaison impossible,
-        # on choisit de réenvoyer plutôt que de risquer de manquer un changement.
-        if verbose:
-            print(_("    (remote size unknown for {f}, re-sending to be safe)").format(f=os.path.basename(local_path)))
-        return True
-    if int(remote_size) != local_size:
-        return True
-    if verify_hash and remote_info.get("sha1"):
-        local_hash = _local_sha1(local_path)
-        if local_hash != remote_info["sha1"]:
-            if verbose:
-                print(_("    (same size but different content: {f})").format(f=os.path.basename(local_path)))
-            return True
-    return False
+        return True, "remote-size-unknown"
+    try:
+        remote_size_i = int(remote_size)
+    except (TypeError, ValueError):
+        return True, "remote-size-unknown"
+    if remote_size_i != st.st_size:
+        return True, "size-changed"
+
+    remote_sha = None
+    if isinstance(remote_info, dict):
+        raw_sha = remote_info.get("sha1")
+        if isinstance(raw_sha, str) and raw_sha:
+            remote_sha = raw_sha
+
+    if verify_hash and remote_sha:
+        if _local_sha1(local_path) != remote_sha:
+            return True, "hash-differs"
+        return False, "hash-equal"
+
+    if isinstance(baseline, dict):
+        base = baseline.get(os.path.basename(local_path))
+        if base is not None:
+            try:
+                base_size, base_mtime = base
+                if int(base_size) == st.st_size and float(base_mtime) == st.st_mtime:
+                    return False, "unchanged-since-last-success"
+            except (TypeError, ValueError):
+                pass
+
+    if remote_sha:
+        if _local_sha1(local_path) != remote_sha:
+            return True, "hash-differs"
+        return False, "hash-equal"
+
+    remote_mtime = None
+    if isinstance(remote_info, dict):
+        remote_mtime = _remote_mtime_seconds(remote_info.get("mtime"))
+    if (remote_mtime is not None
+            and abs(remote_mtime - float(st.st_mtime)) <= _MTIME_MATCH_SECONDS):
+        return False, "mtime-equal"
+    return True, "equal-size-unverifiable"
+
+
+def _report_decision(local_path, reason, verbose):
+    """Affiche la raison pour un fichier de même taille (code non traduit)."""
+    if not verbose:
+        return
+    name = os.path.basename(local_path)
+    if reason == "remote-size-unknown":
+        print(_("    (remote size unknown for {f}, re-sending to be safe)").format(f=name))
+        return
+    if reason in (
+        "hash-differs",
+        "hash-equal",
+        "unchanged-since-last-success",
+        "mtime-equal",
+        "equal-size-unverifiable",
+    ):
+        print(_("    ({reason}: {f})").format(reason=reason, f=name))
+
+
+def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
+    """Wrapper historique. Sans baseline : à taille égale et sans preuve, on envoie.
+
+    Les appelants qui ont le cache (sync_folder) passent par upload_decision.
+    Ici baseline reste None, y compris pour la reprise de lot : un ancien
+    fichier distant de même taille ne doit pas compter comme déjà envoyé.
+    """
+    upload, reason = upload_decision(
+        local_path, remote_info, baseline=None, verify_hash=verify_hash)
+    _report_decision(local_path, reason, verbose)
+    return upload
 
 
 def _glob_escape_local_path(path):
@@ -1518,8 +1668,12 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
     if verbose and res.stdout.strip():
         print("      " + res.stdout.strip().replace("\n", "\n      "))
 
-    # Relire le distant : ce qui est déjà présent (bonne taille) a réussi dans le
-    # lot -> inutile de le renvoyer. On ne ré-essaie QUE ce qui manque encore.
+    # Relire le distant. Un fichier ne compte comme « déjà monté par CE lot »
+    # que si le SHA-1 distant égale le SHA-1 local, ou (pas de SHA-1) si la
+    # taille est égale ET que claimedModificationTime colle au mtime local à
+    # 2 s près. On n'utilise PAS la baseline d'avant le lot : un ancien fichier
+    # de même taille serait pris pour un remplacement réussi. needs_upload
+    # force baseline=None, ce qui est exactement cette règle.
     remote_after = get_remote_listing(remote_parent, verbose=False)
     if not remote_after.ok:
         # Sans relecture fiable, tout paraîtrait manquant et on renverrait un par
@@ -2029,6 +2183,11 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
     to_upload = []
     had_failure = False
     all_children_complete = True
+    # --ignore-cache = revérifier : la baseline du dernier succès n'est pas
+    # une preuve. Pas de cache du tout non plus.
+    baseline = None
+    if cache is not None and not ignore_cache:
+        baseline = cache.file_baseline(local_dir)
     for entry in entries:
         if exclusions and exclusions.is_excluded(entry.name):
             if verbose:
@@ -2047,7 +2206,10 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 all_children_complete = False
         elif entry.is_file():   # suit les liens : un lien vers un fichier EST un fichier
             info = remote_items.get(entry.name)
-            if needs_upload(entry.path, info, verbose=verbose, verify_hash=verify_hash):
+            upload, reason = upload_decision(
+                entry.path, info, baseline=baseline, verify_hash=verify_hash)
+            _report_decision(entry.path, reason, verbose)
+            if upload:
                 to_upload.append(entry.path)
             elif verbose:
                 print(_("    ⏭  unchanged: {p}").format(p=entry.path))
@@ -2176,7 +2338,12 @@ def sync_file(local_file, remote_parent, dry_run=False, verbose=False, verify_ha
         print(_("    ⚠  Could not list {p} — file skipped this pass.").format(p=remote_parent))
         return
     info = remote_items.get(os.path.basename(local_file))
-    if needs_upload(local_file, info, verbose=verbose, verify_hash=verify_hash):
+    # Mapping fichier : pas de baseline de dossier (le coût d'un list est déjà
+    # celui d'un seul fichier). Sans preuve de contenu, on renvoie.
+    upload, reason = upload_decision(
+        local_file, info, baseline=None, verify_hash=verify_hash)
+    _report_decision(local_file, reason, verbose)
+    if upload:
         upload_batch([local_file], remote_parent, dry_run=dry_run, verbose=verbose,
                      conflict_mode=conflict_mode)
     elif verbose:
