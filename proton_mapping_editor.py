@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.25.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.25.4"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -469,7 +469,18 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # config.py (variable d'environnement > réglage persistant > défaut intégré) ;
 # les deux autres se déduisent simplement d'APP_DIR (pas un réglage distinct —
 # c'est toujours « à côté de ce fichier »).
-DEFAULT_CLI = appconfig.resolve_proton_cli() if _HAS_CONFIG else os.path.join(APP_DIR, "proton-drive")
+# 1.25.2 — RÉSOLU À L'USAGE, plus figé à l'import. Le GUI reste ouvert des
+# heures ; une constante calculée au démarrage ignorait tout chemin modifié
+# depuis la fenêtre Configuration, DANS LES DEUX SENS — ni la panne ni la
+# réparation n'étaient vues avant un redémarrage. Et le chemin figé était imposé
+# au moteur par la variable d'environnement PROTON_DRIVE_CLI, qui est
+# PRIORITAIRE sur le réglage : l'utilisateur corrigeait son chemin, le GUI
+# continuait d'imposer l'ancien. Constaté le 2 octobre 2026.
+def cli_path():
+    """Chemin du binaire CLI, relu à chaque appel (voir la note ci-dessus)."""
+    if _HAS_CONFIG:
+        return appconfig.resolve_proton_cli()
+    return os.path.join(APP_DIR, "proton-drive")
 DEFAULT_ENGINE = os.path.join(APP_DIR, "proton_sync.py")
 DEFAULT_LOG_DIR = os.path.join(APP_DIR, "logs")
 
@@ -1228,11 +1239,11 @@ class MappingEditor(tk.Tk):
         travailler : on peut éditer ses mappings sans binaire.
         """
         try:
-            if _HAS_CONFIG and appconfig.cli_is_usable(DEFAULT_CLI):
+            if _HAS_CONFIG and appconfig.cli_is_usable(cli_path()):
                 return
             if not _HAS_CONFIG:
                 return
-            msg = "\n".join(appconfig.cli_unusable_explanation(DEFAULT_CLI))
+            msg = "\n".join(appconfig.cli_unusable_explanation(cli_path()))
             if dlg_confirm(self, msg, title=_("Proton CLI unusable"),
                            kind="warning",
                            ok_text=_("Open Configuration…"),
@@ -1336,7 +1347,7 @@ class MappingEditor(tk.Tk):
             # dialogues empilés pour une seule cause, dont le second est
             # trompeur. Quand le binaire EST là mais que la version reste
             # illisible, l'avertissement garde en revanche tout son sens.
-            if not (_HAS_CONFIG and appconfig.cli_is_usable(DEFAULT_CLI)):
+            if not (_HAS_CONFIG and appconfig.cli_is_usable(cli_path())):
                 self._maybe_disable_rename_ext()
                 return
             msg = _("The Proton CLI version could not be determined. This "
@@ -1395,16 +1406,10 @@ class MappingEditor(tk.Tk):
             # pour un problème qui n'a aucun rapport, et le bouton de connexion
             # échouerait à son tour. On nomme la vraie cause et on renvoie vers
             # le champ qui la corrige.
-            if not (_HAS_CONFIG and appconfig.cli_is_usable(DEFAULT_CLI)):
-                def apply_missing():
-                    if hasattr(self, "auth_status"):
-                        self.auth_status.set("🔑 " + _("Proton CLI unusable"))
-                        self.auth_label.config(foreground="#d2294b")
-                    if hasattr(self, "status"):
-                        self.status.set(_("Proton CLI binary unusable — open "
-                                          "“⚙ Configuration…” to check its path."))
-                        self._auth_error_in_status = True
-                self._ui(apply_missing)
+            if not (_HAS_CONFIG and appconfig.cli_is_usable(cli_path())):
+                # 1.25.4 — peinture déléguée au point unique, désormais
+                # partagé avec la fenêtre Configuration.
+                self._ui(self._paint_cli_unusable)
                 return
             ok = self._check_auth_settled()
             if ok is None:
@@ -3303,6 +3308,27 @@ class MappingEditor(tk.Tk):
             return
         RealtimeDialog(self, path)
 
+    def _paint_cli_unusable(self):
+        """Peint les indicateurs de la fenêtre principale quand le binaire du
+        CLI est INUTILISABLE (absent, dossier au lieu du fichier, non exécutable).
+
+        POINT UNIQUE, partagé par la sonde de démarrage et par la fenêtre
+        Configuration. Jusqu'en 1.25.3 la Configuration n'avait pas ce garde-fou :
+        elle sondait la session malgré tout, concluait « session expirée ou
+        verrouillée » — la sonde échoue faute de binaire à exécuter, pas parce
+        que le jeton a expiré — puis écrasait, par ce faux diagnostic, celui que
+        la fenêtre principale affichait correctement. Trois affichages, deux
+        verdicts contradictoires pour une seule et même cause.
+
+        À n'appeler que depuis le fil principal (Tk n'est pas thread-safe)."""
+        if hasattr(self, "auth_status"):
+            self.auth_status.set("🔑 " + _("Proton CLI unusable"))
+            self.auth_label.config(foreground="#d2294b")
+        if hasattr(self, "status"):
+            self.status.set(_("Proton CLI binary unusable — open "
+                              "“⚙ Configuration…” to check its path."))
+            self._auth_error_in_status = True
+
     def _set_auth_state(self, ok):
         """Peint le TÉMOIN de connexion (bas droite) : vert « connecté — <compte> »
         ou rouge « session expirée ». Point unique — tous les indicateurs d'auth
@@ -3644,6 +3670,30 @@ class MappingEditor(tk.Tk):
             acct_label.pack(anchor="w")
 
             def paint_acct():
+                # 1.25.4 — GARDE-FOU BINAIRE, AVANT toute sonde. « --check-auth »
+                # échoue aussi quand le binaire est absent, qu'il désigne un
+                # dossier ou qu'il n'est pas exécutable : il n'y a alors rien à
+                # exécuter, et conclure « session expirée » envoie l'utilisateur
+                # se reconnecter pour un problème qui n'a aucun rapport — le
+                # bouton de connexion échouerait à son tour. Le contrôle est
+                # instantané (os.path) : il reste dans le fil principal, sans
+                # fil ni file d'attente.
+                _motif = (appconfig.cli_unusable_reason(cli_path())
+                          if _HAS_CONFIG else None)
+                if _motif:
+                    acct_var.set(_("🔑 Proton CLI unusable — fix the path "
+                                   "below, then press OK"))
+                    acct_label.config(foreground="#d2294b")
+                    # Le bouton de connexion lance « proton-drive auth login »
+                    # sur le réglage ENREGISTRÉ. Le laisser actif promettrait
+                    # une connexion que le CLI ne peut pas établir : on le grise.
+                    # Il se dégrise au prochain passage ici, donc après OK et
+                    # réouverture de cette fenêtre — délibérément, car une
+                    # saisie non enregistrée ne change pas ce qui s'exécutera.
+                    btn_sign.config(state="disabled")
+                    self._paint_cli_unusable()   # même verdict dans la fenêtre principale
+                    return
+                btn_sign.config(state="normal")
                 def work():
                     # Sonde FIABILISÉE (sérialisée + reprise) : l'ancienne sonde
                     # directe entrait en course avec celle du <FocusIn> à
@@ -3680,8 +3730,11 @@ class MappingEditor(tk.Tk):
                     self._refresh_auth_indicator()
                 ProtonLoginDialog(dlg, on_done=done)
 
-            ttk.Button(acct, text=_("🔑 Sign in to Proton"),
-                       command=sign_in).pack(anchor="w", pady=(6, 0))
+            # 1.25.4 — référence conservée : paint_acct() grise ce bouton
+            # quand le binaire enregistré est inutilisable.
+            btn_sign = ttk.Button(acct, text=_("🔑 Sign in to Proton"),
+                                  command=sign_in)
+            btn_sign.pack(anchor="w", pady=(6, 0))
             paint_acct()
 
         # ---- Section Proton Drive CLI ----
@@ -3693,6 +3746,37 @@ class MappingEditor(tk.Tk):
             cli_var = tk.StringVar(value=appconfig.proton_cli_path() or "")
             cli_entry = ttk.Entry(crow, textvariable=cli_var, width=34)
             cli_entry.pack(side="left")
+
+            def browse_cli():
+                """1.25.4 — Sélecteur de FICHIER, jamais de dossier : désigner le
+                dossier au lieu du binaire est précisément l'erreur que la
+                validation doit rattraper (voir cli_unusable_explanation), autant
+                ne pas l'offrir. Et aucun filtre d'extension : un binaire n'en a
+                pas, « *.json » masquerait le fichier cherché."""
+                # Dossier de départ : ce que l'utilisateur VOIT dans le champ,
+                # sinon le réglage enregistré, sinon (initialdir=None) le dossier
+                # de l'application, choisi par pick_open_file lui-même.
+                _depart = None
+                for _candidat in ((cli_var.get() or "").strip(),
+                                  appconfig.proton_cli_path() or ""):
+                    if not _candidat:
+                        continue
+                    _d = os.path.dirname(os.path.abspath(
+                        os.path.expanduser(_candidat)))
+                    if os.path.isdir(_d):
+                        _depart = _d
+                        break
+                _choisi = pick_open_file(
+                    dlg, title=_("Choose the proton-drive binary"),
+                    initialdir=_depart, json_only=False)
+                if _choisi:
+                    # Aucune validation ici : elle reste au bouton OK, en UN
+                    # seul endroit (avec « Enregistrer quand même »). Le
+                    # sélecteur ne peut rendre qu'un fichier existant ; le cas
+                    # « non exécutable » est traité là-bas.
+                    cli_var.set(_choisi)
+            ttk.Button(crow, text="📁", width=3,
+                       command=browse_cli).pack(side="left", padx=(4, 0))
             help_btn(crow, "proton-cli-path")
 
             # Disjoncteur d'envoi : le CLI peut rester bloqué indéfiniment en
@@ -4202,6 +4286,9 @@ class MappingEditor(tk.Tk):
             if _HAS_I18N:
                 i18n.write_language_setting(lang_var.get())
             if _HAS_CONFIG:
+                # 1.25.3 — on retient le chemin AVANT d'enregistrer, pour savoir
+                # s'il a réellement changé (voir la re-sonde plus bas).
+                _ancien_cli = appconfig.resolve_proton_cli()
                 appconfig.set_proton_cli_path(_cli_saisi or None)
                 appconfig.set_nas_enabled(nas_var.get())
                 appconfig.set_nas_mount_path(mount_var.get())
@@ -4211,6 +4298,24 @@ class MappingEditor(tk.Tk):
                          for e in pm_rows
                          if e["local_var"].get().strip() and e["nas_var"].get().strip()]
                 appconfig.set_nas_path_map(pairs)
+                # 1.25.3 — Le binaire a changé : rafraîchir le TABLEAU, pour
+                # que la colonne des révisions (↺ / ⚠) dise la vérité tout de
+                # suite. Avec le cache de version désormais porté par l'empreinte
+                # du binaire (proton_sync 1.9.3), elle est recalculée sur le
+                # NOUVEAU binaire.
+                #
+                # On ne RÉ-ANNONCE rien ici, délibérément, pour deux raisons :
+                #   • la fenêtre Configuration est encore ouverte à cet instant —
+                #     un dialogue lancé d'ici s'empilerait par-dessus elle ;
+                #   • l'avis sur les révisions appartient au CHARGEMENT d'un
+                #     fichier de mappings (« une fois par chargement », voir sa
+                #     docstring) : c'est ce qui lui garde son pouvoir d'alerte.
+                #     Il reparaîtra au prochain chargement, avec la bonne
+                #     version.
+                # Conditionné à un VRAI changement : sinon chaque enregistrement
+                # de la configuration redessinerait le tableau pour rien.
+                if appconfig.resolve_proton_cli() != _ancien_cli:
+                    self._refresh_tree()
                 # MIGRATION C : si l'identité change et que l'ancienne existe sur le
                 # NAS, proposer le renommage (file + copie de mappings, billets
                 # préservés). Les renommages NFS partent dans un WORKER pour ne pas
@@ -4339,7 +4444,7 @@ class MappingEditor(tk.Tk):
         engine_args = self._build_engine_args(only_sources)
         log_path = self._log_path()
         cmd = (
-            f"PROTON_DRIVE_CLI={shlex.quote(DEFAULT_CLI)} "
+            f"PROTON_DRIVE_CLI={shlex.quote(cli_path())} "
             f"python3 {shlex.quote(DEFAULT_ENGINE)} "
             + " ".join(shlex.quote(a) for a in engine_args)
             + f" 2>&1 | tee {shlex.quote(log_path)}"
@@ -4635,7 +4740,7 @@ class MappingEditor(tk.Tk):
         cmd = ["python3", DEFAULT_ENGINE] + engine_args
 
         env = dict(os.environ)
-        env["PROTON_DRIVE_CLI"] = DEFAULT_CLI
+        env["PROTON_DRIVE_CLI"] = cli_path()
 
         # Bannière de portée (D2 = option a) : bien visible, sans modale pour un
         # passage additif. Sélection => sous-ensemble ; aucune => tous. Réutilise
@@ -4726,7 +4831,7 @@ class MappingEditor(tk.Tk):
         que rester bloqué à tort)."""
         try:
             e = env if env is not None else dict(os.environ)
-            e.setdefault("PROTON_DRIVE_CLI", DEFAULT_CLI)
+            e.setdefault("PROTON_DRIVE_CLI", cli_path())
             r = subprocess.run(
                 ["python3", DEFAULT_ENGINE, self.config_path, "--check-lock"],
                 env=e, capture_output=True, text=True, timeout=15)
@@ -5102,7 +5207,7 @@ class MappingEditor(tk.Tk):
             log_path = self._log_path()
             self._current_log_path = log_path
             env = dict(os.environ)
-            env["PROTON_DRIVE_CLI"] = DEFAULT_CLI
+            env["PROTON_DRIVE_CLI"] = cli_path()
 
             # 3a) ATTENTE PATIENTE DU VERROU (au lieu d'échouer en code 1). Le
             #     consommateur vient d'être arrêté, mais le watcher NAS ou une passe
