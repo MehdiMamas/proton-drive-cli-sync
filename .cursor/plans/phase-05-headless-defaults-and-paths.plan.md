@@ -34,7 +34,7 @@ todos:
     status: pending
     dependencies: [p05-6-task]
   - id: p05-9-handoff
-    content: "Record gate evidence in PROGRESS.md, mark Phase 5 complete there, open the PR and run the review loop, then STOP and wait for the user"
+    content: "Record gate evidence in PROGRESS.md, mark Phase 5 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
     status: pending
     dependencies: [p05-8-gate]
 ---
@@ -155,7 +155,7 @@ Prove it: run the command, and paste the command and its result (exit code, the 
 1. Mark every todo in this file `completed`.
 2. In `PROGRESS.md`: mark Phase 5 done with the date and evidence, and set the active phase to **6**.
 3. Commit with a conventional message scoped `phase-05`, push branch `phase-05-headless-defaults-and-paths`, open the PR, and run the review loop in `.cursor/skills/phase/SKILL.md`.
-4. **Stop** after the merge. Report the PR URL. Do not start the next phase.
+4. **Hand off** after the merge: run `bash .cursor/skills/phase/next-phase.sh`, report the PR URL and its `NEXT:` line, and stop. Never start the next phase in the same chat.
 
 ## Manual test (for the human)
 
