@@ -3310,3 +3310,12 @@ msgid ""
 "Never fully analysed — real-time does not cover them yet; run “Prime the "
 "cache”:"
 msgstr ""
+
+msgid "⛔ Proton CLI binary unusable — markers kept, no pass launched."
+msgstr ""
+
+msgid "🔑 Proton CLI unusable — fix the path below, then press OK"
+msgstr ""
+
+msgid "Choose the proton-drive binary"
+msgstr ""

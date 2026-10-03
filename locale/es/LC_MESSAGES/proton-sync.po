@@ -4109,3 +4109,14 @@ msgid ""
 msgstr ""
 "Nunca analizados por completo — el tiempo real todavía no los cubre; ejecute "
 "«Inicializar caché»:"
+
+msgid "⛔ Proton CLI binary unusable — markers kept, no pass launched."
+msgstr ""
+"⛔ Binario de la CLI de Proton inutilizable — marcadores conservados, ningún "
+"pase lanzado."
+
+msgid "🔑 Proton CLI unusable — fix the path below, then press OK"
+msgstr "🔑 CLI de Proton inutilizable — corrija la ruta de abajo y pulse OK"
+
+msgid "Choose the proton-drive binary"
+msgstr "Elegir el binario proton-drive"
