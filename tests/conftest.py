@@ -197,9 +197,10 @@ def _isolate(monkeypatch, isolated_home, tmp_path):
         if module is not None and hasattr(module, attr):
             monkeypatch.setattr(module, attr, str(settings))
     for module_name, names in (
-        ("config", ("LOCK_FILE", "CACHE_DIR", "FAILURES_LOG", "RENAMED_LOG", "HEALTH_FILE")),
+        ("config", ("LOCK_FILE", "CACHE_DIR", "FAILURES_LOG", "RENAMED_LOG",
+                    "HEALTH_FILE", "LAST_RUN_FILE")),
         ("proton_sync", ("LOCK_FILE", "CACHE_DIR", "FAILURES_LOG", "RENAMED_LOG",
-                         "HEALTH_FILE", "CLI_VERSION_CACHE")),
+                         "HEALTH_FILE", "LAST_RUN_FILE", "CLI_VERSION_CACHE")),
     ):
         module = sys.modules.get(module_name)
         if module is None:
@@ -211,6 +212,7 @@ def _isolate(monkeypatch, isolated_home, tmp_path):
             "FAILURES_LOG": base / "failures.log",
             "RENAMED_LOG": base / "renamed-extensions.log",
             "HEALTH_FILE": base / "health.json",
+            "LAST_RUN_FILE": base / "last-run.json",
             "CLI_VERSION_CACHE": isolated_home / ".proton_sync" / "cli-version.json",
         }
         for name in names:

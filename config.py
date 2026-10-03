@@ -642,6 +642,11 @@ STATUS_FILE = os.path.join(DATA_DIR, "status.json")
 # RÉÉCRIT À CHAQUE PASSAGE COMPLET, y compris vide quand tout va bien : c'est ce
 # qui empêche l'état de rester figé sur une panne résolue depuis.
 HEALTH_FILE = os.path.join(DATA_DIR, "health.json")
+# Résultat du dernier passage du moteur (code, compteurs, horodatage).
+# Deux clés de premier niveau : last_full et last_subpath. Un passage
+# --subpath ne remplace que last_subpath, pour ne pas effacer le dernier
+# passage complet. Écriture atomique (tmp + os.replace) dans proton_sync.py.
+LAST_RUN_FILE = os.path.join(DATA_DIR, "last-run.json")
 
 _LEGACY_CACHE_DIR = os.path.expanduser("~/.proton_sync_cache")
 _LEGACY_BASE_DIR = os.path.expanduser("~/.proton_sync")

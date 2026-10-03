@@ -212,6 +212,9 @@ def _create_folder(state, parent, name):
 
 
 def _trash(state, path):
+    path = remote_state.normalize(path)
+    if remote_state.consume_faults(state, "trash", path):
+        return _fail("trash failed", 1)
     if not remote_state.trash_tree(state, path):
         return _fail("not found", 1)
     return 0

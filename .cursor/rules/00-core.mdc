@@ -30,9 +30,10 @@ The build is split into one plan per phase: `.cursor/plans/phase-NN-*.plan.md`. 
 | 2 | Auth probe failed (keyring locked OR network/Proton outage) | `SuccessExitStatus`, no restart |
 | 3 | `--subpath` target cold (not fully indexed) | consumer keeps markers, cold backoff |
 | 4 | Proton account changed vs cache stamp | `SuccessExitStatus`, consumer keeps markers |
+| 5 | Pass finished with failures (upload, listing, unreadable folder, permission, stall-skip, trash, or missing source) | systemd unit failed, `RestartPreventExitStatus=5` (no restart storm); consumer keeps markers and backs off |
 | 128+n | Killed by signal n | |
 
-Phase 3 adds code 5 (completed with failures). Any change to this table updates `realtime_consumer.py`, `schedule_manager.py` (`build_service_text`, `_parse_result`, `_result_label`), the GUI, docs and this rule in the same PR.
+Any change to this table updates `realtime_consumer.py`, `schedule_manager.py` (`build_service_text`, `_parse_result`, `_result_label`), the GUI, docs and this rule in the same PR.
 
 ## Hygiene
 - This is a fork: editing upstream files is expected when a plan says so, but keep each edit minimal and list every touched upstream file in `UPSTREAM.md` (file, phase, why). New behavior that can live in a new module goes in a new module.
@@ -43,6 +44,6 @@ Phase 3 adds code 5 (completed with failures). Any change to this table updates 
 - Never auto-commit, auto-resume side-effecting actions, or loop verify/fix without a hard cap.
 
 ## Workflow
-- Implement only the active phase in `PROGRESS.md`, using its plan. Meet its **Gate**, record the evidence in `PROGRESS.md`, get the PR through the review loop and merged (see `.cursor/skills/phase/SKILL.md`), then hand off to a new headless session with `next-phase.sh`.
+- Implement only the active phase in `PROGRESS.md`, using its plan. Meet its **Gate**, record the evidence in `PROGRESS.md`, get the PR through the review loop and merged (see `.cursor/skills/phase/SKILL.md`), then run `next-phase.sh` (it only names the next phase) and stop. The user starts the next phase.
 - The dev machine is Windows. All Python execution and tests run in **WSL** (`wsl -- bash scripts/test.sh`). Git, `gh` and the review script run on Windows.
 - Area rules: `10-engine-safety.mdc`, `50-testing.mdc`, `55-python-style-i18n.mdc`, `60-build-release.mdc`. Testing helpers: `.cursor/skills/fake-cli-testing/SKILL.md`.
