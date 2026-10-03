@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-03
+
+Collects phases 2 to 6 of the fork: change detection, honest exit codes, deletion safety, headless defaults, Arch packaging. Tag creation is a human step after merge.
+
 ### Changed (safety)
 
 - A headless run no longer renames local extensions when the CLI is 0.5.0 or newer, unless settings say so. `rename_ext_enabled: false` stays off. `rename_ext_enabled: true` together with `rename_ext_auto_disabled: true` stays on (that is the GUI's "I turned it back on" flag). A missing key, or `true` without that flag, follows the CLI: off from 0.5.0, on for an older or unknown CLI. `--no-rename-ext` still forces off for one run. The engine does not write these keys. Opening the GUI still performs the one-time notice and records the flag.
@@ -15,6 +19,13 @@
 - Mass-deletion guard: in one remote folder, a pass that would trash at least 20 items and more than half of the folder's remote children trashes nothing there, prints `[delete-guard]`, counts `deletions_refused` in `[run-result]` and exits 5. Thresholds: `max_delete_min` and `max_delete_ratio` in `settings.json`, overridable per mapping. `--allow-mass-delete` turns the guard off for one run.
 - The mount guard is re-checked before each folder's deletions. If it fails mid-pass, deletions stop for the rest of that mapping (uploads continue) and the pass exits 5.
 
+- Arch packaging in `packaging/arch/` (`proton-drive-cli-sync-git`): program files in `/usr/lib/proton-drive-cli-sync/`, launchers `proton-drive-sync`, `proton-drive-sync-gui` and `proton-drive-sync-doctor` in `/usr/bin/`, desktop entry and icon. Nothing writable is installed.
+- `proton-drive-sync-doctor [--redact]` (`doctor.py`): read-only report of CLI resolution and version, systemd units and last results, `last-run.json` and `health.json`, effective settings, per-mapping safety options and session facts for unattended auth. `--redact` hides e-mails and personal paths. It always exits 0.
+- `VERSION` (2.0.0), `SECURITY.md`, `docs/RELEASING.md`, and a fork notice and disclaimer at the top of `README.md`.
+
+### Changed (units)
+
+- Generated systemd units quote and escape paths: spaces, quotes and backslashes are quoted, `%` becomes `%%`, `$` becomes `$$`, and `Environment=` is written as one quoted assignment. A packaged install writes `ExecStart=/usr/bin/proton-drive-sync ...` so units survive upgrades. The readers (`read_service_mappings_path`, `read_service_delete`, `read_units_mappings_path`) accept both the new form and units written by older versions. Migration: nothing required; run `python3 schedule_manager.py --refresh-units` (or save in the GUI) once to rewrite old units.
 ### Fixed
 
 - A pass that finished with failed uploads, a failed remote listing, an unreadable folder, a missing source, a failed trash, or a folder skipped after repeated stalls used to exit 0. systemd and the real-time consumer treated that as success, and the consumer deleted the markers for work that never reached Drive. The pass now exits 5. Exit codes 0–4 are unchanged. Code 3 (a cold `--subpath`, nothing attempted) still wins over 5. Dry-run uses the same rule and does not write `last-run.json`. Existing systemd units do not contain `RestartPreventExitStatus=5` until they are rewritten: run `python3 schedule_manager.py --refresh-units` once per user so a partial failure shows as a failed unit and is not restarted six times an hour. The next timer or the real-time cycle retries it. The real-time consumer now waits 60 seconds, then 120 seconds, doubling up to 30 minutes, before relaunching a target that exited 1, 5, or another non-success code. A later success resets that wait. Exit 2 is unchanged and does not use this wait. The GUI shows "finished with failures (code 5)" for that exit, as a warning rather than a crash or a success.

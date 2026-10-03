@@ -32,3 +32,5 @@ separate pull requests. New files added by the fork are not listed.
 | `INSTALLATION-systemd.md`, `INSTALLATION-systemd_fr.md` | 5 | Lock path is `~/.proton-drive-sync/proton_sync.lock` |
 | `Temporary-files-exclusions.md`, `Temporary-files-exclusions_fr.md` | 5 | Extension rename is no longer the default on CLI ≥ 0.5.0; log path updated |
 | `INSTALLATION-systemd.md` | 3 | Exit-code table and the `--refresh-units` step for units already installed |
+| `schedule_manager.py`, `realtime_manager.py` | 6 | Unit text quotes and escapes paths (`unitexec.py`), packaged installs use `/usr/bin/proton-drive-sync`, readers accept quoted and legacy lines |
+| `README.md`, `LICENSE`, `CHANGELOG.md` | 6 | Fork notice and disclaimer on top, fork contributors line, 2.0.0 section |

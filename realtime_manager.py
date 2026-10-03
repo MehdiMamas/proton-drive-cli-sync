@@ -40,6 +40,7 @@ import subprocess
 
 # i18n (import guardé : l'absence de i18n.py n'empêche rien — les
 # messages restent alors en anglais, la langue source).
+import unitexec  # guillemets/échappement systemd (phase 6)
 try:
     from i18n import _
 except ImportError:
@@ -697,14 +698,20 @@ def drift_state(mappings_path):
 def _service_text(description, script, mappings_path):
     """Génère un .service --user simple, qui RESTE actif (Restart=on-failure)
     et redémarre à l'ouverture de session (WantedBy=default.target)."""
+    exec_line = unitexec.exec_line(script, [mappings_path], app_dir=H_ENGINE_DIR)
+    cli_value = appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI
+    if unitexec.is_packaged(H_ENGINE_DIR) and cli_value == DEFAULT_CLI:
+        env_line = ""  # rien d'installe sous /usr/lib : proton-drive via PATH
+    else:
+        env_line = "Environment=" + unitexec.quote_environment(
+            "PROTON_DRIVE_CLI", cli_value) + "\n"
     return f"""[Unit]
 Description={description}
 After=network-online.target
 
 [Service]
 Type=simple
-Environment=PROTON_DRIVE_CLI={appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI}
-ExecStart=/usr/bin/python3 {script} {mappings_path}
+{env_line}{exec_line}
 Restart=on-failure
 RestartSec=5
 
@@ -756,8 +763,10 @@ def read_units_mappings_path():
             content = f.read()
     except OSError:
         return None
-    m = re.search(r"^ExecStart=.*realtime_consumer\.py\s+(\S+)", content, re.MULTILINE)
-    return m.group(1) if m else None
+    m = re.search(r"^ExecStart=(.*)$", content, re.MULTILINE)
+    if not m:
+        return None
+    return unitexec.mappings_arg_from_exec(m.group(1), "realtime_consumer.py")
 
 
 def mappings_ready_count(mappings_path):

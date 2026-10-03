@@ -4,34 +4,34 @@ overview: "Phase 6 of 6. Arch packaging, safe units, diagnostics, public release
 todos:
   - id: p06-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 6 and the Phase 5 gate is recorded with command output; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §5, §8, §9"
-    status: pending
+    status: completed
   - id: p06-1-task
     content: "Launcher/path helper, systemd_quote, unit generation and backward-compatible parsers (task 1)"
-    status: pending
+    status: completed
     dependencies: [p06-0-preflight]
   - id: p06-2-task
     content: "doctor.py with --redact (task 2)"
-    status: pending
+    status: completed
     dependencies: [p06-1-task]
   - id: p06-3-task
     content: "packaging/arch/: PKGBUILD, .install, launchers, desktop file (task 3)"
-    status: pending
+    status: completed
     dependencies: [p06-2-task]
   - id: p06-4-task
     content: "README, LICENSE, VERSION, CHANGELOG, RELEASING, SECURITY (task 4)"
-    status: pending
+    status: completed
     dependencies: [p06-3-task]
   - id: p06-5-task
     content: "Suite runs under makepkg check() assumptions (task 5)"
-    status: pending
+    status: completed
     dependencies: [p06-4-task]
   - id: p06-8-gate
     content: "Verify gate: `wsl -- bash scripts/test.sh` exits 0 with 0 failed, and `wsl -- bash -n packaging/arch/PKGBUILD` exits 0. makepkg, namcap and a real Arch install are recorded as NOT run (human task)"
-    status: pending
+    status: completed
     dependencies: [p06-5-task]
   - id: p06-9-handoff
     content: "Record gate evidence in PROGRESS.md, mark Phase 6 complete there, open the PR and run the review loop, then hand off with `next-phase.sh` (new headless session) and stop"
-    status: pending
+    status: completed
     dependencies: [p06-8-gate]
 ---
 

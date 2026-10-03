@@ -1,3 +1,32 @@
+# Proton Drive Sync - community fork (Linux, one-way backup)
+
+This is a community fork of [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync). The original idea, the engine and the GUI are the work of its author (CapitaineFlamQuebec / lafontaj); this fork adds change-detection fixes, honest exit codes, deletion safety, tests and Arch packaging. Please credit and support the upstream project.
+
+**One-way model.** Files go from your machine **to** Proton Drive and never the other way. Nothing is downloaded or reconciled. The tool drives Proton's official `proton-drive` command-line client; it does not implement the Drive protocol and never handles your Proton password. Deletion is off unless you turn it on, and the Proton side only ever receives a move to the trash.
+
+> **Disclaimer.** Community software, not affiliated with or endorsed by Proton AG. Use at your own risk. Test with a throwaway folder first. Keep independent backups.
+
+## Install
+
+Arch Linux (AUR-style `-git` package, built from this repository):
+
+```bash
+git clone https://github.com/MehdiMamas/proton-drive-cli-sync.git
+cd proton-drive-cli-sync/packaging/arch
+makepkg -si
+```
+
+Manual: install `python3`, `tk` and `python-pyinotify`, install Proton's [official CLI](https://proton.me/download/drive/cli/index.html) and sign in, then run `python3 proton_mapping_editor.py` from a checkout.
+
+## Quick start
+
+1. `proton-drive-sync-gui`, add a mapping for a **test folder**, run a dry-run, then a real run.
+2. Schedule the nightly run from the GUI, or `systemctl --user enable --now proton-sync.timer`.
+3. If something looks wrong: `proton-drive-sync-doctor --redact` and attach the output to an issue.
+
+More: [CHANGELOG.md](CHANGELOG.md), [docs/change-detection.md](docs/change-detection.md), [SECURITY.md](SECURITY.md).
+
+---
 🇬🇧 English | 🇫🇷 [Français](README_fr.md)
 
 # Proton Drive sync via the official CLI (Linux)
