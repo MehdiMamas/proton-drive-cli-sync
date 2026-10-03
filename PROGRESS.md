@@ -17,9 +17,9 @@ Read this file **before** any work. It is the single source of truth for which p
 ## Handoff (2026-10-03)
 
 **Where we are**
-- Fork of `lafontaj/proton-drive-cli-sync` at `5a852e2`. The phasing setup is on branch `plan/phasing-setup` with a PR into `main`. Merge it before `/phase 1`, because `review.sh` reads `review-prompt.md` from `origin/main`.
+- Fork of `lafontaj/proton-drive-cli-sync` at `5a852e2`. The phasing setup is merged into `main` (PR #1, `f9f186e`).
 - No CI on pull requests. `.github/workflows/tests.yml` is manual (`workflow_dispatch`) only. Reviews run locally via `.cursor/skills/phase/review.sh`.
-- Blocker for phase 1: WSL is not installed on the dev machine (tests are Linux-only). See `docs/dev/SETUP.md`.
+- WSL is installed but waits for a Windows restart. Phase 1 finishes the WSL setup itself as its first task (see "WSL setup after the restart" in the phase 1 plan).
 
 **Who does what**
 - Cursor: code changes, using `/phase <N>` or `/phase <N> resume`.

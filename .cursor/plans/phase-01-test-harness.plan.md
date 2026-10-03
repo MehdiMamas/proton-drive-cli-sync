@@ -5,10 +5,14 @@ todos:
   - id: p01-0-preflight
     content: "Preflight: read PROGRESS.md, confirm the active phase is 1; read PROTON_DRIVE_SYNC_MASTER_PLAN.md §4, §8, Appendix A"
     status: pending
+  - id: p01-0b-wsl
+    content: "Finish WSL setup on this PC (section 'WSL setup after the restart'): Ubuntu on WSL2, non-root default user, python3/venv/pip/gettext; record the distro in PROGRESS.md"
+    status: pending
+    dependencies: [p01-0-preflight]
   - id: p01-1-task
     content: "PROTON_SYNC_SETTINGS env override in config.py and i18n.py (task 1)"
     status: pending
-    dependencies: [p01-0-preflight]
+    dependencies: [p01-0b-wsl]
   - id: p01-2-task
     content: "scripts/test.sh, requirements-dev.txt, pytest.ini, .gitignore (tasks 2-3)"
     status: pending
@@ -48,8 +52,36 @@ todos:
 > Part of the Proton Drive Sync roadmap: [`00-roadmap.plan.md`](00-roadmap.plan.md). Spec: `PROTON_DRIVE_SYNC_MASTER_PLAN.md` §4, §8, Appendix A. Rules in `.cursor/rules/` are binding, especially `05-phase-discipline.mdc` and `10-engine-safety.mdc`.
 
 **Phase 1 of 6.** Previous: none. Next: Phase 2 – Detect equal-size edits.
-Branch `phase-01-test-harness`. Commit subject: `test(phase-01): add fake proton-drive CLI and engine regression suite`. Depends on: the phasing setup (`plan/phasing-setup` PR) merged into `main`.
+Branch `phase-01-test-harness`. Commit subject: `test(phase-01): add fake proton-drive CLI and engine regression suite`.
 Line numbers below refer to upstream commit `5a852e2`. Earlier phases shift them, so locate code by function name.
+
+## Depends on
+- **Needs:** the phasing setup merged into `main`. Check: `gh pr view 1 --json state -q .state` prints `MERGED`. **Met** (2026-10-03, merge `f9f186e`).
+- **Needs:** WSL with Ubuntu ready on the machine that runs the gate. Check: the last step of "WSL setup after the restart" below. **Not met yet; this phase does it as its first task** (only stop if a step says to ask the user).
+
+## WSL setup after the restart
+
+State on 2026-10-03 (Windows 11 PC, AMD Ryzen 9 7900X): `wsl --install -d Ubuntu --no-launch` was run elevated; virtualization is enabled in firmware; Windows needed a **restart** to finish enabling the Virtual Machine Platform. The user will restart and then paste `/phase 1`. Do these steps in PowerShell, in order. Each is safe to repeat; skip a step whose check already passes.
+
+1. **WSL works.** `wsl --status`. If it still says virtualization or the Virtual Machine Platform is not enabled, **stop** and tell the user: "Restart Windows first (WSL setup is pending a reboot), then paste `/phase 1` again."
+2. **Ubuntu is registered.** `wsl -l -v` (output is UTF-16; read it as text). If no `Ubuntu` row: `wsl --install -d Ubuntu --no-launch`. If that needs admin rights, ask the user to approve the prompt (or run it in an admin PowerShell), then re-check. Then `wsl --set-default Ubuntu`. The row must show `VERSION 2`; if not, `wsl --set-version Ubuntu 2`.
+3. **A non-root default user exists** (tests must not run as root, or permission-based tests lie). Check: `wsl -d Ubuntu -- id -un` prints something other than `root`. If it prints `root` or the first launch asks for a username, create the user without prompts:
+   ```powershell
+   wsl -d Ubuntu -u root -- bash -c "id -u mehdi >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo mehdi; printf '[user]\ndefault=mehdi\n' >> /etc/wsl.conf"
+   wsl --terminate Ubuntu
+   ```
+   (Only append to `/etc/wsl.conf` if it has no `[user]` section yet. The user has no password; it is not needed because packages are installed with `-u root`. The user can set one later with `wsl -u root -- passwd mehdi`.)
+4. **Packages.** `wsl -d Ubuntu -u root -- bash -c "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip gettext"`.
+5. **Check (this is the Needs check).** All must succeed:
+   ```powershell
+   wsl -- id -un                                   # not root
+   wsl -- python3 -c "import venv, fcntl; print('ok')"
+   wsl -- msgfmt --version
+   wsl -- grep PRETTY_NAME /etc/os-release         # record this
+   ```
+   Record the result in `PROGRESS.md` → Notes / decisions as `YYYY-MM-DD: WSL ready: <PRETTY_NAME>, WSL2, user <name>`. This is part of the phase 1 commit (no separate push).
+
+If any step fails in a way not covered here, stop and report the exact command and output to the user. Do not work around it by running tests with Windows Python (that is not gate evidence).
 
 ## Before you start
 - `PROGRESS.md` must say the active phase is **1**.
