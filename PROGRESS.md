@@ -2,12 +2,12 @@
 
 Read this file **before** any work. It is the single source of truth for which phase is active. Rules: `.cursor/rules/05-phase-discipline.mdc`. Roadmap: `.cursor/plans/00-roadmap.plan.md`.
 
-**Active phase:** 1 – Test harness with a fake Proton CLI (not started) → `.cursor/plans/phase-01-test-harness.plan.md`
-**Next:** 2 – Detect equal-size edits (not started)
+**Active phase:** 2 – Detect equal-size edits (not started) → `.cursor/plans/phase-02-equal-size-edits.plan.md`
+**Next:** 3 – Run results (not started)
 
 | Phase | Plan | Status | Gate evidence | Date |
 |---|---|---|---|---|
-| 1 | `phase-01-test-harness.plan.md` | not started | | |
+| 1 | `phase-01-test-harness.plan.md` | completed | `wsl -- bash scripts/test.sh` exit 0: `23 passed, 7 xfailed in 12.15s` (0 failed, 0 xpassed). `git diff origin/main -- proton_sync.py` empty. Ubuntu 26.04.1 LTS on WSL2, Windows 11. Not run: real Proton account, real systemd, Arch (human, after phase 6). | 2026-10-03 |
 | 2 | `phase-02-equal-size-edits.plan.md` | not started | | |
 | 3 | `phase-03-run-results.plan.md` | not started | | |
 | 4 | `phase-04-deletion-safety.plan.md` | not started | | |
@@ -19,7 +19,8 @@ Read this file **before** any work. It is the single source of truth for which p
 **Where we are**
 - Fork of `lafontaj/proton-drive-cli-sync` at `5a852e2`. The phasing setup is merged into `main` (PR #1, `f9f186e`).
 - No CI on pull requests. `.github/workflows/tests.yml` is manual (`workflow_dispatch`) only. Reviews run locally via `.cursor/skills/phase/review.sh`.
-- WSL is installed but waits for a Windows restart. Phase 1 finishes the WSL setup itself as its first task (see "WSL setup after the restart" in the phase 1 plan).
+- Phase 1 is done on this branch: fake CLI, WSL runner, baseline tests, 7 strict xfails. `proton_sync.py` is unchanged.
+- WSL is ready on this PC (see Notes). The gate ran there.
 
 **Who does what**
 - Cursor: code changes, using `/phase <N>` or `/phase <N> resume`.
@@ -28,9 +29,9 @@ Read this file **before** any work. It is the single source of truth for which p
 
 **Prompt to give Cursor**
 ```
-/phase 1
+/phase 2
 
-Build the test harness from .cursor/plans/phase-01-test-harness.plan.md: fake proton-drive CLI, hermetic pytest fixtures, scripts/test.sh for WSL, baseline tests and the 7 strict-xfail known-bug tests. Do not change proton_sync.py. Run `wsl -- bash scripts/test.sh`, record the summary line and the WSL distro in this file, open the PR, run the local review loop, merge, and hand off with next-phase.sh.
+Detect equal-size edits from .cursor/plans/phase-02-equal-size-edits.plan.md. The phase 1 gate is recorded in this file. Do not start phase 3.
 ```
 
 ## Deferred
@@ -39,6 +40,8 @@ Build the test harness from .cursor/plans/phase-01-test-harness.plan.md: fake pr
 - [Human, any time] Run the read-only inventory from spec §5 on Nizar's machine (after phase 6: `proton-drive-sync-doctor --redact`) to learn whether deletion, rename-ext or equal-size edits affect his setup. Noticed while planning, 2026-10-03.
 
 ## Notes / decisions
+- 2026-10-03: WSL ready: Ubuntu 26.04.1 LTS, WSL2, user mehdi. `wsl -- id -un` prints `mehdi`; `python3 -c "import venv, fcntl"` prints `ok`; `msgfmt` is GNU gettext-tools 0.23.2.
+- 2026-10-03: `PROTON_SYNC_SETTINGS` is a new override, not a renamed path. When it is unset or empty, `config._SETTINGS_PATH` and `i18n.SETTINGS_PATH` stay `APP_DIR/settings.json`. Those two modules are the only readers and writers of the file. Other `settings.json` hits are comments, `.gitignore`, `settings.example.json`, and docs. This repo has no `-dev` or leading-dot sibling of the settings path.
 - 2026-10-03: Forked at upstream `5a852e218d353209a3b39cabdb4b810d0f254177`, the commit the spec reviewed. Upstream remote is `upstream`.
 - 2026-10-03: Review budget for this project is **2 rounds per PR** (round 1 full, round 2 verify). Set by the user for cost reasons; enforced by `PHASE_REVIEW_MAX_ROUNDS` in `.cursor/skills/phase/review.sh`. After round 2, Cursor fixes what is listed, pushes once, and stops without merging if the verdict was not Ready to merge.
 - 2026-10-03: Tests run in WSL (`wsl -- bash scripts/test.sh`) because the engine needs `fcntl`, `/proc` and systemd. Windows Python results do not count as gate evidence.
