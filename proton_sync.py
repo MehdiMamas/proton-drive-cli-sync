@@ -2996,20 +2996,6 @@ def main():
         print(_("❌ --wipe-remote requires --reset-source."))
         sys.exit(2)
 
-    # Normalisation des extensions : réglage PERSISTANT (config.py / GUI), avec
-    # --no-rename-ext comme surcharge ponctuelle qui force TOUJOURS l'arrêt pour
-    # ce passage, quel que soit le réglage. Résolu une seule fois ici, propagé
-    # à tous les appels du passage.
-    if _HAS_CONFIG:
-        effective_rename_ext = (
-            appconfig.effective_rename_ext(cli_supports_shared_delete)
-            and not args.no_rename_ext
-        )
-        effective_collision_suffix = appconfig.rename_ext_collision_suffix()
-    else:
-        effective_rename_ext = not args.no_rename_ext
-        effective_collision_suffix = _EXT_COLLISION_SUFFIX_DEFAULT
-
     # Sonde d'authentification pure (--check-auth) : réutilise EXACTEMENT le même
     # test que le passage normal (check_auth ci-dessus), mais sans prendre le
     # verrou (c'est une simple lecture) et sans rien synchroniser. Placée AVANT
@@ -3036,6 +3022,21 @@ def main():
             fcntl.flock(probe_fp, fcntl.LOCK_UN)   # libre : on relâche tout de suite
             probe_fp.close()
             sys.exit(0)
+
+    # Normalisation des extensions : réglage PERSISTANT (config.py / GUI), avec
+    # --no-rename-ext comme surcharge ponctuelle qui force TOUJOURS l'arrêt pour
+    # ce passage. Calculé APRÈS --check-auth et --check-lock : ces sondes ne
+    # renomment rien, et la décision interroge la version du CLI (un processus
+    # Bun de plusieurs secondes la première fois).
+    if _HAS_CONFIG:
+        effective_rename_ext = (
+            appconfig.effective_rename_ext(cli_supports_shared_delete)
+            and not args.no_rename_ext
+        )
+        effective_collision_suffix = appconfig.rename_ext_collision_suffix()
+    else:
+        effective_rename_ext = not args.no_rename_ext
+        effective_collision_suffix = _EXT_COLLISION_SUFFIX_DEFAULT
 
     # À partir d'ici, on fait un VRAI passage : le fichier de mappings est requis
     # (les sondes --check-auth / --check-lock ci-dessus sont déjà sorties sans lui).

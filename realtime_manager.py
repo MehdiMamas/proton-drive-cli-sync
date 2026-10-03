@@ -118,7 +118,8 @@ NAS_QUEUE_DIR = os.path.join(NAS_BASE, "queue")     # queue/<user>/
 # l'écart sans copier). Les deux fonctions doivent rester alignées : ne jamais
 # dupliquer cette liste ailleurs.
 _NAS_SCRIPT_FILES = ["nas_watcher.py", "local_watcher.py", "config.py", "i18n.py",
-                     "mount_check.py", "nas_selftest.py", "nas_selftest_watcher.py"]
+                     "paths.py", "mount_check.py", "nas_selftest.py",
+                     "nas_selftest_watcher.py"]
 
 # systemd --user (mêmes conventions que schedule_manager).
 SYSTEMD_USER_DIR = os.path.expanduser("~/.config/systemd/user")

@@ -182,8 +182,34 @@ def test_i18n_and_config_agree_on_settings_path(tmp_path, monkeypatch):
     monkeypatch.delenv("PROTON_SYNC_SETTINGS", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     import i18n
-    assert i18n.paths.settings_path() == paths.settings_path()
-    assert config.paths.settings_path() == paths.settings_path()
+    assert config._write_raw("language", "fr") is True
+    assert i18n.read_setting("language") == "fr"
+    assert i18n.write_setting("tray_enabled", True) is True
+    assert config.get("tray_enabled") is True
+
+
+def test_fresh_settings_write_creates_xdg_file_mode_0600(tmp_path, monkeypatch):
+    monkeypatch.delenv("PROTON_SYNC_SETTINGS", raising=False)
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(paths, "APP_DIR", str(app))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    import i18n
+    assert i18n.write_setting("language", "en") is True
+    dest = tmp_path / "xdg" / "proton-drive-sync" / "settings.json"
+    assert dest.is_file()
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+    assert not (app / "settings.json").exists()
+    assert not (REPO / "settings.json").exists()
+    assert i18n.write_setting("nas_mount_path", "/mnt/nas") is True
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    assert data["language"] == "en"
+    assert data["nas_mount_path"] == "/mnt/nas"
+
+
+def test_nas_script_list_includes_paths():
+    import realtime_manager
+    assert "paths.py" in realtime_manager._NAS_SCRIPT_FILES
 
 
 def test_cli_version_cache_under_data_dir(
@@ -200,6 +226,9 @@ def test_cli_version_cache_under_data_dir(
 
 
 def test_cli_found_on_path_when_no_setting(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(config, "APP_DIR", str(app))
     bindir = tmp_path / "bin"
     bindir.mkdir()
     binary = bindir / "proton-drive"
@@ -207,8 +236,6 @@ def test_cli_found_on_path_when_no_setting(tmp_path, monkeypatch):
     binary.chmod(0o755)
     monkeypatch.setenv("PATH", str(bindir))
     monkeypatch.delenv("PROTON_DRIVE_CLI", raising=False)
-    bundled = Path(config.APP_DIR) / "proton-drive"
-    assert not bundled.exists()
     found = config.resolve_proton_cli()
     assert os.path.samefile(found, binary)
 

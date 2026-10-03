@@ -48,7 +48,7 @@ def _say(template, **kwargs):
 
 def _migrate_legacy(legacy, dest):
     """Copy legacy settings onto dest. Leave legacy in place. Mode 0600."""
-    tmp = dest + ".tmp"
+    tmp = "%s.%d.tmp" % (dest, os.getpid())
     try:
         os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
         shutil.copyfile(legacy, tmp)

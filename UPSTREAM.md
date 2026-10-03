@@ -27,5 +27,8 @@ separate pull requests. New files added by the fork are not listed.
 | `proton_sync.py` | 5 | Engine uses `effective_rename_ext`; CLI version cache lives in the data directory |
 | `proton_mapping_editor.py` | 5 | One-time extension notice uses the same decision as the engine |
 | `local_watcher.py`, `realtime_consumer.py`, `realtime_manager.py` | 5 | No-config fallbacks use `~/.proton-drive-sync` instead of the legacy split paths |
-| `README.md`, `README_fr.md` | 5 | Current paths, settings location, and CLI search order |
+| `README.md`, `README_fr.md` | 5 | Current paths, settings location, CLI search order, and `paths.py` in the NAS file list |
+| `INSTALLATION-realtime.md`, `INSTALLATION-realtime_fr.md` | 5 | NAS file list includes `paths.py`; queue, realtime.conf and settings paths |
+| `INSTALLATION-systemd.md`, `INSTALLATION-systemd_fr.md` | 5 | Lock path is `~/.proton-drive-sync/proton_sync.lock` |
+| `Temporary-files-exclusions.md`, `Temporary-files-exclusions_fr.md` | 5 | Extension rename is no longer the default on CLI ≥ 0.5.0; log path updated |
 | `INSTALLATION-systemd.md` | 3 | Exit-code table and the `--refresh-units` step for units already installed |
