@@ -1,0 +1,22 @@
+---
+description: CI cost policy, workflows, packaging and release rules
+globs: .github/**,packaging/**,VERSION,CHANGELOG.md,docs/RELEASING.md
+alwaysApply: false
+---
+
+# Build, CI and release
+
+## CI cost policy
+- No Claude job runs on GitHub Actions. Phase reviews run locally through `.cursor/skills/phase/review.sh`.
+- Every workflow uses `on: workflow_dispatch` only. Never add `push`, `pull_request`, `pull_request_target`, `schedule`,
+  `issue_comment` or any other automatic trigger, even "just for main".
+- `tests.yml` is the only workflow. Do not add matrices, caches or extra jobs unless a plan asks for it.
+- Never print or echo secrets.
+
+## Review tooling is owned by the user
+`.cursor/skills/phase/review.sh` and `.cursor/skills/phase/review-prompt.md` change only in a `plan/<slug>` PR, never inside a phase PR. (The script reads the prompt from `origin/main`, so a phase PR cannot change its own review anyway.)
+
+## Packaging and release (phase 6 onward)
+- Arch packaging lives in `packaging/arch/`. Program files install read-only under `/usr/lib/proton-drive-cli-sync/`; user data stays in `~/.config/proton-drive-sync/` and `~/.proton-drive-sync/`.
+- `CHANGELOG.md` follows Keep a Changelog with an `## [Unreleased]` section. Every user-visible behavior change adds an entry in the same PR.
+- Tags, GitHub releases and AUR pushes are done by the user, never by the agent.

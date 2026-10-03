@@ -1,0 +1,51 @@
+---
+description: Safety rules for the sync engine, deletion, cache and real-time code paths
+globs: proton_sync.py,realtime_consumer.py,local_watcher.py,mount_check.py,schedule_manager.py,config.py,nas_watcher.py,realtime_manager.py
+alwaysApply: false
+---
+
+# Engine safety rules
+
+## Before changing a function
+- Read the WHOLE function and every caller (`rg -n "function_name\(" --type py`). Many functions return
+  sentinel values that callers branch on: `RemoteListing.ok`, `sync_folder` → subtree-complete bool,
+  `sync_subpath` → `None` or `"cold"`, `delete_orphans` → `(n_deleted, n_failed)`, `upload_batch` → bool.
+- Keep the existing design comments. They record production incidents. If your change invalidates
+  a comment, update the comment in the same commit.
+
+## Stable output tags are an API
+`[upload-failed]`, `[auth-failed]`, `[account-changed]`, `[subpath-cold]`, `[subpath-cold-root]`,
+`[subpath-excluded]`, `@@PROGRESS`, `📂 <path>` lines, and any tag a plan adds (e.g. `[run-result]`).
+The GUI and the consumer parse them. Never translate them, rename them, or move them inside `_()`.
+Add new tags, don't repurpose old ones.
+
+## Cache (`Cache` class, `~/.proton-drive-sync/…/*.cache`)
+- Entry format `{"sig": {...}, "delete_synced": bool, "subtree_complete": bool}` plus legacy bare-signature
+  entries and the reserved `"__meta__"` key. Readers must keep accepting all three.
+- Changing the shape of `_local_signature()` invalidates EVERY cached directory and forces a full
+  remote re-listing on the next pass (hours on big trees). Do not do that unless the plan says so.
+  Store new per-file data in new entry fields instead.
+- The cache is a shortcut, never proof of remote state. Only write a cache entry after the folder's
+  uploads AND deletions fully succeeded (`had_failure == False`).
+
+## Uploads
+- Any "does this file need uploading?" decision must go through one comparator (`needs_upload`, or
+  its successor named in the plan). Do not add ad-hoc size checks elsewhere.
+- When information is missing (no remote size, no remote digest, unreadable local file), choose the
+  conservative answer: upload, or report a failure. Never "assume unchanged".
+
+## Deletions
+- Three gates must all pass: master `--delete` flag, mapping `allow_delete`, mount guard (`_delete_guard_ok`).
+  Never weaken a gate. Never delete when a listing failed (`RemoteListing.ok == False`).
+- `remote_trash` only trashes. Do not reintroduce permanent deletion.
+- Any new deletion path needs a dry-run print, a log line, and a test with the fake CLI.
+
+## Real-time consumer
+- Markers are acknowledged (`_cleanup`) only after the engine reports success for that subpath.
+- Every non-success path must restore markers AND be rate-limited (no engine relaunch every cycle on a
+  persistent error).
+
+## systemd units (`schedule_manager.build_service_text`)
+- A persistent error must never cause a tight restart loop. Use `SuccessExitStatus` /
+  `RestartPreventExitStatus` deliberately and test the generated text.
+- Paths in `ExecStart=` must be quoted/escaped for systemd (spaces, `%` → `%%`, quotes).

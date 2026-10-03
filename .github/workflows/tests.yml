@@ -1,0 +1,28 @@
+# Test suite — MANUAL ONLY. Run from the Actions tab or: gh workflow run tests.yml
+# Day-to-day tests run locally in WSL (scripts/test.sh). This exists for occasional confirmation.
+name: Tests (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA to test"
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q

@@ -1,0 +1,4 @@
+# Linux-run files must keep LF even when edited on Windows (Cursor) — CRLF breaks bash/python shebangs in WSL.
+* text=auto eol=lf
+*.png binary
+*.mo binary
