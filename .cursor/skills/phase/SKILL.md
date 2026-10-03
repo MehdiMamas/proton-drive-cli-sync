@@ -2,21 +2,23 @@
 name: phase
 description: >-
   Execute one Proton Drive Sync phase from PROGRESS.md through its gate, open a pull
-  request, fix Claude's review until it says Ready to merge, then merge it.
-  Invoke as /phase followed by a single phase number, for example /phase 3.
-  Invoke as /phase <number> resume to pick up an open phase pull request.
+  request, fix Claude's review until it says Ready to merge, merge it, then start the next phase in a new headless session.
+  Invoke as /phase alone to run the next phase from PROGRESS.md, or as /phase followed by a single phase number, for example /phase 3.
+  Add resume (/phase resume or /phase <number> resume) to pick up an open phase pull request.
 disable-model-invocation: true
 ---
 
 # Execute one Proton Drive Sync phase
 
-Invoked as `/phase <number>`, or `/phase <number> resume`. One phase per branch and one pull request. Run the review loop below until Claude's review says **Ready to merge**, merge, then stop. Do not start the next phase.
+Invoked as `/phase`, `/phase <number>`, `/phase resume` or `/phase <number> resume`. Without a number, run the next phase (see **Argument**). One phase per branch and one pull request. Run the review loop below until Claude's review says **Ready to merge**, merge, then hand off to a new session (see **Hand off**). Never start the next phase in this chat.
 
 With `resume`, the pull request for this phase already exists: check out its branch, skip to **Review loop**, and start at step 1 for the current head commit.
 
 ## Argument
 
 1. Read the phase number from the user message. Accept `3` or `03`. Reject anything that is not a whole number with a matching plan file, and tell the user to run `/phase 3`. Zero-pad it to two digits (`NN`) for file and branch names.
+   - **No number, no `resume`:** read `PROGRESS.md` on `origin/main` (`git fetch origin && git show origin/main:PROGRESS.md`) and take the lowest-numbered phase in the table that is not `completed`. If it already has an open pull request (`gh pr list --state open --head <branch>`), switch to `resume` for it. If every phase is completed, say so and stop. Tell the user which phase you picked before you edit anything.
+   - **`resume` with no number:** list open pull requests whose head branch matches `phase-NN-*` (`gh pr list --state open --json number,headRefName`). Exactly one: resume that phase. None or more than one: stop, list them, and ask which number.
 2. Read `PROGRESS.md`. The number must be the active phase. If it is not, stop and say which phase is active. With `resume`, the phase may already be marked `completed` on the branch; check `PROGRESS.md` on `origin/main` instead.
 3. Open the one plan `.cursor/plans/phase-<NN>-*.plan.md`. The branch name is that filename without `.plan.md` (`phase-03-contracts`).
 
@@ -57,7 +59,7 @@ Follow `08-gate-proof.mdc`.
 
 1. Run the gate command from the phase plan.
 2. Put the command and the result in the phase row of `PROGRESS.md`, with the date.
-3. Mark that phase `completed`. Set **Next** to the following phase, still `not started`.
+3. Mark that phase `completed`. Set **Active phase** to the following phase and **Next** to the one after it, both still `not started`.
 4. If a check did not run, say so in the gate cell and name the phase that owns it.
 
 ## Pull request
@@ -100,7 +102,7 @@ If the script exits non-zero, stop and tell the user, without merging, with its 
 
 - **Changes needed:** go to **Fixing review feedback**, then back to step 1.
 - **Ready to merge:** go to **Merge**.
-- **Needs user** or **Blocked:** stop. Tell the user the verdict, the open items and the PR URL. Do not merge.
+- **Needs user** or **Blocked:** stop. Tell the user the verdict, the open items and the PR URL. Do not merge and do not hand off.
 
 **Review budget for this project: 2 rounds per PR** (`PHASE_REVIEW_MAX_ROUNDS` in `review.sh`; the user chose it to keep costs down). Round 1 is the full review. Round 2 is the final one and only checks the fixes. So:
 
@@ -121,8 +123,16 @@ Merge only when all of these are true. If one is not, stop and tell the user why
 Then:
 
 1. `gh pr merge <n> --merge --delete-branch --match-head-commit <reviewed sha>`.
-2. `git switch main && git pull --ff-only`.
-3. Tell the user: the PR URL, the merge commit, the review's **Follow-ups (not blocking)** list as-is, and that the next phase is ready for `/phase <next number>`. Then stop. Do not start the next phase.
+2. `git switch main && git pull --ff-only`. If `main` is checked out in another worktree, run `git fetch origin main` instead.
+3. Go to **Hand off**.
+
+## Hand off
+
+Only after a merge. Never after **Needs user**, **Blocked**, a failed review script, or a stopped fix loop.
+
+1. Run `bash .cursor/skills/phase/next-phase.sh`. It reads `PROGRESS.md` on `origin/main`. If a phase is not `completed`, it starts a new headless Cursor CLI session (`agent -p`) in the background that runs `/phase`, so the next phase starts with a clean context and no window or prompt. That session writes its output to `.git/phase-runs/<time>-next.log` in the main repository, and hands off again after its own merge. It starts nothing when every phase is completed, when `PHASE_AUTOCHAIN=0`, after `PHASE_CHAIN_MAX` chained sessions (default 30), or when the `agent` CLI is missing or not logged in. `PHASE_AGENT_MODEL` picks the model.
+2. Tell the user: the PR URL, the merge commit, the review's **Follow-ups (not blocking)** list as-is, and the script's `NEXT:` line.
+3. Stop. Do not start the next phase in this session; the new session gives it a clean context.
 
 ## Fixing review feedback
 
