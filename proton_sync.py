@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (par défaut : ~/Logiciels/Proton-drive/proton-drive)
 """
-__version__ = "1.10.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.11.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -419,6 +419,15 @@ class Cache:
             if isinstance(name, str) and name:
                 baseline[name] = (size, mtime)
         return baseline
+
+    def synced_to(self, local_dir, remote_folder):
+        """True si ce dossier a déjà été synchronisé avec succès VERS CE dossier
+        distant. Une entrée de cache n'est écrite qu'après un passage où le
+        dossier distant a été listé : il existait donc à ce moment-là. C'est une
+        présomption, pas une preuve — on peut l'avoir supprimé depuis sur Drive —
+        et l'appelant doit garder un filet (cf. sync_folder)."""
+        sig, _ds = self._entry(self.data.get(local_dir))
+        return isinstance(sig, dict) and sig.get("remote_folder") == remote_folder
 
     def is_fresh(self, local_dir, current_signature):
         """True si l'empreinte locale correspond à celle en cache (côté upload)."""
@@ -1035,7 +1044,30 @@ _cli_version_cache = {}          # empreinte -> version ; absent = pas encore su
 # indéfiniment. On mémorise donc le résultat sur disque, avec l'empreinte du
 # binaire (chemin + date + taille) : remplacer le CLI change l'empreinte et
 # relance la sonde automatiquement, sans invalidation manuelle.
-CLI_VERSION_CACHE = os.path.expanduser("~/.proton_sync/cli-version.json")
+#
+# Il vit dans le dossier de données unifié, comme le reste. Il était resté dans
+# l'ancien emplacement, qu'il faisait renaître après la migration : un fichier
+# d'état hors du dossier que la documentation donne pour unique.
+_LEGACY_CLI_VERSION_CACHE = os.path.expanduser("~/.proton_sync/cli-version.json")
+if _HAS_CONFIG:
+    CLI_VERSION_CACHE = os.path.join(appconfig.DATA_DIR, "cli-version.json")
+else:
+    CLI_VERSION_CACHE = _LEGACY_CLI_VERSION_CACHE
+
+
+def _drop_legacy_cli_version_cache():
+    """Retire l'ancien fichier, et l'ancien dossier s'il ne contient plus rien.
+    Au mieux : un échec ici n'a aucune conséquence, le fichier est juste inutile."""
+    if CLI_VERSION_CACHE == _LEGACY_CLI_VERSION_CACHE:
+        return
+    try:
+        os.remove(_LEGACY_CLI_VERSION_CACHE)
+    except OSError:
+        return                  # déjà absent, ou non supprimable : rien à faire
+    try:
+        os.rmdir(os.path.dirname(_LEGACY_CLI_VERSION_CACHE))   # échoue s'il n'est pas vide
+    except OSError:
+        pass
 
 
 def _cli_fingerprint():
@@ -1071,7 +1103,8 @@ def _cli_version_to_disk(fingerprint, version):
         with open(CLI_VERSION_CACHE, "w", encoding="utf-8") as f:
             json.dump({"fingerprint": fingerprint, "version": version}, f)
     except OSError:
-        pass
+        return
+    _drop_legacy_cli_version_cache()
 
 
 def cli_version():
@@ -1309,16 +1342,49 @@ def _is_permission_error(stderr):
     ))
 
 
-def ensure_remote_path(path):
+# Dossiers distants dont l'existence est ÉTABLIE pendant CE passage : vérifiés,
+# créés, ou vus dans un listing. Durée de vie : le processus, donc le passage.
+#
+# Pourquoi. Chaque appel au CLI coûte plusieurs secondes (le binaire initialise
+# tout le SDK avant de répondre). Or ensure_remote_path interrogeait Proton une
+# fois PAR NIVEAU du chemin, pour CHAQUE dossier, sans rien retenir : un dossier
+# à cinq niveaux sous la racine coûtait six appels au lieu d'un — les cinq
+# mêmes ancêtres revérifiés à chaque dossier voisin. Mesuré en production sur un
+# passage qui réexamine tout : 21 s par dossier, soit près de 23 heures pour
+# 3 943 dossiers, là où un appel par dossier en demande environ quatre.
+#
+# Rien n'est mémorisé d'un passage à l'autre : ce qui était vrai hier sur Drive
+# ne l'est pas forcément aujourd'hui. Seule la présomption tirée du cache
+# franchit les passages, et elle a son filet (cf. sync_folder).
+_REMOTE_KNOWN = set()
+
+
+def _remember_remote(path):
+    """Note qu'un dossier distant existe — lui ET tous ses ancêtres : on ne peut
+    pas avoir listé un dossier dont un parent n'existerait pas."""
+    current = ""
+    for part in (p for p in path.strip("/").split("/") if p):
+        current = f"{current}/{part}"
+        _REMOTE_KNOWN.add(current)
+
+
+def ensure_remote_path(path, known_absent=False):
     """Crée récursivement chaque segment manquant du chemin distant `path`.
     Renvoie True si le chemin est prêt (créé ou déjà présent), False si une
     création a été REFUSÉE POUR PERMISSION (destination non inscriptible). Dans
     le modèle de partage Proton, un enfant ne peut pas être plus permissif que
     son parent : un refus à ce niveau signifie que TOUT le sous-arbre est non
-    inscriptible — inutile d'insister, l'appelant saute proprement."""
+    inscriptible — inutile d'insister, l'appelant saute proprement.
+
+    Les segments déjà connus (_REMOTE_KNOWN) ne sont pas revérifiés.
+
+    `known_absent` : l'appelant SAIT que le dernier segment n'existe pas — il
+    vient de lister le parent et ne l'y a pas vu. On le crée alors directement,
+    sans demander d'abord s'il existe. Si la création répond « existe déjà »
+    (course avec un autre client), c'est traité comme un succès, comme avant."""
     parts = [p for p in path.strip("/").split("/") if p]
     current = ""
-    for part in parts:
+    for index, part in enumerate(parts):
         parent = current if current else "/"
         current = f"{current}/{part}" if current else f"/{part}"
         # Emplacements de PREMIER NIVEAU de Proton Drive (« My files »,
@@ -1330,7 +1396,10 @@ def ensure_remote_path(path):
         # personne, sur un partage commun).
         if parent == "/":
             continue
-        if not remote_exists(current):
+        if current in _REMOTE_KNOWN:
+            continue
+        absent = (known_absent and index == len(parts) - 1) or not remote_exists(current)
+        if absent:
             res = run_cli(["filesystem", "create-folder", parent, part])
             if res.returncode != 0 and not _already_exists_error(res.stderr):
                 # Permission refusée : destination non inscriptible. On s'arrête
@@ -1344,6 +1413,8 @@ def ensure_remote_path(path):
                 # « existe déjà » = succès silencieux (filtré) ; sinon vraie
                 # erreur (quota, nom invalide…) -> avertissement non bloquant.
                 print(_("    ⚠  Could not create {p}: {e}").format(p=current, e=res.stderr.strip()))
+                continue        # création en échec : ne PAS tenir ce segment pour connu
+        _REMOTE_KNOWN.add(current)
     return True
 
 
@@ -1395,6 +1466,9 @@ def get_remote_listing(remote_path, verbose=False):
         # Le type peut être enveloppé {ok, value} comme les autres champs.
         rtype = _unwrap(item.get("type"))
         listing[name] = {"size": size, "mtime": mtime, "sha1": sha1, "type": rtype}
+        if rtype == "folder":
+            _REMOTE_KNOWN.add(remote_path.rstrip("/") + "/" + name)
+    _remember_remote(remote_path)
     return RemoteListing(listing, ok=True)
 
 
@@ -2070,7 +2144,11 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 conflict_mode="replace",
                 cache=None, ignore_cache=False, exclusions=None,
                 delete=False, delete_mode="trash", realtime=False, rename_ext=True,
-                collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT):
+                collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT, remote_hint=None):
+    # `remote_hint` : ce que le listing du PARENT dit de ce dossier sur Drive —
+    # True (il y figure), False (il n'y figure pas), None (le parent n'a pas été
+    # listé : sauté par le cache, ou passage temps réel visant ce dossier).
+    #
     # Retourne True si CE dossier ET toute sa descendance ont été analysés
     # jusqu'au bout sans échec (subtree_complete) ; False sinon. Cette valeur
     # « remonte » de bas en haut : un parent n'est complet que si tous ses enfants
@@ -2197,16 +2275,42 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
             cache.maybe_save()
         return all_children_complete
 
-    # Chemin normal : on s'assure que le dossier distant existe, puis on liste.
+    # Chemin normal : il faut que le dossier distant existe, puis on le liste.
+    #
+    # On ne redemande pas à Proton ce qu'on sait déjà. Le dossier est tenu pour
+    # existant, et listé DIRECTEMENT, dans trois cas :
+    #   - le listing du parent vient de le montrer (remote_hint True) ;
+    #   - ce passage l'a déjà vérifié, créé ou vu (_REMOTE_KNOWN) ;
+    #   - le parent n'a pas été listé, mais le cache dit que ce dossier a déjà
+    #     été synchronisé vers cette destination. C'est le cas du temps réel, et
+    #     d'un dossier modifié sous un parent sauté par le cache.
+    #
+    # LE FILET : si ce listing direct échoue, on ne conclut rien — le dossier a
+    # pu être supprimé sur Drive, ou la présomption du cache être périmée. On
+    # refait alors la vérification complète (qui recrée ce qui manque), puis on
+    # liste de nouveau. Le comportement d'avant reste donc celui du pire cas.
+    remote_items = None
     if not dry_run:
-        if not ensure_remote_path(remote_folder):
-            # Permission refusée sur ce dossier : destination non inscriptible.
-            # On saute CE dossier ET tout son sous-arbre (un enfant ne peut pas
-            # être plus permissif que son parent) — AUCUN upload tenté, aucune
-            # descente. Évite la cascade de « Node not found ». Non complet.
-            return False
+        acquis = (remote_hint is True
+                  or remote_folder in _REMOTE_KNOWN
+                  or (remote_hint is None and cache is not None
+                      and cache.synced_to(local_dir, remote_folder)))
+        if acquis:
+            remote_items = get_remote_listing(remote_folder, verbose=verbose)
+            if not remote_items.ok:
+                _REMOTE_KNOWN.discard(remote_folder)
+                remote_items = None
+        if remote_items is None:
+            if not ensure_remote_path(remote_folder,
+                                      known_absent=(remote_hint is False)):
+                # Permission refusée sur ce dossier : destination non inscriptible.
+                # On saute CE dossier ET tout son sous-arbre (un enfant ne peut pas
+                # être plus permissif que son parent) — AUCUN upload tenté, aucune
+                # descente. Évite la cascade de « Node not found ». Non complet.
+                return False
 
-    remote_items = get_remote_listing(remote_folder, verbose=verbose)
+    if remote_items is None:
+        remote_items = get_remote_listing(remote_folder, verbose=verbose)
     if not remote_items.ok:
         # Listing en échec : le dossier n'est PAS vide, on ne sait simplement pas
         # ce qu'il contient. Envoyer reviendrait à renvoyer tout le dossier ;
@@ -2244,13 +2348,23 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 print(_("    🚫 excluded ({k}): {p}").format(k=kind, p=entry.path))
             continue
         if entry.is_dir(follow_symlinks=False):
+            # Ce que le listing qu'on vient de faire dit de ce sous-dossier. Un
+            # FICHIER distant du même nom ne dit rien d'utile : on laisse alors
+            # la vérification complète trancher, comme avant.
+            child_info = remote_items.get(entry.name)
+            if child_info is None:
+                child_hint = False
+            elif child_info.get("type") == "folder":
+                child_hint = True
+            else:
+                child_hint = None
             child_complete = sync_folder(
                 entry.path, remote_folder, dry_run=dry_run, verbose=verbose,
                 verify_hash=verify_hash, conflict_mode=conflict_mode,
                 cache=cache, ignore_cache=ignore_cache,
                 exclusions=exclusions, delete=delete, delete_mode=delete_mode,
                 realtime=realtime, rename_ext=rename_ext,
-                collision_suffix=collision_suffix)
+                collision_suffix=collision_suffix, remote_hint=child_hint)
             if not child_complete:
                 all_children_complete = False
         elif entry.is_file():   # suit les liens : un lien vers un fichier EST un fichier
@@ -2377,10 +2491,14 @@ def sync_file(local_file, remote_parent, dry_run=False, verbose=False, verify_ha
         if verbose:
             print(_("    🚫 excluded (file): {p}").format(p=local_file))
         return
-    if not dry_run:
+    # Listing d'abord : le dossier de destination existe presque toujours, et
+    # le vérifier niveau par niveau à chaque passage coûtait un appel par niveau.
+    # S'il manque, le listing échoue, et c'est alors seulement qu'on le crée.
+    remote_items = get_remote_listing(remote_parent, verbose=verbose)
+    if not remote_items.ok and not dry_run:
         if not ensure_remote_path(remote_parent):
             return   # destination non inscriptible : rien envoyé (message déjà émis)
-    remote_items = get_remote_listing(remote_parent, verbose=verbose)
+        remote_items = get_remote_listing(remote_parent, verbose=verbose)
     if not remote_items.ok:
         # Sans listing fiable, le fichier paraîtrait absent et serait renvoyé à
         # chaque passage. On passe notre tour ; le prochain passage tranchera.

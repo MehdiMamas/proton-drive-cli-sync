@@ -340,7 +340,16 @@ Le cache est sauvegardé sur disque **après chaque entrée du mapping traitée*
 
 ### Création automatique des dossiers
 
-`ensure_remote_path()` parcourt le chemin distant segment par segment et crée chaque dossier manquant via `filesystem create-folder`. Récursif : chaque sous-dossier local découvert déclenche la même vérification côté distant. Aucune création préalable manuelle requise.
+`ensure_remote_path()` crée chaque dossier manquant du chemin distant via `filesystem create-folder`. Aucune création préalable manuelle requise.
+
+Le moteur ne redemande pas à Proton ce qu'il sait déjà, chaque appel au CLI coûtant plusieurs secondes :
+
+- un sous-dossier que le listing de son parent vient de montrer est listé directement ;
+- un sous-dossier qui n'y figure pas est créé directement, sans demander d'abord s'il existe ;
+- ce qui a été vérifié une fois ne l'est plus pendant le passage ;
+- quand le parent n'a pas été listé — passage temps réel, ou parent sauté par le cache — un dossier déjà synchronisé vers cette destination est listé directement lui aussi.
+
+Si ce listing direct échoue, le moteur revient à la vérification niveau par niveau, qui recrée ce qui manque : un dossier supprimé sur Proton est rétabli au premier passage qui le touche. Un passage qui réexamine tout (`--verify-hash`, `--ignore-cache`, premier amorçage) coûte ainsi environ un appel par dossier.
 
 ### Propagation des suppressions (`--delete`) — vrai miroir optionnel
 
@@ -430,7 +439,7 @@ Le moteur force l'écriture immédiate de sa sortie (`line_buffering`), donc ave
 
 - Le CLI a un coût fixe par invocation (~1-8 s, surtout latence réseau/authentification).
 - Le moteur **regroupe les uploads** dans un seul appel par dossier (`upload f1 f2 f3 ... destParent`) pour amortir ce coût fixe.
-- Le premier passage complet sur une arborescence vierge prend du temps (uploads + un `list` par dossier). Les passages suivants sont quasi instantanés grâce au cache.
+- Le premier passage complet sur une arborescence vierge prend du temps (uploads + une création et un `list` par dossier). Les passages suivants sont quasi instantanés grâce au cache.
 
 ### Utilisation
 
@@ -508,6 +517,7 @@ Règle transversale : **tout dépend d'abord de l'extension minuscule** (sinon m
 - OK : **panneau « Journal des passages »** — dernière exécution par frontière de démarrage (fiable après reboot), sélecteur de date, résumé succès/échec ; validé (la collision du 1er juillet y est visible)
 - OK : **internationalisation FR/EN complète** — GUI, moteur, démons, descriptions systemd ; sélecteur « 🌍 Language… », catalogue gettext (766 messages), tag stable et marqueurs multilingues pour les détections ; validée en prod sur les deux langues
 - OK : **détection à taille égale** — un fichier modifié sans changement de taille est comparé par SHA1 dès que sa date change, en passage planifié comme en temps réel ; un fichier réécrit à l'identique n'est pas renvoyé ; validé en production par le temps réel
+- OK : **vérifications d'existence allégées** — un dossier distant déjà connu n'est plus revérifié niveau par niveau ; un passage qui réexamine tout coûte environ un appel par dossier ; validé en production
 - À FAIRE (optionnel) : décider d'activer ou non `--delete` dans la planification (voir Option A / Option B ci-dessous)
 - À FAIRE (optionnel) : vérification `--verify-hash` périodique à planifier (équivalent /IS mensuel)
 - À FAIRE (optionnel) : nettoyer les `.caltrash` déjà uploadés avant l'ajout des exclusions

@@ -338,7 +338,16 @@ The cache is saved to disk **after each processed mapping entry** (not only at t
 
 ### Automatic folder creation
 
-`ensure_remote_path()` walks the remote path segment by segment and creates each missing folder via `filesystem create-folder`. Recursive: each newly discovered local subfolder triggers the same check on the remote side. No manual pre-creation required.
+`ensure_remote_path()` creates each missing folder of the remote path via `filesystem create-folder`. No manual pre-creation required.
+
+The engine does not ask Proton again for what it already knows, each CLI call costing several seconds:
+
+- a subfolder that its parent's listing has just shown is listed directly;
+- a subfolder that is not in it is created directly, without first asking whether it exists;
+- what has been checked once is not checked again during the pass;
+- when the parent was not listed — a real-time pass, or a parent skipped by the cache — a folder already synced to that destination is listed directly as well.
+
+If that direct listing fails, the engine falls back to the level-by-level check, which recreates what is missing: a folder deleted on Proton is restored at the first pass that touches it. A pass that re-examines everything (`--verify-hash`, `--ignore-cache`, first priming) thus costs about one call per folder.
 
 ### Deletion propagation (`--delete`) — optional true mirror
 
@@ -425,7 +434,7 @@ The engine forces immediate output flushing (`line_buffering`), so with `| tee f
 
 - The CLI has a fixed cost per invocation (~1-8 s, mostly network/authentication latency).
 - The engine **batches uploads** into a single call per folder (`upload f1 f2 f3 ... destParent`) to amortize that fixed cost.
-- The first full pass on a virgin tree takes time (uploads + one `list` per folder). Subsequent passes are near-instant thanks to the cache.
+- The first full pass on a virgin tree takes time (uploads + one creation and one `list` per folder). Subsequent passes are near-instant thanks to the cache.
 
 ### Usage
 
@@ -503,6 +512,7 @@ Cross-cutting rule: **everything depends first on a lowercase extension** (other
 - OK: **"Run history" panel** — last run isolated by start boundary (reliable after a reboot), date picker, success/failure summary; validated (the July 1st collision is visible there)
 - OK: **complete FR/EN internationalization** — GUI, engine, daemons, systemd descriptions; "🌍 Language…" selector, gettext catalog (766 messages), stable tag and multilingual markers for detections; validated in production in both languages
 - OK: **equal-size detection** — a file modified without a size change is compared by SHA1 as soon as its date changes, in scheduled passes and in real time alike; a file rewritten with identical content is not sent again; validated in production through real time
+- OK: **lighter existence checks** — a remote folder already known is no longer re-checked level by level; a pass that re-examines everything costs about one call per folder; validated in production
 - TO DO (optional): decide whether to enable `--delete` in the schedule (see Option A / Option B below)
 - TO DO (optional): schedule a periodic `--verify-hash` check (monthly /IS equivalent)
 - TO DO (optional): clean up `.caltrash` files uploaded before the exclusions were added
