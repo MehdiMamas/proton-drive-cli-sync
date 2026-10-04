@@ -30,6 +30,8 @@ except ImportError:
     def _(s):
         return s
 
+import unitexec  # guillemets/échappement systemd (phase 6)
+
 # Réglages d'installation (chemin CLI...) : une SEULE source de vérité
 # partagée par le moteur, le GUI et les démons. Import tolérant.
 try:
@@ -68,8 +70,16 @@ def _run(args):
 def build_service_text(mappings_path, delete=False):
     """Génère le contenu du fichier .service pointant vers le fichier de mappings
     donné. Si delete=True, ajoute --delete à l'ExecStart (Option B)."""
-    exec_line = (f"ExecStart=/usr/bin/python3 {DEFAULT_ENGINE} {mappings_path}"
-                 + (" --delete" if delete else ""))
+    # unitexec : chemins entre guillemets si besoin, lanceur stable si paquet.
+    exec_line = unitexec.exec_line(DEFAULT_ENGINE, [mappings_path]
+                                   + (["--delete"] if delete else []),
+                                   app_dir=APP_DIR)
+    cli_value = appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI
+    if unitexec.is_packaged(APP_DIR) and cli_value == DEFAULT_CLI:
+        env_line = ""  # rien d'installe sous /usr/lib : proton-drive via PATH
+    else:
+        env_line = "Environment=" + unitexec.quote_environment(
+            "PROTON_DRIVE_CLI", cli_value) + "\n"
     desc_service = _("Proton Drive sync (NAS -> Proton, one-way)")
     return f"""[Unit]
 Description={desc_service}
@@ -84,8 +94,7 @@ StartLimitBurst=6
 [Service]
 # Type=exec (et non oneshot) : nécessaire pour que Restart= fonctionne.
 Type=exec
-Environment=PROTON_DRIVE_CLI={appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI}
-{exec_line}
+{env_line}{exec_line}
 
 # Deux codes de sortie du moteur sont des NON-échecs du point de vue systemd,
 # déclarés ici pour éviter à la fois le marquage "failed" ET une relance inutile :
@@ -157,9 +166,10 @@ def read_service_mappings_path():
             content = f.read()
     except OSError:
         return None
-    m = re.search(r"^ExecStart=.*proton_sync\.py\s+(\S+)", content, re.MULTILINE)
+    m = re.search(r"^ExecStart=(.*)$", content, re.MULTILINE)
     if m:
-        return m.group(1)
+        return unitexec.mappings_arg_from_exec(
+            m.group(1), "proton_sync.py", "proton-drive-sync")
     return None
 
 
@@ -172,8 +182,8 @@ def read_service_delete():
             content = f.read()
     except OSError:
         return False
-    m = re.search(r"^ExecStart=.*$", content, re.MULTILINE)
-    return bool(m and "--delete" in m.group(0))
+    m = re.search(r"^ExecStart=(.*)$", content, re.MULTILINE)
+    return bool(m and "--delete" in unitexec.split_exec(m.group(1)))
 
 
 def read_timer_calendar():

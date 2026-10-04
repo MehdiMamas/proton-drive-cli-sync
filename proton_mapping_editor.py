@@ -485,7 +485,13 @@ def cli_path():
         return appconfig.resolve_proton_cli()
     return os.path.join(APP_DIR, "proton-drive")
 DEFAULT_ENGINE = os.path.join(APP_DIR, "proton_sync.py")
-DEFAULT_LOG_DIR = os.path.join(APP_DIR, "logs")
+
+
+def run_log_dir():
+    """Directory for GUI run logs. A packaged APP_DIR is not writable."""
+    if _HAS_CONFIG:
+        return appconfig.RUN_LOG_DIR
+    return os.path.expanduser("~/.proton-drive-sync/logs")
 
 
 # ============================================================
@@ -517,10 +523,23 @@ def _zenity_run(args):
     return out or None
 
 
+def _dialog_dir(initialdir):
+    """Folder a file dialog opens in. A read-only APP_DIR (packaged install)
+    is not a usable default, so those dialogs start in the home directory."""
+    start = initialdir or APP_DIR
+    try:
+        same = os.path.realpath(start) == os.path.realpath(APP_DIR)
+    except (OSError, ValueError):
+        same = os.path.normpath(start) == os.path.normpath(APP_DIR)
+    if same and not os.access(APP_DIR, os.W_OK):
+        return os.path.expanduser("~")
+    return start
+
+
 def pick_open_file(parent=None, title=_("Open a mappings file"),
                    initialdir=None, json_only=True):
     """Sélecteur d'ouverture de fichier. zenity si dispo, sinon Tk."""
-    initialdir = initialdir or APP_DIR
+    initialdir = _dialog_dir(initialdir)
     if _ZENITY:
         args = ["--file-selection", "--title", title,
                 # --filename définit le dossier de départ (slash final = dossier)
@@ -539,7 +558,7 @@ def pick_open_file(parent=None, title=_("Open a mappings file"),
 def pick_save_file(parent=None, title=_("Save the mappings file"),
                    initialdir=None, initialfile="mappings.json"):
     """Sélecteur d'enregistrement. zenity si dispo, sinon Tk."""
-    initialdir = initialdir or APP_DIR
+    initialdir = _dialog_dir(initialdir)
     if _ZENITY:
         start = os.path.join(initialdir, initialfile)
         args = ["--file-selection", "--save", "--confirm-overwrite",
@@ -576,7 +595,7 @@ def pick_move_target(parent=None, title=None, initialdir=None):
     pas, on lui ajoute une entrée — le message « le fichier existe, remplacer ? »
     du sélecteur d'enregistrement serait trompeur ici. zenity si dispo, sinon Tk."""
     title = title or _("Move to which mappings file?")
-    initialdir = initialdir or APP_DIR
+    initialdir = _dialog_dir(initialdir)
     if _ZENITY:
         start = os.path.join(initialdir, "mappings.json")
         args = ["--file-selection", "--save",   # --save autorise un nom nouveau…
@@ -4445,7 +4464,7 @@ class MappingEditor(tk.Tk):
 
     def _log_path(self):
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-        return os.path.join(DEFAULT_LOG_DIR, f"sync-{ts}.log")
+        return os.path.join(run_log_dir(), f"sync-{ts}.log")
 
     def _build_shell_command(self, only_sources=None):
         """Reconstruit une commande shell équivalente, copiable dans un terminal.
@@ -4743,7 +4762,7 @@ class MappingEditor(tk.Tk):
                 self.status.set(_("Launch cancelled."))
                 return
 
-        os.makedirs(DEFAULT_LOG_DIR, exist_ok=True)
+        os.makedirs(run_log_dir(), exist_ok=True)
         log_path = self._log_path()
         self._current_log_path = log_path
         engine_args = self._build_engine_args(only_sources)
@@ -5219,7 +5238,7 @@ class MappingEditor(tk.Tk):
                         pass
 
             # 3) Exécuter le moteur (commande déjà construite par l'appelant).
-            os.makedirs(DEFAULT_LOG_DIR, exist_ok=True)
+            os.makedirs(run_log_dir(), exist_ok=True)
             log_path = self._log_path()
             self._current_log_path = log_path
             env = dict(os.environ)

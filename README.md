@@ -1,3 +1,32 @@
+# Proton Drive Sync - community fork (Linux, one-way backup)
+
+This is a community fork of [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync). The original idea, the engine and the GUI are the work of its author (CapitaineFlamQuebec / lafontaj); this fork adds change-detection fixes, honest exit codes, deletion safety, tests and Arch packaging. Please credit and support the upstream project.
+
+**One-way model.** Files go from your machine **to** Proton Drive and never the other way. Nothing is downloaded or reconciled. The tool drives Proton's official `proton-drive` command-line client; it does not implement the Drive protocol and never handles your Proton password. Deletion is off unless you turn it on, and the Proton side only ever receives a move to the trash.
+
+> **Disclaimer.** Community software, not affiliated with or endorsed by Proton AG. Use at your own risk. Test with a throwaway folder first. Keep independent backups.
+
+## Install
+
+Arch Linux (AUR-style `-git` package, built from this repository):
+
+```bash
+git clone https://github.com/MehdiMamas/proton-drive-cli-sync.git
+cd proton-drive-cli-sync/packaging/arch
+makepkg -si
+```
+
+Manual: install `python3`, `tk` and `python-pyinotify`, install Proton's [official CLI](https://proton.me/download/drive/cli/index.html) and sign in, then run `python3 proton_mapping_editor.py` from a checkout.
+
+## Quick start
+
+1. `proton-drive-sync-gui`, add a mapping for a **test folder**, run a dry-run, then a real run.
+2. Schedule the nightly run from the GUI (Schedule). That window writes the service and the timer. `systemctl --user enable --now proton-sync.timer` only re-enables a timer that has already been written.
+3. If something looks wrong: `proton-drive-sync-doctor --redact` and attach the output to an issue.
+
+More: [CHANGELOG.md](CHANGELOG.md), [docs/change-detection.md](docs/change-detection.md), [SECURITY.md](SECURITY.md).
+
+---
 🇬🇧 English | 🇫🇷 [Français](README_fr.md)
 
 # Proton Drive sync via the official CLI (Linux)
@@ -780,7 +809,7 @@ Changes apply at the **next launch** of the GUI and the **next restart** of the 
 
 **Unified data folder.** The cache, the real-time queue and the logs now live under a single parent: `~/.proton-drive-sync/` (`cache/`, `queue/`, `realtime.conf`, `failures.log`, `renamed-extensions.log`, `proton_sync.lock`). On the first run after the update, an **automatic migration** renames the legacy locations (`~/.proton_sync_cache`, `~/.proton_sync`, `~/.proton_sync.lock`) into the new tree — a **rename** within the same filesystem: instantaneous, content untouched, **no cache re-scan**. Idempotent (several processes may start at the same time) and resilient (on failure, the legacy paths keep being used for the current run).
 
-**Path hygiene.** The locations of the scripts themselves (engine, watchers, run logs) are **not** settings: each file derives them from its own location (`__file__`, as `i18n.py` always did). Installing the whole folder elsewhere (`/opt/…`, another home) works without configuring anything.
+**Path hygiene.** The locations of the scripts themselves (engine, watchers) are **not** settings: each file derives them from its own location (`__file__`, as `i18n.py` always did). Installing the whole folder elsewhere (`/opt/…`, another home) works without configuring anything. GUI run logs are under `~/.proton-drive-sync/logs/`.
 
 **Status icon in the system tray** (`tray_indicator.py`). A circular double arrow near the clock: **purple** = daemons running + Proton session valid; **purple with an amber "!" badge** = daemons running but NAS scripts are pending deployment (see "NAS script drift alert" below); **grey with a red X** = daemons running but either the session is expired/keyring locked, or some folders are not being backed up (see "Folders that cannot be read"); **grey** = daemons stopped. (Priority: stopped > session expired > folders not backed up > scripts pending > running.) The last two share the red-X motif on purpose — a fifth drawing would have diluted the signal without telling anyone more; the **tooltip lists every condition that is currently true**, not only the one that won the priority chain, and names the folders concerned. Only conditions whose cause can be named are reported: an unreadable folder, or a mapping root that no full pass has ever analyzed (reported after two hours, so that a newly added mapping awaiting its scheduled pass raises nothing). Left click = open the editor; right click = menu. Enabled through the "System tray" checkbox in ⚙ Configuration… (immediate start + session autostart via `~/.config/autostart/`; on disable, the applet shuts itself down). Technically: XApp.StatusIcon (libxapp — native on Cinnamon/MATE/Xfce; packages `python3-gi` + `gir1.2-xapp-1.0`, preinstalled on Mint). The applet **never** contacts Proton: it only reads the `status.json` heartbeat the consumer rewrites every cycle in `~/.proton-drive-sync/` — zero extra probes, zero keyring contention. Accepted nuance: the consumer's auth probe only happens when there is work to do; when idle, the icon reflects the last known state.
 
@@ -807,6 +836,8 @@ The project's main files:
 - `proton_sync.py` — batch engine (cache, checkpoints, lock, live log, exclusions, deletions, glob fix, `--subpath`)
 - `mount_check.py` — **mount safety-guard module, MANDATORY next to `proton_sync.py`** for deletions to work (nfs/local detection, blocking when the NAS is down)
 - `schedule_manager.py` — GUI backend for the nightly timer (generation/installation of the `--user` systemd units)
+- `unitexec.py` — quoting and parsing of systemd unit lines; **required next to** `schedule_manager.py` and `realtime_manager.py`
+- `doctor.py` — read-only diagnostic report (`proton-drive-sync-doctor`)
 - `local_watcher.py` — inotify watcher for local sources (local machine)
 - `nas_watcher.py` — inotify watcher for NAS sources (**runs on the NAS**)
 - `realtime_consumer.py` — real-time consumer (markers, debounce, targeted engine launch)

@@ -1,0 +1,82 @@
+# Maintainer: community fork contributors (see the repository)
+# Community fork of lafontaj/proton-drive-cli-sync. Not affiliated with Proton AG.
+pkgname=proton-drive-cli-sync-git
+_reponame=proton-drive-cli-sync
+pkgver=2.0.0
+pkgrel=1
+pkgdesc="One-way local to Proton Drive backup built on Proton's official CLI (community fork)"
+arch=('any')
+url="https://github.com/MehdiMamas/proton-drive-cli-sync"
+license=('MIT')
+depends=('python' 'tk' 'python-pyinotify')
+makedepends=('git')
+checkdepends=('python-pytest')
+optdepends=('python-gobject: tray icon'
+            'xapp: tray icon'
+            'libsecret: Secret Service for the CLI credential store'
+            'gnome-keyring: Secret Service for the CLI credential store'
+            'pass: password-store credential store for the CLI'
+            'proton-drive-cli-bin: Proton official CLI (or download it from https://proton.me/download/drive/cli/index.html)')
+provides=('proton-drive-cli-sync')
+conflicts=('proton-drive-cli-sync' 'proton-drive-sync-bin')
+install=proton-drive-cli-sync-git.install
+source=("git+https://github.com/MehdiMamas/${_reponame}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${srcdir}/${_reponame}"
+  if git describe --long --tags >/dev/null 2>&1; then
+    git describe --long --tags | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  fi
+}
+
+check() {
+  cd "${srcdir}/${_reponame}"
+  # No network, no display, no writes outside a temporary HOME (tests/conftest.py).
+  PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider tests
+}
+
+package() {
+  cd "${srcdir}/${_reponame}"
+  local _lib="${pkgdir}/usr/lib/${_reponame}"
+
+  # Program files: nothing writable lives here.
+  local _py
+  for _py in proton_sync.py config.py paths.py i18n.py mapping_keys.py \
+             mount_check.py unitexec.py doctor.py \
+             local_watcher.py realtime_consumer.py realtime_manager.py \
+             schedule_manager.py proton_mapping_editor.py tray_indicator.py \
+             nas_watcher.py nas_selftest.py nas_selftest_watcher.py; do
+    install -Dm644 "${_py}" "${_lib}/${_py}"
+  done
+  install -Dm644 VERSION "${_lib}/VERSION"
+  local _png
+  for _png in icone.png tray_connected.png tray_expired.png tray_scripts.png tray_stopped.png; do
+    install -Dm644 "${_png}" "${_lib}/${_png}"
+  done
+  local _mo
+  for _mo in locale/*/LC_MESSAGES/proton-sync.mo; do
+    install -Dm644 "${_mo}" "${_lib}/${_mo}"
+  done
+
+  # Stable launchers.
+  install -Dm755 packaging/arch/launchers/proton-drive-sync "${pkgdir}/usr/bin/proton-drive-sync"
+  install -Dm755 packaging/arch/launchers/proton-drive-sync-gui "${pkgdir}/usr/bin/proton-drive-sync-gui"
+  install -Dm755 packaging/arch/launchers/proton-drive-sync-doctor "${pkgdir}/usr/bin/proton-drive-sync-doctor"
+
+  # Desktop entry and icon.
+  install -Dm644 packaging/arch/proton-drive-sync.desktop \
+    "${pkgdir}/usr/share/applications/proton-drive-sync.desktop"
+  install -Dm644 icone.png \
+    "${pkgdir}/usr/share/icons/hicolor/128x128/apps/proton-drive-sync.png"
+
+  # License and docs.
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  local _doc
+  for _doc in README.md CHANGELOG.md SECURITY.md mappings.example.json settings.example.json; do
+    install -Dm644 "${_doc}" "${pkgdir}/usr/share/doc/${pkgname}/${_doc}"
+  done
+  install -Dm644 docs/change-detection.md "${pkgdir}/usr/share/doc/${pkgname}/change-detection.md"
+}
