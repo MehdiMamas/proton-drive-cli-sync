@@ -3,17 +3,20 @@
 Moteur de synchro Proton Drive (NAS -> Proton, à sens unique).
 
 Lit un fichier JSON de mappings (voir proton_mapping_editor.py) et, pour
-chaque entrée, n'envoie que les fichiers nouveaux ou modifiés — en
-s'appuyant sur la taille (et la date de modification si disponible)
-plutôt que de tout réenvoyer comme le ferait `upload --conflict-strategy
-replace` seul.
+chaque entrée, n'envoie que les fichiers nouveaux ou modifiés plutôt que
+de tout réenvoyer comme le ferait `upload --conflict-strategy replace`
+seul. Une taille différente suffit à décider l'envoi. À taille ÉGALE, le
+moteur ne conclut pas : si la taille et la date du fichier sont celles du
+dernier passage réussi, il est inchangé ; sinon son SHA1 est comparé à
+celui de Drive ; faute de SHA1 distant, ce sont les dates qui tranchent ;
+et faute de toute preuve, le fichier est renvoyé.
 
 Cache local : pour éviter un appel `filesystem list` côté Proton sur
 chaque sous-dossier à chaque passage (très coûteux sur une arborescence
 profonde), un cache JSON local stocke une empreinte de chaque dossier
 synchronisé avec succès. Au passage suivant, si l'empreinte locale n'a
 pas changé, on saute l'appel CLI. Le cache vit dans
-~/.proton_sync_cache/<nom_du_mapping>.cache et n'est qu'un raccourci :
+~/.proton-drive-sync/cache/<nom_du_mapping>.cache et n'est qu'un raccourci :
 le supprimer force un passage complet (équivalent à --ignore-cache).
 
 Usage :
@@ -26,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (par défaut : ~/Logiciels/Proton-drive/proton-drive)
 """
-__version__ = "1.9.3"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.10.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -371,6 +374,52 @@ class Cache:
         # Ancien format : la valeur EST la signature ; jamais réconcilié pour delete.
         return raw, False
 
+    def file_baseline(self, local_dir, remote_folder, excl_fp):
+        """Ce qu'on savait de chaque fichier direct de ce dossier au DERNIER
+        PASSAGE RÉUSSI : {nom: (taille, date)}. None si l'on n'en sait rien de
+        fiable.
+
+        C'est la preuve la moins chère qu'un fichier n'a pas bougé : s'il a
+        encore la taille ET la date qu'il avait quand le dossier a été
+        synchronisé sans échec, il est sur Drive tel quel et il n'y a rien à
+        lire. Ces valeurs sont déjà dans l'empreinte du dossier — le format du
+        cache ne change pas.
+
+        La note n'est crue que si elle décrit LA MÊME situation qu'aujourd'hui :
+
+          - même dossier distant. Si la destination du mapping a changé, la
+            note parle d'un autre endroit de Drive : elle ne dit rien des
+            fichiers qui se trouvent à la nouvelle destination.
+
+          - mêmes exclusions. L'empreinte recense TOUS les fichiers directs, y
+            compris ceux qui étaient exclus à ce moment-là. Un fichier modifié
+            pendant son exclusion porterait donc, dans la note, sa nouvelle
+            date — alors qu'il n'a jamais été envoyé. Le jour où l'exclusion
+            est retirée, il paraîtrait inchangé. Quand les exclusions ont
+            changé, on ne se fie pas à la note : le contenu tranchera.
+
+        Une entrée à l'ancien format (la signature sans enveloppe) est traitée
+        comme sans note : elle date d'avant ces garanties. Elle sera réécrite
+        au format courant dès que le dossier aura été synchronisé."""
+        raw = self.data.get(local_dir)
+        if not isinstance(raw, dict) or not isinstance(raw.get("sig"), dict):
+            return None
+        sig = raw["sig"]
+        if sig.get("remote_folder") != remote_folder or sig.get("excl") != excl_fp:
+            return None
+        files = sig.get("files")
+        if not isinstance(files, list):
+            return None
+        baseline = {}
+        for item in files:
+            try:
+                name, size, mtime = item[0], int(item[1]), float(item[2])
+            except (TypeError, ValueError, IndexError):
+                continue        # ligne illisible : ce fichier-là n'a pas de note
+            if isinstance(name, str) and name:
+                baseline[name] = (size, mtime)
+        return baseline
+
     def is_fresh(self, local_dir, current_signature):
         """True si l'empreinte locale correspond à celle en cache (côté upload)."""
         cached_sig, _ds = self._entry(self.data.get(local_dir))
@@ -657,26 +706,71 @@ def _local_signature(local_dir, remote_folder, excl_fp=None):
 # totalStorageSize = taille CHIFFRÉE stockée (overhead de chiffrement, ne correspond
 # jamais exactement à la taille locale) -> ne pas utiliser pour comparer.
 # activeRevision.value.claimedSize = vraie taille du fichier original -> à utiliser.
-# activeRevision.value.claimedDigests.sha1 = hash du contenu original -> vérif optionnelle.
+# activeRevision.value.claimedDigests.sha1 = hash du contenu original -> comparé
+#   au SHA1 local quand la taille ne suffit pas à conclure (cf. upload_decision).
+# activeRevision.value.claimedModificationTime = date de modification que le
+#   fichier avait SUR LE DISQUE au moment de l'envoi, tronquée à la milliseconde.
+#   Mesuré en production : 18:49:50,850506 en local, « …T22:49:50.850Z » sur
+#   Drive. C'est une chaîne ISO-8601 en temps universel.
+# modificationTime (premier niveau) = horloge du SERVEUR à la réception. Elle ne
+#   dit rien du fichier : ne jamais s'en servir pour décider d'un envoi.
 REMOTE_NAME_KEYS = ("name",)
+
+# Écart toléré entre la date locale et la date déclarée sur Drive (secondes).
+# L'écart réel mesuré est d'un millième de seconde (troncature). Deux secondes
+# couvrent un client qui aurait arrondi à la seconde, ou un système de fichiers
+# à granularité grossière, sans ouvrir la porte à une vraie modification.
+_MTIME_TOLERANCE_SECONDS = 2.0
+
+
+def _remote_mtime_seconds(value):
+    """Convertit la date déclarée sur Drive en secondes POSIX, ou None si elle
+    est absente ou illisible. None veut dire « pas de date à comparer » — jamais
+    « date égale »."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        # Le CLI n'émet pas de nombre ici ; accepté par prudence. Au-delà de
+        # 1e11, ce sont des millisecondes (1e11 s nous mènerait en l'an 5138).
+        number = float(value)
+        if number != number or number in (float("inf"), float("-inf")):
+            return None
+        return number / 1000.0 if abs(number) >= 1e11 else number
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text[-1] in "Zz":
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.timestamp()
 
 
 def _extract_remote_meta(item):
-    """Extrait (size, mtime, sha1) en privilégiant les champs 'claimed*' (fichier
-    original), avec repli sur les champs de premier niveau si activeRevision est
-    absent (ex. ancienne version du CLI, ou structure différente)."""
+    """Extrait (size, mtime, sha1) du fichier ORIGINAL, tels que le client les a
+    déclarés à l'envoi. `mtime` est en secondes POSIX, ou None.
+
+    La taille se rabat sur le champ de premier niveau si activeRevision est
+    absent (ancienne version du CLI, structure différente). La date, elle, ne
+    se rabat sur rien : le seul autre champ disponible est l'horloge du
+    serveur, qui n'a aucun rapport avec le fichier."""
     size = item.get("totalStorageSize")
-    mtime = item.get("modificationTime")
+    mtime = None
     sha1 = None
     active_rev = _unwrap(item.get("activeRevision"))
     if isinstance(active_rev, dict):
         if active_rev.get("claimedSize") is not None:
             size = active_rev.get("claimedSize")
-        if active_rev.get("claimedModificationTime") is not None:
-            mtime = active_rev.get("claimedModificationTime")
+        mtime = _remote_mtime_seconds(active_rev.get("claimedModificationTime"))
         digests = active_rev.get("claimedDigests")
         if isinstance(digests, dict):
-            sha1 = digests.get("sha1")
+            sha1 = digests.get("sha1") or None
     return size, mtime, sha1
 
 
@@ -1313,29 +1407,123 @@ def _local_sha1(path, chunk_size=1024 * 1024):
     return h.hexdigest()
 
 
-def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
+def upload_decision(local_path, remote_info, baseline=None, verify_hash=False):
+    """Faut-il envoyer ce fichier ? Retourne (envoyer, motif).
+
+    Une taille différente suffit à décider. À TAILLE ÉGALE, la taille ne prouve
+    rien : une base de données réécrit dans l'espace qu'elle a déjà réservé, un
+    fichier de réglages remplace une valeur par une autre de même longueur.
+    S'arrêter là laissait sur Drive une copie périmée, et le dossier — traité
+    sans échec — était inscrit au cache comme synchronisé : l'oubli devenait
+    définitif. Mesuré en production : cinq fichiers sur 704, dont une base
+    périmée de huit jours, dans un dossier pourtant traité la veille.
+
+    D'où cet ordre, du moins coûteux au plus sûr :
+
+      1. `baseline` — la note du dernier passage réussi (Cache.file_baseline).
+         Même taille ET même date qu'alors : inchangé, RIEN n'est lu. C'est ce
+         qui garde les passages rapides : dans un dossier où un seul fichier a
+         bougé, les autres ne coûtent rien.
+
+      2. Le SHA1. La date a changé, ou l'on n'a pas de note : on lit le fichier
+         et on compare son empreinte à celle de Drive. Elle seule distingue une
+         vraie modification d'un fichier réécrit à l'identique (constaté aussi :
+         la date change, le contenu non — l'envoyer serait du gaspillage).
+         Mesuré : 110 Mio/s depuis le NAS, soit bien moins que l'envoi qu'on
+         évite ou qu'on décide.
+
+      3. La date déclarée, quand Drive n'a pas de SHA1 pour ce fichier. Égale à
+         la date locale : inchangé.
+
+      4. Rien pour trancher : on envoie. Renvoyer un fichier intact coûte un
+         transfert ; ne pas renvoyer un fichier modifié coûte une sauvegarde.
+
+    `verify_hash` (--verify-hash) saute l'étape 1 : la note n'est pas crue, le
+    contenu est comparé pour TOUS les fichiers de même taille. C'est le seul
+    moyen d'attraper une modification qui aurait conservé la taille ET la date.
+
+    `baseline` vaut None quand il n'y a pas de note fiable : --ignore-cache,
+    premier passage, mapping d'un fichier unique, reprise après un lot en échec.
+
+    Le motif est un code interne, jamais affiché tel quel (cf. _report_decision).
+    """
     if remote_info is None:
-        return True
+        return True, "absent"
     try:
-        local_size = os.path.getsize(local_path)
+        st = os.stat(local_path)
     except OSError:
-        return True
+        return True, "local-unreadable"   # l'envoi rapportera la vraie erreur
     remote_size = remote_info.get("size")
-    if remote_size is None:
-        # Champ taille introuvable dans la réponse -> comparaison impossible,
+    try:
+        remote_size = int(remote_size)
+    except (TypeError, ValueError):
+        # Champ taille introuvable ou inexploitable -> comparaison impossible,
         # on choisit de réenvoyer plutôt que de risquer de manquer un changement.
-        if verbose:
-            print(_("    (remote size unknown for {f}, re-sending to be safe)").format(f=os.path.basename(local_path)))
-        return True
-    if int(remote_size) != local_size:
-        return True
-    if verify_hash and remote_info.get("sha1"):
-        local_hash = _local_sha1(local_path)
-        if local_hash != remote_info["sha1"]:
-            if verbose:
-                print(_("    (same size but different content: {f})").format(f=os.path.basename(local_path)))
-            return True
-    return False
+        return True, "remote-size-unknown"
+    if remote_size != st.st_size:
+        return True, "size-differs"
+
+    # ── À partir d'ici : même taille des deux côtés ──────────────────────────
+    remote_sha1 = remote_info.get("sha1")
+    if not (isinstance(remote_sha1, str) and remote_sha1):
+        remote_sha1 = None
+
+    if not verify_hash and isinstance(baseline, dict):
+        known = baseline.get(os.path.basename(local_path))
+        if known is not None and known == (st.st_size, st.st_mtime):
+            return False, "unchanged-since-last-pass"
+
+    if remote_sha1:
+        try:
+            local_sha1 = _local_sha1(local_path)
+        except OSError:
+            return True, "local-unreadable"
+        if local_sha1.lower() != remote_sha1.lower():
+            return True, "content-differs"
+        return False, "content-identical"
+
+    remote_mtime = _remote_mtime_seconds(remote_info.get("mtime"))
+    if (remote_mtime is not None
+            and abs(remote_mtime - st.st_mtime) <= _MTIME_TOLERANCE_SECONDS):
+        return False, "date-identical"
+    return True, "unverifiable"
+
+
+def _report_decision(local_path, reason, verbose):
+    """Dit, en mode détaillé, pourquoi un fichier de même taille part ou reste.
+
+    Les décisions banales (absent de Drive, taille différente, inchangé depuis
+    le dernier passage) n'ont pas de ligne à elles : l'envoi ou le « inchangé »
+    qui suit les dit déjà. On ne parle que quand un contenu a été LU, ou quand
+    on envoie par prudence — ce sont les deux cas qu'on voudra retrouver dans
+    un journal pour comprendre une durée ou un envoi inattendu."""
+    if not verbose:
+        return
+    name = os.path.basename(local_path)
+    if reason == "remote-size-unknown":
+        print(_("    (remote size unknown for {f}, re-sending to be safe)").format(f=name))
+    elif reason == "content-differs":
+        print(_("    (same size but different content: {f})").format(f=name))
+    elif reason == "content-identical":
+        print(_("    (same size, content checked by SHA1 — identical: {f})").format(f=name))
+    elif reason == "unverifiable":
+        print(_("    (same size and nothing to compare the content with, "
+                "re-sending to be safe: {f})").format(f=name))
+
+
+def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
+    """Décision SANS note du dernier passage : à taille égale, c'est le contenu
+    (ou, faute de SHA1 distant, la date) qui tranche.
+
+    Sert aux appelants qui n'ont pas de note fiable : le mapping d'un fichier
+    unique, et la reprise après un lot en échec — où l'on se demande justement
+    si le fichier qu'on voit sur Drive est bien celui qu'on vient d'envoyer, et
+    non l'ancien de même taille. sync_folder, lui, passe par upload_decision
+    avec la note du cache."""
+    send, reason = upload_decision(local_path, remote_info, baseline=None,
+                                   verify_hash=verify_hash)
+    _report_decision(local_path, reason, verbose)
+    return send
 
 
 def _glob_escape_local_path(path):
@@ -1518,8 +1706,11 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
     if verbose and res.stdout.strip():
         print("      " + res.stdout.strip().replace("\n", "\n      "))
 
-    # Relire le distant : ce qui est déjà présent (bonne taille) a réussi dans le
-    # lot -> inutile de le renvoyer. On ne ré-essaie QUE ce qui manque encore.
+    # Relire le distant : ce qui y est déjà, AVEC LE BON CONTENU, a réussi dans
+    # le lot -> inutile de le renvoyer. On ne ré-essaie QUE ce qui manque encore.
+    # La taille seule ne le prouve pas : l'ancien fichier de même taille serait
+    # pris pour le remplacement réussi, et le dossier mis au cache sur cette foi.
+    # needs_upload compare donc le SHA1 (ou la date, faute de SHA1 distant).
     remote_after = get_remote_listing(remote_parent, verbose=False)
     if not remote_after.ok:
         # Sans relecture fiable, tout paraîtrait manquant et on renverrait un par
@@ -2029,6 +2220,23 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
     to_upload = []
     had_failure = False
     all_children_complete = True
+    # La note du dernier passage réussi, pour ne pas relire les fichiers qui
+    # n'ont pas bougé. --ignore-cache veut dire « ne te fie à rien de ce que tu
+    # as noté » : pas de note, c'est le contenu qui tranchera.
+    #
+    # Les exclusions comparées ici sont celles d'AUJOURD'HUI, même en temps réel
+    # — alors que `excl_fp`, plus haut, y reprend volontairement l'empreinte déjà
+    # en cache pour ne pas déclencher de réconciliation des suppressions. Les
+    # deux besoins diffèrent : là-bas on veut éviter un travail lourd, ici on
+    # refuse de croire une note prise sous d'autres exclusions. Tant qu'un
+    # passage complet n'a pas réinscrit le dossier sous les exclusions
+    # courantes, le temps réel compare donc le contenu au lieu de se fier à la
+    # note : plus lent pour ce dossier, jamais faux.
+    baseline = None
+    if cache is not None and not ignore_cache:
+        baseline = cache.file_baseline(
+            local_dir, remote_folder,
+            exclusions.fingerprint() if exclusions else None)
     for entry in entries:
         if exclusions and exclusions.is_excluded(entry.name):
             if verbose:
@@ -2047,7 +2255,10 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 all_children_complete = False
         elif entry.is_file():   # suit les liens : un lien vers un fichier EST un fichier
             info = remote_items.get(entry.name)
-            if needs_upload(entry.path, info, verbose=verbose, verify_hash=verify_hash):
+            send, reason = upload_decision(entry.path, info, baseline=baseline,
+                                           verify_hash=verify_hash)
+            _report_decision(entry.path, reason, verbose)
+            if send:
                 to_upload.append(entry.path)
             elif verbose:
                 print(_("    ⏭  unchanged: {p}").format(p=entry.path))
@@ -2404,14 +2615,19 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Affiche ce qui serait fait, sans rien transférer")
     parser.add_argument(
         "--verify-hash", action="store_true",
-        help="Vérifie aussi le contenu par SHA1 (plus lent, lit chaque fichier en entier). "
-             "Équivalent du /IS mensuel de robocopy — à utiliser occasionnellement, pas au quotidien. "
-             "Ignore aussi le cache local.",
+        help="Compare par SHA1 le contenu de TOUS les fichiers de même taille, sans se "
+             "fier au dernier passage réussi (lit chaque fichier en entier, ignore le "
+             "cache local). Sans cette option, seuls les fichiers dont la date a changé "
+             "sont comparés par SHA1. À lancer une fois après une mise à jour depuis une "
+             "version antérieure à la 1.10.0 du moteur, puis occasionnellement : c'est le "
+             "seul moyen de voir une modification qui conserve la taille ET la date.",
     )
     parser.add_argument(
         "--ignore-cache", action="store_true",
         help="Ignore le cache local pour ce passage (force la revérification complète "
-             "côté Proton). Le cache reste à jour à la fin si le passage réussit.",
+             "côté Proton). Sans la note du dernier passage, les fichiers de même taille "
+             "sont comparés par SHA1, donc lus en entier. Le cache reste à jour à la fin "
+             "si le passage réussit.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument(
@@ -2429,8 +2645,10 @@ def main():
         "--subpath", metavar="CHEMIN",
         help="Mode TEMPS RÉEL : synchronise uniquement ce sous-dossier (et son "
              "sous-arbre) au lieu de tous les mappings. Nécessite --mapping-source "
-             "pour identifier le mapping auquel ce sous-chemin appartient. Purement "
-             "additif (ne propage jamais les suppressions). Utilisé par le "
+             "pour identifier le mapping auquel ce sous-chemin appartient. Avec "
+             "--delete, propage les suppressions si le mapping les autorise "
+             "(allow_delete) et que le garde-fou de montage valide la source ; "
+             "sans --delete, n'envoie que des ajouts. Utilisé par le "
              "déclencheur inotify ; sans cette option, le moteur traite tous les "
              "mappings normalement.",
     )

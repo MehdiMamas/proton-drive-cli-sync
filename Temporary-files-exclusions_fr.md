@@ -228,7 +228,7 @@ de l'extension **de façon sensible à la casse**. Une extension majuscule
 apps Proton, **silencieusement**. Le moteur corrige ça à la source en
 **renommant** l'extension en minuscule (voir README, section « Robustesse
 d'upload, vignettes et détection MIME »), avec garde-fou anti-collision et journal
-`~/.proton_sync/renamed-extensions.log`. Désactivable par `--no-rename-ext`.
+`~/.proton-drive-sync/renamed-extensions.log`. Désactivable par `--no-rename-ext`.
 Cas connexe : TIFF/HEIC/AVIF échouent la génération de vignette (codec image) —
 le moteur re-téléverse alors automatiquement avec `--skip-thumbnails` (fichier
 sauvegardé, sans aperçu intégré Proton ; convertir en JPEG/PNG pour un aperçu).

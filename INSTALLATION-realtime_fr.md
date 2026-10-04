@@ -132,10 +132,10 @@ chaud, donc un nouveau push est pris en compte sans redémarrer le service.
 
 ## Rappel — réglages temps réel
 
-- **Délais** : `~/.proton_sync/realtime.conf` (JSON `debounce_seconds`,
+- **Délais** : `~/.proton-drive-sync/realtime.conf` (JSON `debounce_seconds`,
   `cycle_seconds`), écrit par le GUI, relu **à chaud** par le consommateur à
   chaque cycle. Pas de redémarrage nécessaire.
-- **Files** : marqueurs dans `~/.proton_sync/queue/` (locale) et
+- **Files** : marqueurs dans `~/.proton-drive-sync/queue/` (locale) et
   `/media/home_nas/proton-sync/queue/<user>/` (NAS via NFS). Le GUI les compte et
   peut les vider.
 - **Mode NAS** : le réglage « Utiliser un NAS » (Configuration) s'applique **à chaud** —
@@ -178,7 +178,7 @@ La surveillance est **distribuée** entre deux watchers, et leur répartition ti
 
 - Le **watcher de la machine locale** (`local_watcher.py`) surveille les sources locales
   (ext4) **et** les sources NAS montées en NFS (`/media/nas1…`). Tous ses
-  marqueurs vont dans la file **locale** (`~/.proton_sync/queue/`).
+  marqueurs vont dans la file **locale** (`~/.proton-drive-sync/queue/`).
 - Le **watcher du NAS** (`nas_watcher.py`) surveille le **disque local du NAS** et
   écrit dans la file **NAS** (`/home/nasuser/proton-sync/queue/<user>/`, vue côté
   la machine locale comme `/media/home_nas/proton-sync/queue/<user>/`).

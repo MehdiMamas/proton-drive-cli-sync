@@ -131,10 +131,10 @@ new push is picked up without restarting the service.
 
 ## Reminder — real-time settings
 
-- **Delays**: `~/.proton_sync/realtime.conf` (JSON `debounce_seconds`,
+- **Delays**: `~/.proton-drive-sync/realtime.conf` (JSON `debounce_seconds`,
   `cycle_seconds`), written by the GUI, re-read **live** by the consumer on every
   cycle. No restart needed.
-- **Queues**: markers in `~/.proton_sync/queue/` (local) and
+- **Queues**: markers in `~/.proton-drive-sync/queue/` (local) and
   `/media/home_nas/proton-sync/queue/<user>/` (NAS over NFS). The GUI counts them
   and can clear them.
 - **NAS mode**: the "Use a NAS" setting (Configuration) applies **live** — switching
@@ -175,7 +175,7 @@ kernel-level subtlety of NFS.
 
 - The **desktop watcher** (`local_watcher.py`) watches the local sources (ext4)
   **and** the NFS-mounted NAS sources (`/media/nas1…`). All its markers go into
-  the **local** queue (`~/.proton_sync/queue/`).
+  the **local** queue (`~/.proton-drive-sync/queue/`).
 - The **NAS watcher** (`nas_watcher.py`) watches the **NAS's local disk** and
   writes into the **NAS** queue (`/home/nasuser/proton-sync/queue/<user>/`, seen from
   the desktop as `/media/home_nas/proton-sync/queue/<user>/`).

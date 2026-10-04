@@ -221,7 +221,7 @@ extension **case-sensitively**. An uppercase extension (`DOC.PDF`, `IMG.JPG`) is
 mis-typed → no thumbnail, no preview, no icon in the Proton apps, **silently**.
 The engine fixes this at the source by **renaming** the extension to lowercase
 (see the README, "Upload robustness, thumbnails and MIME detection"), with a
-collision guard and a `~/.proton_sync/renamed-extensions.log`. Disable with
+collision guard and a `~/.proton-drive-sync/renamed-extensions.log`. Disable with
 `--no-rename-ext`. Related: TIFF/HEIC/AVIF fail thumbnail generation (image codec)
 — the engine then auto-retries with `--skip-thumbnails` (file saved, no built-in
 Proton preview; convert to JPEG/PNG for a preview).

@@ -80,7 +80,7 @@
       "source": "/media/nas1/Backups/Phone",
       "dest_parent": "/my-files/Backups/Phone",
       "allow_delete": true,
-      "delete_mode": "permanent",
+      "delete_mode": "trash",
       "source_kind": "nfs"
     }
   ]

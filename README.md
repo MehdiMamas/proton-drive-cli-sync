@@ -89,7 +89,7 @@ Keeping the previous binary around also gives you an instant rollback. The appli
 
 Since the CLI only supports one active account at a time (credentials live in the keyring of the current Linux user), the chosen solution is: **two separate Linux accounts** on the same Mint machine, each with its own graphical session and its own keyring. No Windows VM nor second container needed — Linux natively handles multi-user sessions without the Windows Home/Pro limitation.
 
-The lock (see below) uses `~/.proton_sync.lock` (in each user's home) and the cache `~/.proton_sync_cache/` — so User1 and User2 can run **simultaneously** from their respective sessions without interference.
+The lock (see below) uses `~/.proton-drive-sync/proton_sync.lock` (in each user's home) and the cache `~/.proton-drive-sync/cache/` — so User1 and User2 can run **simultaneously** from their respective sessions without interference.
 
 ---
 
@@ -164,6 +164,7 @@ Key fields to extract (nested `{ok: true, value: ...}` wrappers must be unwrappe
 - `totalStorageSize` = the **encrypted** size stored on Proton's side (encryption overhead). Does **not** match the local size of the original file. **Do not use for comparison** — that was an initial bug that re-uploaded everything.
 - `activeRevision.value.claimedSize` = the size of the original file as declared by the client at upload time. **This is the value to compare** against `os.path.getsize(local)`.
 - `claimedDigests.sha1` = SHA1 hash of the original content. Enables content verification independent of the modification date (useful to detect music tag changes that preserve date and size).
+- `activeRevision.value.claimedModificationTime` = the modification date the file had **on disk** at upload time, truncated to the millisecond. Not to be confused with `modificationTime` (top level), which is the server's clock on receipt and says nothing about the file.
 
 ### Useful CLI commands
 
@@ -206,10 +207,11 @@ realtime_consumer.py        <- consumer: reads markers, debounces, launches the 
 realtime_manager.py         <- GUI backend for real-time (daemons, config, NAS push, queues)
 proton-nas-watch.service    <- systemd unit for the NAS watcher (to install on the NAS)
 
-~/.proton_sync.lock         <- lock (created automatically, per user)
-~/.proton_sync_cache/       <- folder fingerprint cache (per mappings file)
-~/.proton_sync/queue/       <- real-time marker queue (local)
-~/.proton_sync/realtime.conf<- real-time settings (debounce, cycle) — written by the GUI
+~/.proton-drive-sync/       <- data folder (created automatically, per user)
+    proton_sync.lock        <- lock
+    cache/                  <- folder fingerprint cache (per mappings file)
+    queue/                  <- real-time marker queue (local)
+    realtime.conf           <- real-time settings, written by the GUI
 /media/home_nas/proton-sync/ <- NAS side over NFS: config/ (pushed mappings) + queue/<account>/
 ```
 
@@ -283,7 +285,7 @@ Two cumulative levels:
 
 An excluded folder is not visited at all (its entire content is ignored). An important deliberate nuance: we do NOT blindly exclude all hidden files (starting with `.`) — a wanted `.important_config` is kept, while an explicitly listed `.caltrash` is excluded.
 
-**Automatic cleanup with `--delete`**: a file excluded locally but already present on Proton (uploaded before the exclusion was added) is seen as an **orphan** at the next `--delete` pass and goes to the Proton trash (recoverable until you empty it). The **cache signature embeds a fingerprint of the exclusion set**: any exclusion change invalidates `delete_synced` and forces reconciliation at the next `--delete` pass — cleanup is therefore automatic, no "Ignore cache" needed. Trade-off: that first pass after an exclusion change re-checks every folder (slower, once), then fast skips resume. Keep in mind: refine your exclusions if you want to keep on Proton certain files excluded locally — what you exclude eventually disappears from the backup.
+**Automatic cleanup with `--delete`**: a file excluded locally but already present on Proton (uploaded before the exclusion was added) is seen as an **orphan** at the next `--delete` pass and goes to the Proton trash (recoverable until you empty it). The **cache signature embeds a fingerprint of the exclusion set**: any exclusion change invalidates `delete_synced` and forces reconciliation at the next `--delete` pass — cleanup is therefore automatic, no "Ignore cache" needed. Trade-off: that first pass after an exclusion change re-checks every folder and compares equal-size files by SHA1 (slower, once), then fast skips resume. Keep in mind: refine your exclusions if you want to keep on Proton certain files excluded locally — what you exclude eventually disappears from the backup.
 
 **Real-time safety guard (`sync_subpath`)**: when the watcher targets a subpath directly, the engine tests **every segment** of the path relative to the mapping root — the target itself (`__pycache__`, `logs`) **and its ancestors** (`.Trash-1000/info` is skipped because `.Trash-1000` matches `.Trash-*`). The engine then emits a line carrying the **stable tag `[subpath-excluded]`** (language-independent), which the consumer detects to display "🚫 excluded (name filtered) — nothing to sync" instead of an ambiguous "✓ ok". No upload, no remote creation, no deletion for those paths.
 
@@ -295,15 +297,28 @@ Exclusions are managed visually in `proton_mapping_editor.py` ("Global exclusion
 
 ### Detection logic
 
-For each local file, the engine runs `filesystem list -j` on the remote folder (once per folder), retrieves `claimedSize` and compares it to `os.path.getsize(local)`. If the sizes differ, upload. If the remote size field is missing, **upload to be safe** (prefers uploading too much over missing a change).
+For each local file, the engine runs `filesystem list -j` on the remote folder (once per folder) and compares the file with its copy on Proton.
 
-With `--verify-hash`, it adds a SHA1 comparison when sizes match — detecting content changes without size changes (equivalent of robocopy's monthly `/MIR /IS`). **Warning**: reads every file in full (slow on large volumes) AND bypasses the cache. Reserve it for a periodic check, not daily use.
+**Size first.** `claimedSize` is compared to `os.path.getsize(local)`. If the sizes differ, upload. If the remote size field is missing, **upload to be safe** (prefers uploading too much over missing a change).
+
+**At equal size, the size proves nothing**: a database rewrites within the space it has already reserved, a settings file replaces a value with another of the same length. The engine then decides in this order, from cheapest to safest:
+
+1. The file has the same size **and the same date** as at the last successful pass over this folder: unchanged, nothing is read. These values come from the fingerprint already in the cache.
+2. Otherwise, the engine computes the file's SHA1 and compares it to `claimedDigests.sha1`: upload only if they differ. A file rewritten with identical content — the date changes, the content does not — is therefore not sent again.
+3. If Proton has no SHA1 for this file, `claimedModificationTime` is compared to the local date, within 2 seconds.
+4. If nothing allows a decision, **upload to be safe**.
+
+So the SHA1 is computed only for files whose date changed while their size did not, in scheduled passes and in real time alike. The record of the last pass is trusted only for the same remote folder and the same exclusions: after a change of destination or of exclusions, the content is compared.
+
+`--verify-hash` extends the SHA1 comparison to **all** files of equal size, without trusting the last pass — the only way to catch a change that kept both the size and the date (a rewritten music tag, for instance; equivalent of robocopy's monthly `/MIR /IS`). It reads every file in full and bypasses the cache: reserve it for a periodic check, not daily use. Reading stays much shorter than listing the remote folders (in the order of 100 MiB/s from a NAS over gigabit).
+
+⚠ **After updating from a version older than v1.17.0, run one `--verify-hash` pass over all mappings** (in the interface: "SHA1 check" ticked, "Test (dry-run)" unticked). Earlier versions stopped at the size: a file modified at equal size was not sent, and its folder was still recorded in the cache as synced. Those stale copies stay on Proton until the file changes again; only this pass finds them.
 
 ### Local cache (major optimization)
 
 **Problem solved**: without a cache, the engine makes one `filesystem list` call per visited folder, at ~1-2 s each. On User1's tree (the `Communs` folder alone contains **1890 subfolders**), a "nothing to do" pass would take tens of minutes to several hours.
 
-**Solution**: `~/.proton_sync_cache/<mapping_name>.cache` (JSON). For each successfully synced folder, we store a fingerprint: the folder's mtime + the sorted list of (name, size, mtime) of its direct files. On the next pass, if the local fingerprint is identical -> we **skip the CLI call entirely** ("⚡ cache valid") and just descend into subfolders. Result: a no-change pass drops from hours to seconds.
+**Solution**: `~/.proton-drive-sync/cache/<mapping_name>.cache` (JSON). For each successfully synced folder, we store a fingerprint: the folder's mtime + the sorted list of (name, size, mtime) of its direct files. On the next pass, if the local fingerprint is identical -> we **skip the CLI call entirely** ("⚡ cache valid") and just descend into subfolders. Result: a no-change pass drops from hours to seconds.
 
 **Safeguards**:
 
@@ -319,7 +334,7 @@ The cache is saved to disk **after each processed mapping entry** (not only at t
 
 ### Lock (no simultaneous runs)
 
-`flock` on `~/.proton_sync.lock`. Prevents two engine instances from running at the same time **under the same user** (e.g. cron firing during a manual pass). The lock is released automatically by the OS at process end — clean exit, kill, Ctrl+C or crash — so no orphan lock. Since it lives in the user's home, User1 and User2 (separate Linux sessions) never block each other.
+`flock` on `~/.proton-drive-sync/proton_sync.lock`. Prevents two engine instances from running at the same time **under the same user** (e.g. cron firing during a manual pass). The lock is released automatically by the OS at process end — clean exit, kill, Ctrl+C or crash — so no orphan lock. Since it lives in the user's home, User1 and User2 (separate Linux sessions) never block each other.
 
 ### Automatic folder creation
 
@@ -424,8 +439,8 @@ python3 ~/Logiciels/Proton-drive/proton_sync.py \
 Options:
 
 - `--dry-run`: shows what would be done without transferring anything (and without touching the cache)
-- `--verify-hash`: adds SHA1 verification (slower, reads every file; bypasses the cache; monthly use)
-- `--ignore-cache`: forces a full re-check on the Proton side (rebuilds the cache on the fly)
+- `--verify-hash`: compares all equal-size files by SHA1, without trusting the last pass (slower, reads every file; bypasses the cache; once after an update, then monthly use)
+- `--ignore-cache`: forces a full re-check on the Proton side (rebuilds the cache on the fly); without the record of the last pass, equal-size files are compared by SHA1, hence read in full
 - `--delete`: **master switch** for deletion propagation. Without it, no deletion. With it, every mapping with `allow_delete: true` propagates its local deletions to Proton, according to its `delete_mode` (trash/permanent) and subject to the mount guard. Always test with `--dry-run` first.
 - `--subpath <folder>` + `--mapping-source <source>`: processes only **one subfolder** of a given mapping, instead of sweeping everything. Used by the real-time layer (the consumer launches the engine targeted at the folder that just changed).
 - `--check-auth`: probes **only** authentication (is the keyring unlocked?) then exits — code 0 = OK, code 2 = locked. Doesn't take the lock, syncs nothing, doesn't touch the cache. Used by the real-time consumer to avoid launching passes doomed to exit code 2 while the session isn't open (reuses the engine's exact test, no duplicated logic).
@@ -437,13 +452,13 @@ Options:
 Three behaviors added after production observations. They target a backup whose **previews** are visible in Proton (web/mobile), not just recoverable files.
 
 **1. Case-sensitive MIME detection on the extension — automatic normalization.** *Fixed upstream in CLI 0.5.0: the media type is now detected correctly even with an uppercase extension. On first launch with 0.5.0 or later the application therefore turns this normalization **off** and tells you why — renaming your own files is no longer needed. You can turn it back on if you want your extensions normalized anyway, or to repair older uploads sent with an uppercase extension; that choice is then kept for good. The description below applies to older CLI versions.* The Proton CLI derives the MIME type from the **extension**, but **case-sensitively**: a file named `DOC.PDF` or `IMG.JPG` (uppercase extension) is mis-typed (`application/octet-stream`), which breaks **thumbnail, preview AND icon** in the Proton apps at once — silently, with no error. Confirmed side by side: `doc.pdf`/`photo.jpg` (lowercase) get their type and preview, byte-identical `DOC.PDF`/`PHOTO.JPG` do not. Applies to images **and** PDFs (and presumably any preview-able format).
-To fix this at the root **and** keep the cache coherent, the engine **renames the SOURCE**: any final extension containing uppercase letters is lowercased (`IMG_1949.JPG → IMG_1949.jpg`, base name unchanged). A single injection point (`sync_folder`) → covers **manual, priming/reset AND real-time**. Safety: directories and **excluded** files are never touched; on a **collision** with an existing target it **never** overwrites (suffix `_ProtonEditExt`, then a counter); `--dry-run` reports without renaming. **Scope (whitelist).** Since the only remaining purpose is to repair *older* uploads, and only preview-able formats ever had a thumbnail, normalization is limited to the extensions listed in `rename_ext_whitelist` (images, video, audio, documents — editable in ⚙ Configuration…). Renaming a router `.CFG` or a phone `.Backup` would modify one of your files without repairing anything — and if an external agent (a phone backup app, `rsync`…) recreates the original name on every pass, the collision guard turns an idempotent overwrite into an **unbounded pile-up**: one extra suffixed copy every night, on disk *and* on the Drive (observed in production, 12 copies of the same 6 KB file). An empty list means no restriction (historical behavior). **Duplicate suffixes** added by external agents are understood: `PHOTO.JPG (1)` is read as a photo and repaired to `PHOTO.jpg (1)`, the ` (1)` being restored untouched — without this, `splitext` yields an extension `.JPG (1)` that matches no list. Every rename is logged to `~/.proton_sync/renamed-extensions.log`. Disable with `--no-rename-ext`. Note: renaming a file previously uploaded with an uppercase extension leaves a remote orphan (old name), cleaned by any `--delete` pass.
+To fix this at the root **and** keep the cache coherent, the engine **renames the SOURCE**: any final extension containing uppercase letters is lowercased (`IMG_1949.JPG → IMG_1949.jpg`, base name unchanged). A single injection point (`sync_folder`) → covers **manual, priming/reset AND real-time**. Safety: directories and **excluded** files are never touched; on a **collision** with an existing target it **never** overwrites (suffix `_ProtonEditExt`, then a counter); `--dry-run` reports without renaming. **Scope (whitelist).** Since the only remaining purpose is to repair *older* uploads, and only preview-able formats ever had a thumbnail, normalization is limited to the extensions listed in `rename_ext_whitelist` (images, video, audio, documents — editable in ⚙ Configuration…). Renaming a router `.CFG` or a phone `.Backup` would modify one of your files without repairing anything — and if an external agent (a phone backup app, `rsync`…) recreates the original name on every pass, the collision guard turns an idempotent overwrite into an **unbounded pile-up**: one extra suffixed copy every night, on disk *and* on the Drive (observed in production, 12 copies of the same 6 KB file). An empty list means no restriction (historical behavior). **Duplicate suffixes** added by external agents are understood: `PHOTO.JPG (1)` is read as a photo and repaired to `PHOTO.jpg (1)`, the ` (1)` being restored untouched — without this, `splitext` yields an extension `.JPG (1)` that matches no list. Every rename is logged to `~/.proton-drive-sync/renamed-extensions.log`. Disable with `--no-rename-ext`. Note: renaming a file previously uploaded with an uppercase extension leaves a remote orphan (old name), cleaned by any `--delete` pass.
 
 > **Transient marker burst (real-time).** The *first* normalization of a tree renames many files at once; each rename is seen by the watcher as a pair of events (`DEL` of the old name + `ADD` of the new one), which drop real-time markers. This is **transient and self-resorbing**: on the next pass the files are already lowercase (no rename, no marker), and new files almost always arrive lowercase already. The consumer's **per-directory deduplication** also bounds the burst — ten files renamed in one folder = **one** sync of that folder, not ten. To avoid the burst entirely, do the first normalization via a **priming/reset** (`--delete` pass, consumer paused) rather than letting real-time discover everything.
 
 **2. Thumbnails impossible for some formats (TIFF/HEIC/AVIF) — auto `--skip-thumbnails`.** Even with a lowercase extension, the CLI **fails thumbnail generation** for these formats on Linux (`Failed to generate thumbnails … format not supported … require the OS codec`), and that failure fails the **whole** batch upload. Installing system codecs (`libheif`, `libaom`, `libdav1d`, `libtiff`) does **not** help — verified: already installed, TIFF still fails; the CLI (TypeScript/Bun) doesn't use the system image libraries. Engine response: on that specific signature it **re-uploads the file with `--skip-thumbnails`** → the file is saved (intact, encrypted; viewable with a third-party viewer or after downloading), only Proton's **built-in** preview is missing. For an in-Proton preview, convert to JPEG/PNG. Affected files are logged `NO-THUMBNAIL` in the failures log, with the exact reason.
 
-**3. Upload-failure isolation + dedicated log.** On a batch failure the CLI reports only a **count** (`N item(s) failed`), not the culprit — and the real reason is on **stdout** (not stderr). The engine then re-lists the remote (skipping what already landed), retries **file by file** to name the culprit and capture its exact reason, applies the auto-`--skip-thumbnails` above where relevant, and logs everything to `~/.proton_sync/failures.log` (`❌ FAIL` = genuine failure; `⚠ NO-THUMBNAIL` = uploaded without a thumbnail). The GUI has an **"❗ Errors only"** toggle that re-filters the output to error lines only.
+**3. Upload-failure isolation + dedicated log.** On a batch failure the CLI reports only a **count** (`N item(s) failed`), not the culprit — and the real reason is on **stdout** (not stderr). The engine then re-lists the remote (skipping what already landed), retries **file by file** to name the culprit and capture its exact reason, applies the auto-`--skip-thumbnails` above where relevant, and logs everything to `~/.proton-drive-sync/failures.log` (`❌ FAIL` = genuine failure; `⚠ NO-THUMBNAIL` = uploaded without a thumbnail). The GUI has an **"❗ Errors only"** toggle that re-filters the output to error lines only.
 
 **4. The CLI can freeze forever on an upload — engine-side circuit breaker.** Observed in production: on a 2 GiB upload the CLI stopped for **over 4 hours** at the very end of the transfer, holding the engine lock the whole time and stalling every other sync behind it, until a manual `kill`. Diagnosis: the CLI uploads 4 MiB blocks over a **pool of ~20 connections**; when one of them is dropped by an intermediate device during the quiet tail of a transfer, the reply never arrives, the process sleeps in `epoll_wait` and **no TCP timer is armed** — nothing at the network level will ever wake it. The engine therefore watches the upload it started (`Popen` + two pipe-draining threads; without them a full 64 KB buffer would block the CLI, creating the very problem being solved) and stops it after `cli_stall_minutes` of **total inactivity**, returning a failure so markers are kept and the folder is retried. What is sampled is `rchar` in `/proc/<pid>/io` (bytes read **by syscall**): `read_bytes` is unusable — the page cache serves the file, so it stays **frozen for minutes during a perfectly healthy transfer**. Instantaneous throughput does not discriminate either (a healthy final stretch still crawls at a few KB/min, same order as a freeze): **only duration separates them** — measured at 1 min 24 s for a healthy finalization, versus hours for a freeze. `cli_stall_max_kills` bounds *consecutive* attempts on the same destination: past the limit one pass is skipped and the counter resets — the folder is **never** permanently abandoned, since a backup that silently stops backing up is worse than the bandwidth it would save.
 
@@ -487,6 +502,7 @@ Cross-cutting rule: **everything depends first on a lowercase extension** (other
 - OK: **exclusion-aware cache** — the exclusion set fingerprint enters the signature: an exclusion change forces reconciliation at the next `--delete` (automatic cleanup of newly excluded orphans, e.g. `.dtrash`, `thumbnails-digikam.db`)
 - OK: **"Run history" panel** — last run isolated by start boundary (reliable after a reboot), date picker, success/failure summary; validated (the July 1st collision is visible there)
 - OK: **complete FR/EN internationalization** — GUI, engine, daemons, systemd descriptions; "🌍 Language…" selector, gettext catalog (766 messages), stable tag and multilingual markers for detections; validated in production in both languages
+- OK: **equal-size detection** — a file modified without a size change is compared by SHA1 as soon as its date changes, in scheduled passes and in real time alike; a file rewritten with identical content is not sent again; validated in production through real time
 - TO DO (optional): decide whether to enable `--delete` in the schedule (see Option A / Option B below)
 - TO DO (optional): schedule a periodic `--verify-hash` check (monthly /IS equivalent)
 - TO DO (optional): clean up `.caltrash` files uploaded before the exclusions were added
@@ -610,7 +626,7 @@ realtime_manager.py  (local machine)  GUI backend: daemon install/control, confi
 
 A **marker** is a small JSON file `{"path": "...", "delete": bool}` written by a watcher when a folder changes. For a deletion, the marker points at the **parent folder**: the engine notices the absence during the pass, needing no information about the vanished file.
 
-- Local queue (local machine): `~/.proton_sync/queue/`
+- Local queue (local machine): `~/.proton-drive-sync/queue/`
 - NAS queue: `/home/nasuser/proton-sync/queue/<account>/`, seen over NFS on the local machine as `/media/home_nas/proton-sync/queue/<account>/`
 
 **Identity = account name, not Unix login.** The `<account>` comes from the mappings file name (`mappings-user1.json` → `user1`) — a convention shared by the NAS watcher (which writes into `queue/user1`), the consumer (which reads there) and the GUI. This is deliberately **independent of the Linux login**, which can differ (e.g. `myuser` for the `user1` account): relying on `$USER` would read the wrong NAS queue. (Bug fixed: the consumer now derives the account from the mappings file, no more `$USER`.)
@@ -619,7 +635,7 @@ A **marker** is a small JSON file `{"path": "...", "delete": bool}` written by a
 
 Runs in a loop (cycle ~30 s):
 
-- re-reads its config `~/.proton_sync/realtime.conf` (JSON `debounce_seconds`, `cycle_seconds`) **on every cycle** → live tuning, no restart;
+- re-reads its config `~/.proton-drive-sync/realtime.conf` (JSON `debounce_seconds`, `cycle_seconds`) **on every cycle** → live tuning, no restart;
 - groups markers per folder, applies the **debounce** (lets write bursts settle before acting), merges conflicts with the rule **`delete=true` wins**;
 - launches the engine on the single mature subfolder via `--subpath <folder> --mapping-source <source>` (and `--delete` if the mapping allows it) — so no full sweep, just what moved.
 
@@ -655,7 +671,7 @@ Detailed installation: `INSTALLATION-realtime.md`.
 
 ### Interaction with the batch and the lock
 
-Real-time, the scheduled batch and manual launches share the **lock** `~/.proton_sync.lock`: never two passes in parallel under the same user. If a manual pass holds the lock, the consumer **keeps** its markers and retries at the next cycle — safe behavior, observed in production (no loss).
+Real-time, the scheduled batch and manual launches share the **lock** `~/.proton-drive-sync/proton_sync.lock`: never two passes in parallel under the same user. If a manual pass holds the lock, the consumer **keeps** its markers and retries at the next cycle — safe behavior, observed in production (no loss).
 
 The symmetric case on the **scheduled** side: if the real-time consumer holds the lock when the timer fires, the scheduled pass exits with failure (code 1). Its systemd service therefore uses `Type=exec` with `Restart=on-failure` + `RestartSec=120`: it **automatically retries ~2 minutes later**, once the consumer has finished and released the lock (bounded by `StartLimitBurst` to avoid any loop). Without this, a single collision was enough to skip the whole nightly pass. An exit code 2 (locked keyring) is still treated as success (`SuccessExitStatus=0 2`) and thus triggers no pointless retry.
 
@@ -794,7 +810,6 @@ Changes apply at the **next launch** of the GUI and the **next restart** of the 
 
 The project's main files:
 
-- `Guide-ProtonDrive-iSCSI-WinBoat.pdf` — the previous solution (WinBoat/iSCSI), still functional, kept as backup until this new setup is proven
 - `proton_mapping_editor.py` — Tkinter GUI (mapping editing, launching, exclusions, deletion settings, Schedule and Real-time windows)
 - `proton_sync.py` — batch engine (cache, checkpoints, lock, live log, exclusions, deletions, glob fix, `--subpath`)
 - `mount_check.py` — **mount safety-guard module, MANDATORY next to `proton_sync.py`** for deletions to work (nfs/local detection, blocking when the NAS is down)
@@ -828,4 +843,9 @@ The project's main files:
 - Notification (email or desktop pop-up) on error during a scheduled task
 - Per-pass statistics (duration, files transferred, total volume) in a history file
 - Automatic retry of 500 errors within the same pass (instead of waiting for the next one) — small `time.sleep` + 2-3 attempts
-- Archive the WinBoat/iSCSI bridge once the CLI has run in production for 1-2 months without incident
+
+---
+
+## Acknowledgements
+
+Equal-size detection originates from the fork [MehdiMamas/proton-drive-cli-sync](https://github.com/MehdiMamas/proton-drive-cli-sync): its analysis is what found that a file modified without a size change was never sent again, and the order of checks adopted here is its own.
