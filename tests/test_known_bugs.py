@@ -1,6 +1,7 @@
 """Known bugs. Each test is a strict xfail until the change that fixes it removes the marker.
 
 The equal-size tests live in tests/test_equal_size.py.
+A failed upload now exits 5; those tests live in tests/test_run_results.py.
 """
 
 import pytest
@@ -16,11 +17,6 @@ def _mapping(source, **extra):
     return mapping
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a failed upload still exits 0",
-)
 def test_upload_failure_exits_nonzero(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
     fake_drive.add_fault(cmd="upload", match="a.txt", times=5, stderr="nope")
@@ -29,11 +25,6 @@ def test_upload_failure_exits_nonzero(fake_drive, local_tree, write_mappings, en
     assert result.returncode == 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a failed subpath upload still exits 0",
-)
 def test_subpath_upload_failure_exits_nonzero(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs")])
