@@ -48,7 +48,16 @@ except ImportError:
         return s
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-_SETTINGS_PATH = os.path.join(APP_DIR, "settings.json")
+# PROTON_SYNC_SETTINGS : chemin alternatif de settings.json, figé à l'import
+# comme le chemin historique. Sert aux tests (réglages isolés, sans toucher
+# au fichier du dépôt) et au paquetage, pour sortir les réglages mutables
+# du répertoire d'installation. Absente ou vide =
+# APP_DIR/settings.json, le comportement d'avant.
+_settings_override = os.environ.get("PROTON_SYNC_SETTINGS", "").strip()
+if _settings_override:
+    _SETTINGS_PATH = _settings_override
+else:
+    _SETTINGS_PATH = os.path.join(APP_DIR, "settings.json")
 
 # ─────────────────────────────────────────────────────────────────────────
 #  1) Réglages typés (settings.json)
