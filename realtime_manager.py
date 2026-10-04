@@ -14,7 +14,7 @@ Périmètre (décidé en conception) :
     systemd, et le GUI ne fait que lire son activité via la file NFS (pas de SSH,
     pas d'identifiants à distance). On affiche un voyant honnête, sans bouton qui
     prétendrait le contrôler.
-  - Règle le délai de debounce/cycle en écrivant ~/.proton_sync/realtime.conf,
+  - Règle le délai de debounce/cycle en écrivant ~/.proton-drive-sync/realtime.conf,
     relu À CHAUD par le consommateur à chaque cycle.
   - Pousse la copie des mappings vers le NAS (config/) avec un hash de version,
     et calcule la « dérive » local <-> NAS.
@@ -96,7 +96,7 @@ if _HAS_CONFIG:
     LOCAL_QUEUE = appconfig.QUEUE_DIR
     CONFIG_FILE = appconfig.REALTIME_CONF
 else:
-    BASE_DIR = os.path.expanduser("~/.proton_sync")
+    BASE_DIR = os.path.expanduser("~/.proton-drive-sync")
     LOCAL_QUEUE = os.path.join(BASE_DIR, "queue")
     CONFIG_FILE = os.path.join(BASE_DIR, "realtime.conf")
 
@@ -118,7 +118,8 @@ NAS_QUEUE_DIR = os.path.join(NAS_BASE, "queue")     # queue/<user>/
 # l'écart sans copier). Les deux fonctions doivent rester alignées : ne jamais
 # dupliquer cette liste ailleurs.
 _NAS_SCRIPT_FILES = ["nas_watcher.py", "local_watcher.py", "config.py", "i18n.py",
-                     "mount_check.py", "nas_selftest.py", "nas_selftest_watcher.py"]
+                     "paths.py", "mount_check.py", "nas_selftest.py",
+                     "nas_selftest_watcher.py"]
 
 # systemd --user (mêmes conventions que schedule_manager).
 SYSTEMD_USER_DIR = os.path.expanduser("~/.config/systemd/user")
@@ -176,7 +177,7 @@ def user_from_mappings_path(mappings_path):
 #  1) Réglage du délai (debounce / cycle) — realtime.conf
 # ─────────────────────────────────────────────────────────────────────────
 def read_config():
-    """Lit ~/.proton_sync/realtime.conf. Toujours un dict valide (valeurs par
+    """Lit ~/.proton-drive-sync/realtime.conf. Toujours un dict valide (valeurs par
     défaut si fichier absent/invalide), pour ne jamais faire échouer le GUI."""
     cfg = {
         "debounce_seconds": DEFAULT_DEBOUNCE_SECONDS,
@@ -784,7 +785,8 @@ def mappings_ready_count(mappings_path):
     if total == 0:
         return (0, 0)
     # Cache correspondant.
-    cache_dir = appconfig.CACHE_DIR if _HAS_CONFIG else os.path.expanduser("~/.proton_sync_cache")
+    cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
+                 else os.path.expanduser("~/.proton-drive-sync/cache"))
     name = os.path.basename(mappings_path).replace(".json", "") + ".cache"
     try:
         with open(os.path.join(cache_dir, name), "r", encoding="utf-8") as f:

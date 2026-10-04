@@ -1377,11 +1377,13 @@ class MappingEditor(tk.Tk):
         try:
             if appconfig.rename_ext_auto_disabled():
                 return                      # déjà fait : le choix de l'utilisateur prime
+            # Même décision que le moteur (lecture seule). On n'écrit le fichier
+            # que pour mémoriser la bascule unique, et le dialogue reste ici.
+            if appconfig.effective_rename_ext(_ENGINE.cli_supports_shared_delete):
+                return                      # CLI ancien, ou choix explicite : on garde
             if not appconfig.rename_ext_enabled():
                 appconfig.set_rename_ext_auto_disabled(True)   # déjà décoché
                 return
-            if not _ENGINE.cli_supports_shared_delete():
-                return                      # CLI ancien : le contournement sert encore
             appconfig.set_rename_ext_enabled(False)
             appconfig.set_rename_ext_auto_disabled(True)
         except Exception:
@@ -1838,7 +1840,8 @@ class MappingEditor(tk.Tk):
         parse plus qu'~1×/10 s au lieu de 2×/1,5 s."""
         if not self.config_path:
             return {}
-        cache_dir = appconfig.CACHE_DIR if _HAS_CONFIG else os.path.expanduser("~/.proton_sync_cache")
+        cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
+                     else os.path.expanduser("~/.proton-drive-sync/cache"))
         name = os.path.basename(self.config_path).replace(".json", "") + ".cache"
         path = os.path.join(cache_dir, name)
         try:
@@ -2741,7 +2744,7 @@ class MappingEditor(tk.Tk):
         if not self.config_path or mapping.get("type") != "folder":
             return
         cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
-                     else os.path.expanduser("~/.proton_sync_cache"))
+                     else os.path.expanduser("~/.proton-drive-sync/cache"))
         name = os.path.basename(self.config_path).replace(".json", "") + ".cache"
         path = os.path.join(cache_dir, name)
         try:
@@ -2777,7 +2780,7 @@ class MappingEditor(tk.Tk):
         """Chemin du fichier cache associé à un fichier de mappings quelconque
         (même règle que le moteur : CACHE_DIR/<nom sans .json>.cache)."""
         cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
-                     else os.path.expanduser("~/.proton_sync_cache"))
+                     else os.path.expanduser("~/.proton-drive-sync/cache"))
         name = os.path.basename(config_path).replace(".json", "") + ".cache"
         return os.path.join(cache_dir, name)
 
@@ -4837,7 +4840,7 @@ class MappingEditor(tk.Tk):
             self.status.set(_("Sync interrupted."))
 
     def _lock_is_busy(self, env=None):
-        """True si le verrou moteur (~/.proton_sync.lock) est actuellement tenu par
+        """True si le verrou moteur (~/.proton-drive-sync/proton_sync.lock) est actuellement tenu par
         un autre passage. Utilise --check-lock du moteur : une sonde qui teste
         EXACTEMENT le même flock puis le relâche aussitôt (non destructif, ne lance
         aucune synchro). Renvoie False en cas de doute (mieux vaut tenter le passage
@@ -5224,7 +5227,7 @@ class MappingEditor(tk.Tk):
 
             # 3a) ATTENTE PATIENTE DU VERROU (au lieu d'échouer en code 1). Le
             #     consommateur vient d'être arrêté, mais le watcher NAS ou une passe
-            #     planifiée peut encore tenir le flock ~/.proton_sync.lock ; et le
+            #     planifiée peut encore tenir le flock ~/.proton-drive-sync/proton_sync.lock ; et le
             #     consommateur peut mettre un instant à le relâcher. Plutôt que de
             #     laisser le moteur sortir immédiatement (« Une autre instance… »,
             #     code 1), on sonde le verrou (--check-lock, non destructif) et on

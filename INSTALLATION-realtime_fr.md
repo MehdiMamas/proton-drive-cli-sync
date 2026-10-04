@@ -94,10 +94,12 @@ Sur le NAS :
 ```bash
 # Fichiers requis dans /home/nasuser/proton-sync/ (à copier ensemble) :
 #   nas_watcher.py, local_watcher.py (helpers partagés), mount_check.py,
-#   i18n.py + le dossier locale/ (traductions ; sans eux, logs en anglais).
+#   config.py, paths.py, i18n.py + le dossier locale/
+#   (traductions ; sans eux, logs en anglais).
 # pyinotify installé (python3-pyinotify ou pip).
 # Langue des logs : suit LANG du NAS ; pour forcer :
-#   echo '{"language": "fr"}' > /home/nasuser/proton-sync/settings.json
+#   echo '{"language": "fr"}' > ~/.config/proton-drive-sync/settings.json
+#   (un ancien settings.json à côté des scripts y est copié une fois)
 sudo cp proton-nas-watch.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now proton-nas-watch.service
@@ -132,10 +134,10 @@ chaud, donc un nouveau push est pris en compte sans redémarrer le service.
 
 ## Rappel — réglages temps réel
 
-- **Délais** : `~/.proton_sync/realtime.conf` (JSON `debounce_seconds`,
+- **Délais** : `~/.proton-drive-sync/realtime.conf` (JSON `debounce_seconds`,
   `cycle_seconds`), écrit par le GUI, relu **à chaud** par le consommateur à
   chaque cycle. Pas de redémarrage nécessaire.
-- **Files** : marqueurs dans `~/.proton_sync/queue/` (locale) et
+- **Files** : marqueurs dans `~/.proton-drive-sync/queue/` (locale) et
   `/media/home_nas/proton-sync/queue/<user>/` (NAS via NFS). Le GUI les compte et
   peut les vider.
 - **Mode NAS** : le réglage « Utiliser un NAS » (Configuration) s'applique **à chaud** —
@@ -178,7 +180,7 @@ La surveillance est **distribuée** entre deux watchers, et leur répartition ti
 
 - Le **watcher de la machine locale** (`local_watcher.py`) surveille les sources locales
   (ext4) **et** les sources NAS montées en NFS (`/media/nas1…`). Tous ses
-  marqueurs vont dans la file **locale** (`~/.proton_sync/queue/`).
+  marqueurs vont dans la file **locale** (`~/.proton-drive-sync/queue/`).
 - Le **watcher du NAS** (`nas_watcher.py`) surveille le **disque local du NAS** et
   écrit dans la file **NAS** (`/home/nasuser/proton-sync/queue/<user>/`, vue côté
   la machine locale comme `/media/home_nas/proton-sync/queue/<user>/`).

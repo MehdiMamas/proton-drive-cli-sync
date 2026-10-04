@@ -152,7 +152,7 @@ journalctl --user -u proton-sync.service | grep "Authentification"
 ## Collision avec le temps réel (relance automatique)
 
 Le passage planifié et le **consommateur temps réel** partagent le verrou
-`~/.proton_sync.lock` : jamais deux passages en parallèle. Si le consommateur
+`~/.proton-drive-sync/proton_sync.lock` : jamais deux passages en parallèle. Si le consommateur
 tient le verrou au moment où le timer se déclenche (par ex. un backup de
 téléphone en pleine nuit a réveillé le temps réel), le moteur planifié sort en
 **échec (code 1)**.
