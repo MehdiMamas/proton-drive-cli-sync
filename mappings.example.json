@@ -65,6 +65,7 @@
       "dest_parent": "/my-files/Backups",
       "allow_delete": true,
       "delete_mode": "trash",
+      "excluded_remote": "keep",
       "source_kind": "nfs",
       "exclusions": {
         "names": [
@@ -80,7 +81,8 @@
       "source": "/media/nas1/Backups/Phone",
       "dest_parent": "/my-files/Backups/Phone",
       "allow_delete": true,
-      "delete_mode": "permanent",
+      "delete_mode": "trash",
+      "excluded_remote": "keep",
       "source_kind": "nfs"
     }
   ]

@@ -111,6 +111,7 @@ class RunStats:
         "folders_stall_skipped",
         "items_trashed",
         "trash_failed",
+        "deletions_refused",
         "sources_missing",
         "mappings_total",
         "mappings_complete",
@@ -123,6 +124,7 @@ class RunStats:
         "folders_permission_denied",
         "folders_stall_skipped",
         "trash_failed",
+        "deletions_refused",
         "sources_missing",
     )
 
@@ -1888,7 +1890,8 @@ def _count_remote_recursive(remote_path):
 
 
 def delete_orphans(local_dir, remote_folder, remote_items, local_names,
-                   delete_mode="trash", dry_run=False, verbose=False):
+                   delete_mode="trash", dry_run=False, verbose=False,
+                   exclusions=None, delete_opts=None):
     """Supprime sur Proton les éléments présents dans `remote_items` mais absents
     localement (`local_names`). Les dossiers orphelins sont supprimés en entier
     (Proton gère la récursion via trash/delete sur le dossier).
@@ -1903,9 +1906,43 @@ def delete_orphans(local_dir, remote_folder, remote_items, local_names,
     permanent = (delete_mode == "permanent")
     n_deleted = 0
     n_failed = 0
+    opts = delete_opts or {}
+    keep_excluded = opts.get("excluded_remote", "keep") != "prune"
+
+    # 1) Orphelins candidats. Sous `excluded_remote: keep` (défaut), un élément
+    #    distant dont le NOM correspond à une exclusion active n'est JAMAIS
+    #    envoyé à la corbeille : exclure veut dire « ne plus synchroniser », pas
+    #    « effacer ma sauvegarde ». "prune" restitue l'ancien comportement.
+    orphans = []
     for name, info in remote_items.items():
         if name in local_names:
             continue  # existe encore localement -> on garde
+        if keep_excluded and exclusions and exclusions.is_excluded(name):
+            if verbose:
+                print(_("    kept (excluded): {p}").format(
+                    p=remote_folder.rstrip("/") + "/" + name))
+            continue
+        orphans.append((name, info))
+
+    # 2) Garde-fou de suppression de masse, par dossier : si trop d'enfants
+    #    distants seraient supprimés d'un coup (source vidée par erreur, montage
+    #    vide), on refuse TOUT dans ce dossier. Compté comme échec (code 5) ; le
+    #    dossier n'est pas marqué delete_synced (n_failed > 0).
+    n_remote = len(remote_items)
+    if orphans and n_remote and not opts.get("allow_mass_delete"):
+        max_min = opts.get("max_delete_min", 20)
+        max_ratio = opts.get("max_delete_ratio", 0.5)
+        if len(orphans) >= max_min and len(orphans) / n_remote > max_ratio:
+            print("    [delete-guard] " + _(
+                "refusing to trash {n} of {t} remote item(s) in {p} "
+                "(limit: at least {m} and more than {r:.0%}); nothing deleted there. "
+                "Use --allow-mass-delete for a deliberate cleanup.").format(
+                    n=len(orphans), t=n_remote, p=remote_folder,
+                    m=max_min, r=max_ratio))
+            _RUN.add("deletions_refused")
+            return 0, len(orphans)
+
+    for name, info in orphans:
         remote_path = remote_folder.rstrip("/") + "/" + name
         rtype = info.get("type")
         if rtype == "folder":
@@ -1937,6 +1974,56 @@ def _delete_guard_ok(source_path, source_kind, verbose=False):
         return False, ("module mount_check.py absent — suppression refusée par "
                        "sécurité (place mount_check.py à côté de proton_sync.py)")
     return mount_check.source_is_safe_for_delete(source_path, source_kind, verbose=verbose)
+
+
+# Durée (s) pendant laquelle un verdict « montage sain » est réutilisé entre deux
+# dossiers : detect_source_kind relit /proc/mounts, trop lourd à chaque dossier.
+_MOUNT_RECHECK_TTL = 5.0
+
+
+def build_delete_opts(mapping, guard_path, allow_mass_delete=False, verbose=False):
+    """Options de suppression d'UN mapping pour sync_folder / delete_orphans :
+    excluded_remote, seuils du garde-fou de masse, et re-contrôle du montage
+    (`delete_guard`, avec verrou `mount_lost` valable pour tout le passage du
+    mapping). Valeurs de mapping invalides -> réglage global -> défaut."""
+    mode = mapping.get("excluded_remote", "keep")
+    if mode not in ("keep", "prune"):
+        print(_("  ⚠  Unknown excluded_remote value {v!r} — using \"keep\".").format(v=mode))
+        mode = "keep"
+
+    if _HAS_CONFIG:
+        g_min, g_ratio = appconfig.max_delete_min(), appconfig.max_delete_ratio()
+    else:
+        g_min, g_ratio = 20, 0.5
+    max_min, max_ratio = g_min, g_ratio
+    raw_min = mapping.get("max_delete_min")
+    if isinstance(raw_min, int) and not isinstance(raw_min, bool) and raw_min >= 0:
+        max_min = raw_min
+    raw_ratio = mapping.get("max_delete_ratio")
+    if (isinstance(raw_ratio, (int, float)) and not isinstance(raw_ratio, bool)
+            and 0.0 <= raw_ratio <= 1.0):
+        max_ratio = float(raw_ratio)
+
+    source_kind = mapping.get("source_kind")
+    cache_state = {"ok_until": 0.0}
+
+    def delete_guard():
+        # Seul un verdict POSITIF est mémorisé ; un refus est toujours revérifié.
+        if time.monotonic() < cache_state["ok_until"]:
+            return True, ""
+        ok, raison = _delete_guard_ok(guard_path, source_kind, verbose=verbose)
+        if ok:
+            cache_state["ok_until"] = time.monotonic() + _MOUNT_RECHECK_TTL
+        return ok, raison
+
+    return {
+        "excluded_remote": mode,
+        "max_delete_min": max_min,
+        "max_delete_ratio": max_ratio,
+        "allow_mass_delete": bool(allow_mass_delete),
+        "delete_guard": delete_guard,
+        "mount_lost": False,
+    }
 
 
 def _wipe_mapping_remote(mapping, dry_run=False, verbose=False):
@@ -2106,7 +2193,10 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 conflict_mode="replace",
                 cache=None, ignore_cache=False, exclusions=None,
                 delete=False, delete_mode="trash", realtime=False, rename_ext=True,
-                collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT):
+                collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT, delete_opts=None):
+    # delete_opts : options de suppression du mapping (voir build_delete_opts) ;
+    # None = défauts (excluded_remote "keep", garde-fou de masse par défaut, pas
+    # de re-contrôle du montage).
     # Retourne True si CE dossier ET toute sa descendance ont été analysés
     # jusqu'au bout sans échec (subtree_complete) ; False sinon. Cette valeur
     # « remonte » de bas en haut : un parent n'est complet que si tous ses enfants
@@ -2220,7 +2310,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                     cache=cache, ignore_cache=ignore_cache,
                     exclusions=exclusions, delete=delete, delete_mode=delete_mode,
                     realtime=realtime, rename_ext=rename_ext,
-                    collision_suffix=collision_suffix)
+                    collision_suffix=collision_suffix, delete_opts=delete_opts)
                 if not child_complete:
                     all_children_complete = False
         # Le dossier lui-même est valide (cache frais) ; sa complétude de sous-arbre
@@ -2275,7 +2365,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 cache=cache, ignore_cache=ignore_cache,
                 exclusions=exclusions, delete=delete, delete_mode=delete_mode,
                 realtime=realtime, rename_ext=rename_ext,
-                collision_suffix=collision_suffix)
+                collision_suffix=collision_suffix, delete_opts=delete_opts)
             if not child_complete:
                 all_children_complete = False
         elif entry.is_file():   # suit les liens : un lien vers un fichier EST un fichier
@@ -2312,9 +2402,33 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
 
     # --- Propagation des suppressions (si activée pour ce mapping) ---
     if delete:
-        _n_del, n_del_failed = delete_orphans(
-            local_dir, remote_folder, remote_items, local_names,
-            delete_mode=delete_mode, dry_run=dry_run, verbose=verbose)
+        opts = delete_opts or {}
+        guard = opts.get("delete_guard")
+        has_candidates = any(n not in local_names for n in remote_items)
+        deletions_blocked = False
+        if guard is not None and has_candidates:
+            # Re-contrôle du montage juste avant les suppressions de CE dossier.
+            # Un NAS tombé en cours de passage rend des dossiers entiers
+            # « orphelins » : au premier refus on verrouille (latch) toutes les
+            # suppressions des dossiers suivants de ce mapping. Les envois continuent.
+            if opts.get("mount_lost"):
+                deletions_blocked = True
+            else:
+                ok_mount, raison_mount = guard()
+                if not ok_mount:
+                    opts["mount_lost"] = True
+                    deletions_blocked = True
+                    print("    [delete-guard] " + _(
+                        "mount check failed during the pass, deletions stopped for "
+                        "the rest of this mapping: {r}").format(r=raison_mount))
+                    _RUN.add("deletions_refused")
+        if deletions_blocked:
+            n_del_failed = 1
+        else:
+            _n_del, n_del_failed = delete_orphans(
+                local_dir, remote_folder, remote_items, local_names,
+                delete_mode=delete_mode, dry_run=dry_run, verbose=verbose,
+                exclusions=exclusions, delete_opts=delete_opts)
         if n_del_failed:
             # Au moins un orphelin distant n'a PAS pu être supprimé (erreur CLI
             # transitoire, réseau…). Sans ce garde, le dossier serait quand même
@@ -2357,7 +2471,8 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
 def sync_folder_guarded(mapping, local_dir, remote_parent, dry_run=False, verbose=False,
                         verify_hash=False, cache=None, ignore_cache=False, exclusions=None,
                         delete=False, rename_ext=True,
-                        collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT):
+                        collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT,
+                        allow_mass_delete=False):
     """Enveloppe sync_folder en appliquant le GARDE-FOU de suppression.
 
     Si --delete est demandé ET que ce mapping autorise la suppression
@@ -2389,7 +2504,9 @@ def sync_folder_guarded(mapping, local_dir, remote_parent, dry_run=False, verbos
                        conflict_mode=mapping.get("conflict_mode", "replace"),
                        cache=cache, ignore_cache=ignore_cache,
                        exclusions=exclusions, delete=mapping_delete, delete_mode=mode,
-                       rename_ext=rename_ext, collision_suffix=collision_suffix)
+                       rename_ext=rename_ext, collision_suffix=collision_suffix,
+                       delete_opts=build_delete_opts(mapping, local_dir,
+                                                     allow_mass_delete, verbose))
 
 
 def sync_file(local_file, remote_parent, dry_run=False, verbose=False, verify_hash=False,
@@ -2511,7 +2628,8 @@ def _first_excluded_segment(mapping, subpath, exclusions):
 
 def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=False,
                  cache=None, ignore_cache=False, exclusions=None, delete=False,
-                 rename_ext=True, collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT):
+                 rename_ext=True, collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT,
+                 allow_mass_delete=False):
     """Synchronise UN sous-dossier précis d'un mapping (mode temps réel).
 
     sync_folder étant récursive, le sous-dossier ET son sous-arbre sont traités.
@@ -2631,7 +2749,9 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
                            cache=cache, ignore_cache=ignore_cache,
                            exclusions=exclusions, delete=mapping_delete, delete_mode=mode,
                            realtime=True, rename_ext=rename_ext,
-                           collision_suffix=collision_suffix)
+                           collision_suffix=collision_suffix,
+                           delete_opts=build_delete_opts(mapping, subpath,
+                                                         allow_mass_delete, verbose))
     return "ok" if complete else "failed"
 
 
@@ -2658,7 +2778,8 @@ def _summary_line():
              "listing failed {folders_listing_failed}, unreadable {folders_unreadable}, "
              "permission denied {folders_permission_denied}, "
              "stall-skipped {folders_stall_skipped}, trashed {items_trashed}, "
-             "trash failed {trash_failed}, sources missing {sources_missing}, "
+             "trash failed {trash_failed}, deletions refused {deletions_refused}, "
+             "sources missing {sources_missing}, "
              "mappings {mappings_complete}/{mappings_total}.").format(**_RUN.to_dict())
 
 
@@ -2757,15 +2878,27 @@ def main():
              "est supprimé). Le mode de suppression (corbeille ou définitif) est celui "
              "défini dans chaque mapping ('delete_mode'). Un garde-fou vérifie d'abord "
              "que la source est saine (montage NFS vivant) ; sinon les suppressions "
-             "sont désactivées pour ce mapping.",
+             "sont désactivées pour ce mapping. Les éléments distants dont le nom "
+             "correspond à une exclusion sont CONSERVÉS par défaut ('excluded_remote': "
+             "'keep' ; 'prune' pour les supprimer). Un garde-fou de masse refuse toute "
+             "suppression dans un dossier quand elle toucherait trop d'éléments "
+             "(voir --allow-mass-delete).",
+    )
+    parser.add_argument(
+        "--allow-mass-delete", action="store_true",
+        help="Désactive, pour CE passage seulement, le garde-fou de suppression de "
+             "masse ([delete-guard]) : à réserver à un nettoyage délibéré. Sans effet "
+             "sans --delete. Le GUI ne le passe jamais.",
     )
     parser.add_argument(
         "--subpath", metavar="CHEMIN",
         help="Mode TEMPS RÉEL : synchronise uniquement ce sous-dossier (et son "
              "sous-arbre) au lieu de tous les mappings. Nécessite --mapping-source "
-             "pour identifier le mapping auquel ce sous-chemin appartient. Purement "
-             "additif (ne propage jamais les suppressions). Utilisé par le "
-             "déclencheur inotify ; sans cette option, le moteur traite tous les "
+             "pour identifier le mapping auquel ce sous-chemin appartient. Les "
+             "suppressions ne sont propagées que si --delete est aussi passé, que "
+             "le mapping a 'allow_delete' et que les garde-fous (montage, "
+             "exclusions conservées, suppression de masse) les autorisent. Utilisé "
+             "par le déclencheur inotify ; sans cette option, le moteur traite tous les "
              "mappings normalement.",
     )
     parser.add_argument(
@@ -3144,7 +3277,8 @@ def main():
     # Si --subpath est fourni, on synchronise UNIQUEMENT ce sous-dossier dans le
     # mapping identifié par --mapping-source, puis on sort. Tout le reste de la
     # logique (boucle sur tous les mappings) est inchangé et ne s'exécute pas
-    # dans ce mode. C'est purement additif : sans --subpath, comportement normal.
+    # dans ce mode. Sans --subpath, comportement normal. Les suppressions n'y ont
+    # lieu que si --delete est aussi passé (mêmes garde-fous qu'un passage complet).
     if args.subpath:
         if not args.mapping_source:
             print(_("❌ --subpath requires --mapping-source to identify the mapping."))
@@ -3173,7 +3307,8 @@ def main():
                      verbose=args.verbose, verify_hash=args.verify_hash,
                      cache=cache, ignore_cache=args.ignore_cache, exclusions=eff_ex,
                      delete=args.delete, rename_ext=effective_rename_ext,
-                     collision_suffix=effective_collision_suffix)
+                     collision_suffix=effective_collision_suffix,
+                     allow_mass_delete=args.allow_mass_delete)
         cache.save()
         if result == "cold":
             # Sous-dossier froid : rien n'a été traité, la planification prendra
@@ -3255,7 +3390,8 @@ def main():
                                 verify_hash=args.verify_hash, cache=cache,
                                 ignore_cache=args.ignore_cache, exclusions=eff_ex,
                                 delete=args.delete, rename_ext=effective_rename_ext,
-                                collision_suffix=effective_collision_suffix)
+                                collision_suffix=effective_collision_suffix,
+                                allow_mass_delete=args.allow_mass_delete)
             if complete:
                 _RUN.add("mappings_complete")
             health.append((m["source"], bool(complete), _take_unreadable()))

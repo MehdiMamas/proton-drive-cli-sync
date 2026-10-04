@@ -2,6 +2,7 @@
 
 The equal-size tests live in tests/test_equal_size.py.
 A failed upload now exits 5; those tests live in tests/test_run_results.py.
+An exclusion no longer trashes the remote copy; that test lives in tests/test_deletion_safety.py.
 """
 
 import pytest
@@ -36,11 +37,6 @@ def test_subpath_upload_failure_exits_nonzero(fake_drive, local_tree, write_mapp
     assert result.returncode == 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="a later exclusion plus --delete trashes the remote copy",
-)
 def test_exclusion_added_later_keeps_remote_copy(fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/secret.txt": (b"hide", 1_000_000_000)})
     cfg = write_mappings([_mapping(src / "Docs", allow_delete=True, source_kind="local")])
