@@ -9,8 +9,9 @@ post_install() {
  2. Create mappings: run `proton-drive-sync-gui`, or write a mappings file
     (see /usr/share/doc/proton-drive-cli-sync-git/mappings.example.json).
     Try a throwaway folder first. Keep independent backups.
- 3. Schedule a nightly run from the GUI (Schedule), or enable the timer:
-      systemctl --user enable --now proton-sync.timer
+ 3. Schedule a nightly run from the GUI (Schedule). That window writes the
+    service and the timer. systemctl --user enable only re-enables a timer
+    that has already been written.
  4. Unattended runs need the credential store to be unlocked. `loginctl
     enable-linger $USER` keeps your user services running while you are logged
     out, but it does NOT unlock a keyring: with a locked keyring the run exits

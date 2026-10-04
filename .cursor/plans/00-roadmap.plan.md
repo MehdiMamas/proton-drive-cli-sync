@@ -4,26 +4,26 @@ overview: "Index for the proton-drive-cli-sync fork. It explains the architectur
 todos:
   - id: phase-01-test-harness
     content: "1 – Test harness with a fake Proton CLI → complete phase-01-test-harness.plan.md"
-    status: pending
+    status: completed
   - id: phase-02-equal-size-edits
     content: "2 – Detect equal-size edits → complete phase-02-equal-size-edits.plan.md"
-    status: pending
+    status: completed
     dependencies: [phase-01-test-harness]
   - id: phase-03-run-results
     content: "3 – Honest run results → complete phase-03-run-results.plan.md"
-    status: pending
+    status: completed
     dependencies: [phase-02-equal-size-edits]
   - id: phase-04-deletion-safety
     content: "4 – Deletion and exclusion safety → complete phase-04-deletion-safety.plan.md"
-    status: pending
+    status: completed
     dependencies: [phase-03-run-results]
   - id: phase-05-headless-defaults-and-paths
     content: "5 – Headless defaults and file locations → complete phase-05-headless-defaults-and-paths.plan.md"
-    status: pending
+    status: completed
     dependencies: [phase-04-deletion-safety]
   - id: phase-06-arch-packaging-release
     content: "6 – Arch packaging, safe units, diagnostics, public release → complete phase-06-arch-packaging-release.plan.md"
-    status: pending
+    status: completed
     dependencies: [phase-05-headless-defaults-and-paths]
 ---
 

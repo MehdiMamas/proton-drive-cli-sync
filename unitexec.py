@@ -36,8 +36,15 @@ def systemd_quote(arg):
 
 
 def quote_environment(name, value):
-    """`Environment=` value: the whole NAME=value assignment is quoted."""
-    return systemd_quote("%s=%s" % (name, value))
+    """One `Environment=` assignment. systemd does not expand `$` in
+    Environment= (only `%` specifiers), so `$` is left as-is. `%` is doubled,
+    and `\\` and `"` are escaped when the assignment is quoted."""
+    text = "%s=%s" % (name, value)
+    text = text.replace("%", "%%")
+    if text and not any(c in _NEEDS_QUOTES for c in text):
+        return text
+    text = text.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + text + '"'
 
 
 def split_exec(line):

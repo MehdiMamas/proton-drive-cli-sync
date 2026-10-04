@@ -40,12 +40,13 @@ import subprocess
 
 # i18n (import guardé : l'absence de i18n.py n'empêche rien — les
 # messages restent alors en anglais, la langue source).
-import unitexec  # guillemets/échappement systemd (phase 6)
 try:
     from i18n import _
 except ImportError:
     def _(s):
         return s
+
+import unitexec  # guillemets/échappement systemd (phase 6)
 
 # Réglages d'installation (chemins, présence NAS...) : une SEULE source de
 # vérité partagée par le moteur, le GUI et les démons. Import tolérant : si

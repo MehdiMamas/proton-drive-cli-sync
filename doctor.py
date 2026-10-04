@@ -18,13 +18,19 @@ import shutil
 import subprocess
 import sys
 
+import paths
+import unitexec
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CMD_TIMEOUT = 10
-
-try:
-    import config as appconfig
-except Exception:  # config absent or broken: the report still runs
-    appconfig = None
+# Same location as config.DATA_DIR. Not imported from config: that import
+# renames ~/.proton_sync and copies settings, and this tool must not write.
+DATA_DIR = os.path.expanduser("~/.proton-drive-sync")
+_DEFAULTS = {
+    "cli_stall_minutes": 5,
+    "max_delete_min": 20,
+    "max_delete_ratio": 0.5,
+}
 
 SYNC_SERVICE = "proton-sync.service"
 SYNC_TIMER = "proton-sync.timer"
@@ -118,7 +124,7 @@ class Redactor:
                 text = text.replace(value, self.number(value))
         text = _EMAIL.sub("<account>", text)
         if home and home != "/":
-            text = text.replace(home, "~")
+            text = _replace_home_boundary(text, home)
         text = _HOME_PATH.sub(self._home_sub, text)
         return _ABS_PATH.sub(self._abs_sub, text)
 
@@ -156,6 +162,123 @@ class Report:
         return "\n".join(self.lines) + "\n"
 
 
+def _replace_home_boundary(text, home):
+    """Replace HOME only when it is a path prefix, not a username prefix.
+    `/home/meg` must not turn `/home/megan/secret` into `~an/secret`."""
+    out = []
+    i = 0
+    n = len(home)
+    while True:
+        j = text.find(home, i)
+        if j < 0:
+            out.append(text[i:])
+            break
+        nxt = text[j + n] if j + n < len(text) else ""
+        if nxt in ("", "/", '"', "'", " ", "\t", "\n", "\r"):
+            out.append(text[i:j])
+            out.append("~")
+            i = j + n
+        else:
+            out.append(text[i:j + n])
+            i = j + n
+    return "".join(out)
+
+
+def _learn_paths(redactor):
+    """Paths that can contain spaces, learned before the regex pass."""
+    redactor.learn(APP_DIR)
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg:
+        redactor.learn(xdg)
+    for value in os.environ.values():
+        if isinstance(value, str) and value.startswith("/") and len(value) > 1:
+            redactor.learn(value)
+
+
+def _learn_unit_text(redactor, text):
+    for line in (text or "").splitlines():
+        body = None
+        if line.startswith("ExecStart="):
+            body = line[len("ExecStart="):]
+        elif line.startswith("Environment="):
+            body = line[len("Environment="):]
+        if body is None:
+            continue
+        for arg in unitexec.split_exec(body):
+            redactor.learn(arg)
+            if "=" in arg:
+                redactor.learn(arg.split("=", 1)[1])
+
+
+def settings_file():
+    """Settings path, read only. Does not copy the legacy file."""
+    override = os.environ.get("PROTON_SYNC_SETTINGS", "").strip()
+    if override:
+        return override
+    dest = paths.xdg_settings_path()
+    try:
+        if os.path.isfile(dest):
+            return dest
+    except OSError:
+        pass
+    legacy = paths.legacy_settings_path()
+    try:
+        if os.path.isfile(legacy):
+            return legacy
+    except OSError:
+        pass
+    return dest
+
+
+def _load_settings():
+    path = settings_file()
+    data, err = read_json(path)
+    if not isinstance(data, dict):
+        data = {}
+    return path, data, err
+
+
+def _effective_rename(data, modern):
+    if "rename_ext_enabled" in data and not data.get("rename_ext_enabled"):
+        return False
+    if (data.get("rename_ext_enabled") is True
+            and data.get("rename_ext_auto_disabled") is True):
+        return True
+    return not bool(modern)
+
+
+def _int_setting(data, key):
+    try:
+        n = int(data.get(key))
+    except (TypeError, ValueError):
+        return _DEFAULTS[key]
+    return n if n >= 0 else _DEFAULTS[key]
+
+
+def _ratio_setting(data):
+    try:
+        r = float(data.get("max_delete_ratio"))
+    except (TypeError, ValueError):
+        return _DEFAULTS["max_delete_ratio"]
+    return r if 0.0 <= r <= 1.0 else _DEFAULTS["max_delete_ratio"]
+
+
+def _resolve_cli(settings):
+    env = os.environ.get("PROTON_DRIVE_CLI")
+    if env:
+        return env
+    configured = settings.get("proton_cli_path")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    bundled = os.path.join(APP_DIR, "proton-drive")
+    if os.path.isfile(bundled) and os.access(bundled, os.X_OK):
+        return bundled
+    found = shutil.which("proton-drive")
+    if found:
+        return found
+    return bundled
+
+
 def engine_version():
     version = None
     for name in ("VERSION",):
@@ -183,12 +306,14 @@ def section_install(rep):
     rep.kv("XDG_CONFIG_HOME", os.environ.get("XDG_CONFIG_HOME") or "(unset)")
 
 
-def section_cli(rep):
+def section_cli(rep, settings):
     rep.section("Proton CLI")
+    configured = settings.get("proton_cli_path")
+    if not (isinstance(configured, str) and configured.strip()):
+        configured = None
     chain = [
         ("PROTON_DRIVE_CLI", os.environ.get("PROTON_DRIVE_CLI") or "(unset)"),
-        ("settings proton_cli_path",
-         (appconfig.proton_cli_path() if appconfig else None) or "(unset)"),
+        ("settings proton_cli_path", configured or "(unset)"),
         ("next to the scripts",
          os.path.join(APP_DIR, "proton-drive")
          if os.access(os.path.join(APP_DIR, "proton-drive"), os.X_OK)
@@ -197,13 +322,11 @@ def section_cli(rep):
     ]
     for label, value in chain:
         rep.kv("resolve: " + label, value)
-    cli = None
     try:
-        cli = appconfig.resolve_proton_cli() if appconfig else None
+        cli = _resolve_cli(settings)
     except Exception as exc:
         rep.kv("resolved", "error (%s)" % type(exc).__name__)
-    if cli is None:
-        cli = shutil.which("proton-drive")
+        cli = None
     rep.kv("resolved", cli or NA)
     version = None
     if cli and os.path.exists(cli):
@@ -215,7 +338,7 @@ def section_cli(rep):
     return version
 
 
-def section_systemd(rep):
+def section_systemd(rep, redactor):
     rep.section("systemd (user)")
     if shutil.which("systemctl") is None:
         rep.add("systemctl: " + NA)
@@ -223,13 +346,14 @@ def section_systemd(rep):
         for unit in (SYNC_SERVICE, SYNC_TIMER) + REALTIME_UNITS:
             rep.add("-- %s" % unit)
             ok, out = run_cmd(["systemctl", "--user", "cat", unit])
+            _learn_unit_text(redactor, out)
             rep.add(out if out else NA)
             ok, out = run_cmd(["systemctl", "--user", "show", unit, "-p",
                                "Result", "-p", "ExecMainStatus",
                                "-p", "ActiveState"])
             rep.add(out if out else NA)
-        ok, out = run_cmd(["systemctl", "--user", "list-timers", SYNC_TIMER,
-                           "--no-pager"])
+        ok, out = run_cmd(["systemctl", "--user", "list-timers", "--all",
+                           SYNC_TIMER, "--no-pager"])
         rep.add("-- list-timers")
         rep.add(out if out else NA)
     rep.add("-- linger")
@@ -250,60 +374,60 @@ def section_systemd(rep):
 
 def section_state(rep, redactor):
     rep.section("Last run and health")
-    data_dir = getattr(appconfig, "DATA_DIR", None) or os.path.expanduser(
-        "~/.proton-drive-sync")
-    for label, attr, name in (("last-run.json", "LAST_RUN_FILE", "last-run.json"),
-                              ("health.json", "HEALTH_FILE", "health.json")):
-        path = getattr(appconfig, attr, None) or os.path.join(data_dir, name)
+    for label, name in (("last-run.json", "last-run.json"),
+                        ("health.json", "health.json")):
+        path = os.path.join(DATA_DIR, name)
         data, err = read_json(path)
         redactor.learn_tree(data)
+        redactor.learn(path)
         rep.kv(label, compact(data) if err is None else err)
 
 
 def mappings_file(explicit):
     if explicit:
         return explicit
+    path = os.path.expanduser("~/.config/systemd/user/proton-sync.service")
     try:
-        import schedule_manager
-        return schedule_manager.read_service_mappings_path()
-    except Exception:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
         return None
+    m = re.search(r"^ExecStart=(.*)$", content, re.MULTILINE)
+    if not m:
+        return None
+    return unitexec.mappings_arg_from_exec(
+        m.group(1), "proton_sync.py", "proton-drive-sync")
 
 
-def section_settings(rep, redactor, cli_version, mappings_arg):
+def section_settings(rep, redactor, cli_version, mappings_arg, settings, settings_path, settings_err):
     rep.section("Settings")
-    if appconfig is None:
-        rep.add("config module: " + NA)
+    rep.kv("settings file", settings_path)
+    redactor.learn(settings_path)
+    if settings_err == "missing":
+        rep.kv("settings", "missing")
+    elif settings_err is not None:
+        rep.kv("settings", settings_err)
     else:
-        settings, err = read_json(getattr(appconfig, "_SETTINGS_PATH", ""))
-        rep.kv("settings file", getattr(appconfig, "_SETTINGS_PATH", NA))
-        if err is not None:
-            rep.kv("settings", err)
-        else:
-            redactor.learn_tree(settings)
-            if isinstance(settings, dict):
-                for key in sorted(settings):
-                    if "account" in key or "email" in key:
-                        settings = dict(settings, **{key: "<hidden>"})
-            rep.kv("settings (as stored)", compact(settings))
-        try:
-            modern = bool(cli_version and cli_version >= (0, 5, 0))
-            effective = appconfig.effective_rename_ext(lambda: modern)
-            rep.kv("rename-ext effective", "%s (CLI >= 0.5.0: %s)"
-                   % ("on" if effective else "off",
-                      "yes" if modern else "no or unknown"))
-        except Exception as exc:
-            rep.kv("rename-ext effective", "error (%s)" % type(exc).__name__)
-        for label, fn in (("max_delete_min", "max_delete_min"),
-                          ("max_delete_ratio", "max_delete_ratio"),
-                          ("cli_stall_minutes", "cli_stall_minutes")):
-            try:
-                rep.kv(label, getattr(appconfig, fn)())
-            except Exception as exc:
-                rep.kv(label, "error (%s)" % type(exc).__name__)
+        shown = dict(settings)
+        redactor.learn_tree(shown)
+        for key in sorted(shown):
+            if "account" in key or "email" in key:
+                shown[key] = "<hidden>"
+        rep.kv("settings (as stored)", compact(shown))
+    modern = bool(cli_version and cli_version >= (0, 5, 0))
+    effective = _effective_rename(settings, modern)
+    rep.kv("rename-ext effective", "%s (CLI >= 0.5.0: %s)"
+           % ("on" if effective else "off",
+              "yes" if modern else "no or unknown"))
+    rep.kv("max_delete_min", _int_setting(settings, "max_delete_min"))
+    rep.kv("max_delete_ratio", _ratio_setting(settings))
+    rep.kv("cli_stall_minutes", _int_setting(settings, "cli_stall_minutes"))
 
     rep.section("Mappings")
     path = mappings_file(mappings_arg)
+    if path:
+        redactor.learn(path)
+        _learn_unit_text(redactor, "ExecStart=" + path)
     rep.kv("mappings file", path or "unknown (no unit and no --mappings)")
     if not path:
         return
@@ -360,16 +484,17 @@ def section_session(rep):
 def build_report(mappings_arg=None, redact=False):
     rep = Report()
     redactor = Redactor()
+    _learn_paths(redactor)
+    settings_path, settings, settings_err = _load_settings()
     rep.add("proton-drive-sync doctor (read-only)")
     rep.add("Redaction: %s" % ("on" if redact else
                                "OFF - run with --redact before pasting this publicly"))
-    steps = [section_install]
-    for fn in steps:
-        _guard(rep, fn, rep)
-    cli_version = _guard(rep, section_cli, rep)
-    _guard(rep, section_systemd, rep)
+    _guard(rep, section_install, rep)
+    cli_version = _guard(rep, section_cli, rep, settings)
+    _guard(rep, section_systemd, rep, redactor)
     _guard(rep, section_state, rep, redactor)
-    _guard(rep, section_settings, rep, redactor, cli_version, mappings_arg)
+    _guard(rep, section_settings, rep, redactor, cli_version, mappings_arg,
+           settings, settings_path, settings_err)
     _guard(rep, section_session, rep)
     text = rep.text()
     return redactor.apply(text) if redact else text

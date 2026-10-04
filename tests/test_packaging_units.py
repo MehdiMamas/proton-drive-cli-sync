@@ -22,6 +22,14 @@ def _exec_line(text):
     return next(l for l in text.splitlines() if l.startswith("ExecStart="))
 
 
+def test_environment_quote_keeps_dollar():
+    quoted = unitexec.quote_environment("PROTON_DRIVE_CLI", "/opt/a$b/%p")
+    assert "a$b" in quoted
+    assert "a$$b" not in quoted
+    assert "%%p" in quoted
+    assert unitexec.split_exec(quoted) == ["PROTON_DRIVE_CLI=/opt/a$b/%p"]
+
+
 @pytest.mark.parametrize("arg,expected", [
     ("/plain/path.json", "/plain/path.json"),
     ("/with space/m.json", '"/with space/m.json"'),
@@ -100,7 +108,6 @@ def test_packaged_install_uses_usr_bin_launcher(tmp_path, monkeypatch):
     assert "python3" not in line and PACKAGED not in line
     assert "PROTON_DRIVE_CLI=" not in text  # nothing to point at under /usr/lib
     assert "RestartPreventExitStatus=5" in text
-    Path(schedule_manager.SERVICE_PATH).parent.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(schedule_manager, "SERVICE_PATH",
                         str(tmp_path / "proton-sync.service"))
     Path(schedule_manager.SERVICE_PATH).write_text(text, encoding="utf-8")
@@ -153,16 +160,53 @@ def _doctor(args, home, env_extra=None, path_env=None):
                           text=True, timeout=120)
 
 
+def _doctor_stubs(tmp_path, unit_text, journal_text):
+    stub = tmp_path / "stubs"
+    stub.mkdir()
+    (stub / "unit.txt").write_text(unit_text, encoding="utf-8")
+    (stub / "journal.txt").write_text(journal_text, encoding="utf-8")
+    body = """#!/bin/sh
+cmd=$(basename "$0")
+d=$(dirname "$0")
+case "$cmd" in
+  systemctl)
+    case "$2" in
+      cat) cat "$d/unit.txt" ;;
+      list-timers)
+        printf '%s\\n' "$*" | grep -q -- '--all' \\
+          && echo 'timers listed with --all' \\
+          || echo 'timers missing --all'
+        ;;
+      *) echo 'ActiveState=inactive' ;;
+    esac
+    ;;
+  journalctl) cat "$d/journal.txt" ;;
+  loginctl) echo 'Linger=no' ;;
+  busctl) echo 'Name=org.freedesktop.secrets' ;;
+esac
+exit 0
+"""
+    for name in ("systemctl", "journalctl", "loginctl", "busctl"):
+        path = stub / name
+        path.write_text(body, encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+    # Stubs win over the real systemctl/journalctl. /bin stays so the
+    # stubs can use cat and grep.
+    return str(stub) + ":/usr/bin:/bin"
+
+
 def test_doctor_redact_removes_emails_and_paths(tmp_path):
     home = tmp_path / "home" / "alice"
     (home / ".proton-drive-sync").mkdir(parents=True)
+    docs = home / "My Docs"
+    docs.mkdir(parents=True)
+    mappings = docs / "mappings.json"
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({
         "language": "en",
         "account_name": "alice@example.org",
         "proton_cli_path": "/opt/secret-tools/proton-drive",
     }), encoding="utf-8")
-    mappings = tmp_path / "mappings.json"
     mappings.write_text(json.dumps({"mappings": [{
         "type": "folder",
         "source": "/mnt/secret-nas/private photos",
@@ -173,20 +217,63 @@ def test_doctor_redact_removes_emails_and_paths(tmp_path):
     (home / ".proton-drive-sync" / "last-run.json").write_text(json.dumps({
         "last_full": {"exit": 0, "source": "/mnt/secret-nas/private photos",
                       "user": "carol@example.com"}}), encoding="utf-8")
-    plain = _doctor(["--mappings", str(mappings)], home,
-                    {"PROTON_SYNC_SETTINGS": str(settings)})
+    sibling = str(home) + "x/secret"
+    unit = (
+        "[Service]\n"
+        'ExecStart=/usr/bin/proton-drive-sync "%s"\n'
+        'Environment="PROTON_DRIVE_CLI=/opt/secret-tools/proton-drive"\n'
+    ) % mappings
+    journal = (
+        "alice@example.org uploaded /mnt/secret-nas/private photos\n"
+        "also %s\n" % sibling
+    )
+    stubs = _doctor_stubs(tmp_path, unit, journal)
+    extra = {"PROTON_SYNC_SETTINGS": str(settings)}
+    plain = _doctor(["--mappings", str(mappings)], home, extra, path_env=stubs)
     assert plain.returncode == 0, plain.stderr
-    assert "secret-nas" in plain.stdout  # the unredacted report shows it
-    redacted = _doctor(["--redact", "--mappings", str(mappings)], home,
-                       {"PROTON_SYNC_SETTINGS": str(settings)})
+    assert "secret-nas" in plain.stdout
+    assert "timers listed with --all" in plain.stdout
+    redacted = _doctor(["--redact", "--mappings", str(mappings)], home, extra,
+                       path_env=stubs)
     assert redacted.returncode == 0, redacted.stderr
-    out = redacted.stdout
+    out = redacted.stdout + redacted.stderr
     for secret in ("alice@example.org", "bob@example.net", "carol@example.com",
                    "secret-nas", "private photos", "secret-tools",
-                   str(tmp_path), "/home/alice"):
+                   "Docs", "x/secret", str(home), str(tmp_path), sibling):
         assert secret not in out, secret
-    assert "mapping 1: type=folder" in out
-    assert "allow_delete=False" in out
+    assert "mapping 1: type=folder" in redacted.stdout
+    assert "allow_delete=False" in redacted.stdout
+    assert "timers listed with --all" in redacted.stdout
+
+
+def test_doctor_redact_does_not_migrate_legacy_home(tmp_path):
+    home = tmp_path / "home" / "nizar"
+    legacy = home / ".proton_sync"
+    (legacy / "cache").mkdir(parents=True)
+    marker = legacy / "cache" / "keep"
+    marker.write_text("x", encoding="utf-8")
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"language": "en"}', encoding="utf-8")
+    stubs = _doctor_stubs(tmp_path, "[Service]\n", "ok\n")
+    result = _doctor(["--redact"], home,
+                     {"PROTON_SYNC_SETTINGS": str(settings)}, path_env=stubs)
+    assert result.returncode == 0, result.stderr
+    assert str(home) not in result.stdout
+    assert str(home) not in result.stderr
+    assert legacy.is_dir()
+    assert marker.is_file()
+    assert not (home / ".proton-drive-sync").exists()
+
+
+def test_gui_run_logs_not_under_app_dir():
+    editor = (REPO / "proton_mapping_editor.py").read_text(encoding="utf-8")
+    config = (REPO / "config.py").read_text(encoding="utf-8")
+    assert 'os.path.join(APP_DIR, "logs")' not in editor
+    assert 'RUN_LOG_DIR = os.path.join(DATA_DIR, "logs")' in config
+    assert 'DATA_DIR = os.path.expanduser("~/.proton-drive-sync")' in config
+    assert "def _dialog_dir(" in editor
+    assert "os.access(APP_DIR, os.W_OK)" in editor
+    assert editor.count("_dialog_dir(") >= 4
 
 
 def test_doctor_survives_missing_systemctl_and_cli(tmp_path):
