@@ -49,9 +49,11 @@ makes that probe exit 1. `filesystem list <path> -j` returns a JSON array of
 direct children that are not trashed. Fields the engine unwraps (`type`,
 `keyAuthor`, `activeRevision`) use `{"ok": true, "value": ...}`. File items
 carry `claimedSize`, `claimedModificationTime` and `claimedDigests.sha1`.
-`claimedModificationTime` is the local file's mtime in POSIX seconds at the
-moment of upload. A later change checks whether the real CLI does the same
-and updates the fake if it does not.
+`claimedModificationTime` is an ISO-8601 UTC string with milliseconds
+(`Date.toISOString()`, for example `2001-09-09T01:46:40.000Z`). That is what
+`filesystem list -j` returns at SDK commit `28ac9cdc`: upload sends the
+local file's modification time, and JSON serialization turns the Date into
+that string. The state file stores POSIX seconds; the listing converts them.
 
 Uploads read names relative to the process cwd, which is how the engine
 calls the CLI. Glob escapes are undone first (`a[[]b.txt` is the file
@@ -104,11 +106,10 @@ today's code it fails, and strict mode records that as an expected failure.
 The change that fixes the bug removes the marker in the same change. Leaving
 the marker on a test that now passes fails the suite.
 
+The equal-size tests now live in `tests/test_equal_size.py`.
+
 | Test | Fixed by |
 |---|---|
-| `test_equal_size_edit_is_uploaded` | equal-size upload |
-| `test_equal_size_edit_detected_by_comparator` | equal-size upload |
-| `test_batch_recovery_not_fooled_by_old_equal_size_remote` | equal-size upload |
 | `test_upload_failure_exits_nonzero` | partial-pass exit code |
 | `test_subpath_upload_failure_exits_nonzero` | partial-pass exit code |
 | `test_exclusion_added_later_keeps_remote_copy` | exclusion keeps the remote copy |
