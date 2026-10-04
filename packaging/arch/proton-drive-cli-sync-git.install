@@ -1,0 +1,30 @@
+post_install() {
+  cat <<'EOF'
+==> proton-drive-cli-sync (not affiliated with Proton AG). Use at your own risk.
+
+ 1. Install Proton's official CLI (the `proton-drive` command), then sign in:
+      AUR: proton-drive-cli-bin, or download from
+      https://proton.me/download/drive/cli/index.html
+    Put it on your PATH, or set its path in the GUI / PROTON_DRIVE_CLI.
+ 2. Create mappings: run `proton-drive-sync-gui`, or write a mappings file
+    (see /usr/share/doc/proton-drive-cli-sync-git/mappings.example.json).
+    Try a throwaway folder first. Keep independent backups.
+ 3. Schedule a nightly run from the GUI (Schedule). That window writes the
+    service and the timer. systemctl --user enable only re-enables a timer
+    that has already been written.
+ 4. Unattended runs need the credential store to be unlocked. `loginctl
+    enable-linger $USER` keeps your user services running while you are logged
+    out, but it does NOT unlock a keyring: with a locked keyring the run exits
+    with code 2 and nothing is uploaded.
+ 5. For a bug report, run `proton-drive-sync-doctor --redact`.
+EOF
+}
+
+post_upgrade() {
+  cat <<'EOF'
+==> proton-drive-cli-sync updated. Rewrite your systemd units once so they use the
+    stable launcher and current options: open the GUI Schedule tab and save,
+    or run: python3 /usr/lib/proton-drive-cli-sync/schedule_manager.py --refresh-units
+    then: systemctl --user daemon-reload
+EOF
+}

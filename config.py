@@ -691,6 +691,8 @@ def cli_env_value(default_template):
 # de fichiers que $HOME) : instantané, ne touche PAS le contenu -> aucun
 # re-balayage du cache existant.
 DATA_DIR = os.path.expanduser("~/.proton-drive-sync")
+# GUI "Run" logs. Not under APP_DIR: a packaged install is read-only there.
+RUN_LOG_DIR = os.path.join(DATA_DIR, "logs")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 QUEUE_DIR = os.path.join(DATA_DIR, "queue")
 REALTIME_CONF = os.path.join(DATA_DIR, "realtime.conf")
