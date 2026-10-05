@@ -11,6 +11,7 @@ except ImportError:
         return s
 
 from ui.document import Document, backup_blurb
+from ui.live_sync import FolderWatchers
 from ui.pages.mappings import MappingsPage
 from ui.pages.settings import SettingsPage
 from ui import widgets
@@ -59,6 +60,7 @@ class MainWindow:
         self._qt = _Window()
         self._quitting = False
         self.doc = Document()
+        self.watchers = FolderWatchers()
         self.cli_flags = {"revisions": None, "shared": None}
         self._qt.setWindowTitle(_("Mappings editor — Proton Drive sync"))
         self._qt.resize(1060, 700)
@@ -212,7 +214,7 @@ class MainWindow:
         if ok:
             self.set_account_line(detail or _("Signed in."))
             if source:
-                self.mappings._launch_mapping_pass(source, announce_cli=announce)
+                self.mappings._queue_pass(source, announce)
             return
         text = detail or _("Session unavailable")
         self.account_chip.setText(text)

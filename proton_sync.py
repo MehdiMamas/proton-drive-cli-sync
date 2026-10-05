@@ -3013,7 +3013,9 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
     # sortie en code 3 (« pas encore analysé — différé »), le consommateur CONSERVE
     # le marqueur et réessaiera ; dès qu'un passage complet aura analysé l'arbre, il
     # deviendra traitable. `--ignore-cache` court-circuite ce garde-fou.
-    if cache is not None and not ignore_cache:
+    # Un dossier choisi (« live ») se synchronise tout de suite : le refus froid
+    # attendait un passage lancé à la main, et ce n'est plus le chemin normal.
+    if cache is not None and not ignore_cache and mapping.get("live") is not True:
         source = os.path.normpath(mapping.get("source", ""))
         target = os.path.normpath(subpath)
         ref = target if target == source else os.path.dirname(target)

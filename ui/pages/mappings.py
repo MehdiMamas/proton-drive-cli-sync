@@ -19,6 +19,16 @@ def _selected_rows(table):
     return sorted({item.row() for item in table.selectedItems()})
 
 
+def _consumer_active():
+    try:
+        import realtime_manager
+        _rc, out, _err = realtime_manager._run(
+            ["systemctl", "--user", "is-active", realtime_manager.CONSUME_NAME])
+    except Exception:
+        return False
+    return (out or "").strip() == "active"
+
+
 class MappingsPage:
     """La page vit dans ``host``. Le document est celui de la fenêtre."""
 
@@ -551,13 +561,39 @@ class MappingsPage:
     def _prepare_live(self, source):
         import volume as volume_mod
         volume_mod.ensure_dolphin_place(source)
+        try:
+            import realtime_manager
+            realtime_manager.write_config(2, 2)
+        except Exception:
+            pass
         started, message = volume_mod.start_watcher(self.doc.path)
+        if not started or not _consumer_active():
+            watchers = getattr(self.window, "watchers", None)
+            if watchers is not None:
+                watchers.ensure(self.doc.path)
+                started = True
         self._refresh()
         tray = getattr(self.window, "_tray", None)
         if tray is not None:
             tray.refresh()
         if not started:
             self.window.set_status(message or _("The real-time watcher was not started."))
+        self._queue_pass(source, False)
+
+    def _queue_pass(self, source, announce_cli):
+        if not source:
+            return
+        self._queued_source = source
+        self._queued_announce = announce_cli
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._run_queued_pass)
+
+    def _run_queued_pass(self):
+        source = getattr(self, "_queued_source", "") or ""
+        announce = bool(getattr(self, "_queued_announce", False))
+        self._queued_source = ""
+        if source:
+            self._launch_mapping_pass(source, announce_cli=announce)
 
     def _auth_then(self, source, announce_cli):
         self._pending_source = source

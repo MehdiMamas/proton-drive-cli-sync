@@ -43,6 +43,7 @@ separate pull requests. New files added by the fork are not listed.
 | `proton_sync.py` | 2.1.0 | A pass re-checked every ancestor of a folder it had already seen. Within one pass it now lists or creates the next folder directly, and falls back to the level-by-level check when that direct list fails |
 | `proton_sync.py` | twoway A | `download_decision` compares claimed size, SHA-1 and claimed modification time. A listing entry also carries `claimed_size` and `node_id`. One-way upload still reads `size` |
 | `proton_sync.py` | twoway B | A mapping with `"direction": "twoway"` is reconciled by `twoway.py`. Every other mapping stays on the one-way path |
+| `proton_sync.py` | live folder | A mapping marked live is synced by a real-time subpath even when the cache is not yet complete |
 | `realtime_consumer.py` | twoway C | A twoway folder is polled on `poll_minutes` (default 5) by the existing consumer. No new daemon |
 | `schedule_manager.py` | twoway C | Comment only: the nightly unit is the same engine pass, including twoway mappings. Unit text is still generated only here |
 | `schedule_manager.py` | file managers | Installing or refreshing the schedule also writes and enables the file-manager status unit for the same mappings file |

@@ -118,6 +118,9 @@ class Tray:
 
     def _quit(self):
         self.window._quitting = True
+        watchers = getattr(self.window, "watchers", None)
+        if watchers is not None:
+            watchers.stop()
         self.service.stop()
         self._timer.stop()
         self._icon.hide()
@@ -140,6 +143,9 @@ class Tray:
 
     def _exit(self, event):
         self.service.stop()
+        watchers = getattr(self.window, "watchers", None)
+        if watchers is not None:
+            watchers.stop()
         self._timer.stop()
         self._icon.hide()
         event.accept()
