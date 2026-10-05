@@ -528,7 +528,25 @@ class MappingsPage:
         except Exception as exc:
             widgets.error(self.window, str(exc), _("Save error"))
             return
-        volume_mod.ensure_dolphin_place(mapping["source"])
+        self._arm_live(mapping["source"], announce_cli=True)
+
+    def resume_live(self):
+        """Reopen the chosen folder's watcher and run one pass, without a button."""
+        live = self._live_mapping()
+        if live is None or not self.doc.path:
+            return
+        self._arm_live(live["source"], announce_cli=False)
+
+    def _live_mapping(self):
+        for row in self.doc.mappings:
+            if (row.get("live") is True and row.get("type", "folder") == "folder"
+                    and row.get("source")):
+                return row
+        return None
+
+    def _arm_live(self, source, announce_cli):
+        import volume as volume_mod
+        volume_mod.ensure_dolphin_place(source)
         started, message = volume_mod.start_watcher(self.doc.path)
         self._refresh()
         tray = getattr(self.window, "_tray", None)
@@ -536,21 +554,23 @@ class MappingsPage:
             tray.refresh()
         if not started:
             self.window.set_status(message or _("The real-time watcher was not started."))
-        if not widgets.confirm(
-                self.window,
-                _("Local changes in this folder sync on their own. A pass now "
-                  "syncs this mapping only. It does not download the rest of "
-                  "your account."),
-                _("Sync this folder?"),
-                _("Sync"), _("Not now")):
-            self.window.set_status(_("Proton Drive opens this folder. A pass was not started."))
+        self._launch_mapping_pass(source, announce_cli=announce_cli)
+
+    def _launch_mapping_pass(self, source, announce_cli):
+        import config as appconfig
+        if not appconfig.cli_is_usable():
+            lines = appconfig.cli_unusable_explanation()
+            if announce_cli:
+                widgets.error(self.window, "\n".join(lines), _("Proton CLI"))
+            else:
+                self.window.set_status(lines[0] if lines else _("Proton CLI binary unusable."))
             return
         if not self._need_engine() or self._running():
             return
         log_path = self._log_file()
         args = run.sync_args(
             self.doc.path, dry_run=False, verify_hash=False, verbose=False,
-            delete=False, only_sources=[mapping["source"]])
+            delete=False, only_sources=[source])
         cmd = run.engine_cmd(args)
         self._append(_("=== Launch: {c} ===").format(
             c=" ".join(shlex.quote(part) for part in cmd)) + "\n")

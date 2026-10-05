@@ -119,7 +119,11 @@ def test_unpackaged_install_keeps_python_path(monkeypatch, tmp_path):
     text = schedule_manager.build_service_text(str(tmp_path / "m.json"))
     line = _exec_line(text)
     assert line.startswith("ExecStart=/usr/bin/python3 ")
-    assert "Environment=PROTON_DRIVE_CLI=" in text
+    default = schedule_manager.DEFAULT_CLI
+    if os.path.isfile(default) and os.access(default, os.X_OK):
+        assert "Environment=PROTON_DRIVE_CLI=" in text
+    else:
+        assert "PROTON_DRIVE_CLI=" not in text
 
 
 def test_consumer_unit_generation_escaped(tmp_path, monkeypatch):
@@ -135,9 +139,13 @@ def test_consumer_unit_generation_escaped(tmp_path, monkeypatch):
         assert args == ["/usr/bin/python3", app + "/" + script, path]
         assert '"%s"' % (app + "/" + script) in text
         assert "100%%.json" in text
-        env = next(l for l in text.splitlines() if l.startswith("Environment="))
-        assert env.startswith('Environment="PROTON_DRIVE_CLI=') or \
-            env.startswith("Environment=PROTON_DRIVE_CLI=")
+        default = realtime_manager.DEFAULT_CLI
+        if os.path.isfile(default) and os.access(default, os.X_OK):
+            env = next(l for l in text.splitlines() if l.startswith("Environment="))
+            assert env.startswith('Environment="PROTON_DRIVE_CLI=') or \
+                env.startswith("Environment=PROTON_DRIVE_CLI=")
+        else:
+            assert "PROTON_DRIVE_CLI=" not in text
     consume = tmp_path / "proton-consume.service"
     consume.write_text(realtime_manager.build_consume_service_text(path),
                        encoding="utf-8")

@@ -700,9 +700,11 @@ def _service_text(description, script, mappings_path):
     """Génère un .service --user simple, qui RESTE actif (Restart=on-failure)
     et redémarre à l'ouverture de session (WantedBy=default.target)."""
     exec_line = unitexec.exec_line(script, [mappings_path], app_dir=H_ENGINE_DIR)
-    cli_value = appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI
-    if unitexec.is_packaged(H_ENGINE_DIR) and cli_value == DEFAULT_CLI:
-        env_line = ""  # rien d'installe sous /usr/lib : proton-drive via PATH
+    cli_value = appconfig.cli_unit_value(DEFAULT_CLI) if _HAS_CONFIG else (
+        DEFAULT_CLI if os.path.isfile(DEFAULT_CLI) and os.access(DEFAULT_CLI, os.X_OK)
+        else None)
+    if not cli_value or (unitexec.is_packaged(H_ENGINE_DIR) and cli_value == DEFAULT_CLI):
+        env_line = ""  # chemin absent ou paquet : proton-drive via PATH
     else:
         env_line = "Environment=" + unitexec.quote_environment(
             "PROTON_DRIVE_CLI", cli_value) + "\n"

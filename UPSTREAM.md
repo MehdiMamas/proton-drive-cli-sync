@@ -46,3 +46,4 @@ separate pull requests. New files added by the fork are not listed.
 | `realtime_consumer.py` | twoway C | A twoway folder is polled on `poll_minutes` (default 5) by the existing consumer. No new daemon |
 | `schedule_manager.py` | twoway C | Comment only: the nightly unit is the same engine pass, including twoway mappings. Unit text is still generated only here |
 | `schedule_manager.py` | file managers | Installing or refreshing the schedule also writes and enables the file-manager status unit for the same mappings file |
+| `config.py`, `schedule_manager.py`, `realtime_manager.py` | live folder | A missing CLI path is skipped, and a missing path is not embedded in a generated unit, so `proton-drive` on PATH is used |

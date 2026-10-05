@@ -20,6 +20,18 @@ from ui import widgets
 _SINGLETON = "\0proton_mapping_editor_%d" % os.getuid() if os.name != "nt" else None
 
 
+def _mappings_from_units():
+    """The mappings file the watcher was already started with, if it is still there."""
+    try:
+        import realtime_manager
+        path = realtime_manager.read_units_mappings_path()
+    except Exception:
+        return None
+    if path and os.path.isfile(path):
+        return path
+    return None
+
+
 class MainWindow:
     """Enveloppe autour de QMainWindow, construite seulement si Qt est là."""
 
@@ -136,6 +148,8 @@ class MainWindow:
         self._qt.auth_sig.connect(self._paint_auth)
         self._qt.account_sig.connect(self._paint_account)
 
+        if not (config_path and os.path.exists(config_path)):
+            config_path = _mappings_from_units()
         if config_path and os.path.exists(config_path):
             try:
                 self.doc.load(config_path)
@@ -149,6 +163,7 @@ class MainWindow:
         from ui.launcher import install_ui_autostart
         self._tray = Tray(self)
         install_ui_autostart()
+        QTimer.singleShot(400, self.mappings.resume_live)
 
     def _fit_screen(self):
         from PySide6.QtWidgets import QApplication

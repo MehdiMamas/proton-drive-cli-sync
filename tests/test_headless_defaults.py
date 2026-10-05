@@ -240,6 +240,28 @@ def test_cli_found_on_path_when_no_setting(tmp_path, monkeypatch):
     assert os.path.samefile(found, binary)
 
 
+def test_missing_cli_path_does_not_hide_the_one_on_path(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(config, "APP_DIR", str(app))
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    binary = bindir / "proton-drive"
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    missing = tmp_path / "gone" / "proton-drive"
+    monkeypatch.setenv("PROTON_DRIVE_CLI", str(missing))
+    monkeypatch.setattr(config, "proton_cli_path", lambda: str(tmp_path / "also-gone"))
+    found = config.resolve_proton_cli()
+    assert os.path.samefile(found, binary)
+    link = tmp_path / "link-proton-drive"
+    link.symlink_to(binary)
+    monkeypatch.setattr(config, "proton_cli_path", lambda: str(link))
+    found = config.resolve_proton_cli()
+    assert os.path.samefile(found, binary)
+
+
 def test_symlink_semantics_documented(
         fake_drive, local_tree, write_mappings, engine, tmp_path):
     doc = (REPO / "docs" / "change-detection.md").read_text(encoding="utf-8")

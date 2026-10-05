@@ -264,19 +264,24 @@ def _ratio_setting(data):
 
 
 def _resolve_cli(settings):
+    # Même repli que config.pick_proton_cli. config n'est pas importé ici :
+    # son import réécrit des dossiers sous $HOME, et ce rapport ne doit rien écrire.
     env = os.environ.get("PROTON_DRIVE_CLI")
-    if env:
-        return env
     configured = settings.get("proton_cli_path")
-    if isinstance(configured, str) and configured.strip():
-        return configured.strip()
+    if not isinstance(configured, str) or not configured.strip():
+        configured = None
+    else:
+        configured = configured.strip()
     bundled = os.path.join(APP_DIR, "proton-drive")
+    for path in (env, configured):
+        if path and os.path.exists(path):
+            return path
     if os.path.isfile(bundled) and os.access(bundled, os.X_OK):
         return bundled
     found = shutil.which("proton-drive")
     if found:
         return found
-    return bundled
+    return env or configured or bundled
 
 
 def engine_version():

@@ -552,30 +552,36 @@ def set_cli_stall_max_kills(value):
     return _put("cli_stall_max_kills", n)
 
 
-def resolve_proton_cli():
-    """Ordre de résolution du binaire CLI Proton, PARTAGÉ par tous les
-    fichiers (moteur, GUI, démons) — une seule règle, jamais dupliquée :
-      1. Variable d'environnement PROTON_DRIVE_CLI (prioritaire : ne casse
-         rien chez qui l'utilise déjà) ;
-      2. Réglage 'proton_cli_path' de settings.json (le plus pratique pour un
-         usage GUI — pas besoin de manipuler une variable d'environnement) ;
-      3. <dossier d'installation>/proton-drive, s'il est un fichier exécutable ;
-      4. `proton-drive` trouvé sur PATH ;
-      5. <dossier d'installation>/proton-drive quand même, pour que le message
-         d'erreur nomme un chemin (comme avant l'étape PATH)."""
-    env = os.environ.get("PROTON_DRIVE_CLI")
-    if env:
-        return env
-    configured = proton_cli_path()
-    if configured:
-        return configured
-    bundled = os.path.join(APP_DIR, "proton-drive")
-    if os.path.isfile(bundled) and os.access(bundled, os.X_OK):
+def pick_proton_cli(env, configured, bundled):
+    """Même ordre que resolve_proton_cli, sur des valeurs déjà lues.
+
+    Un chemin qui n'existe pas est ignoré. Une unité systemd qui a figé
+    l'ancien emplacement (à côté des scripts) ne doit pas cacher
+    /usr/bin/proton-drive ni le champ Configuration.
+    """
+    for path in (env, configured):
+        if path and os.path.exists(path):
+            return path
+    if bundled and os.path.isfile(bundled) and os.access(bundled, os.X_OK):
         return bundled
     found = shutil.which("proton-drive")
     if found:
         return found
-    return bundled
+    return env or configured or bundled
+
+
+def resolve_proton_cli():
+    """Ordre de résolution du binaire CLI Proton, PARTAGÉ par tous les
+    fichiers (moteur, GUI, démons) — une seule règle, jamais dupliquée :
+      1. PROTON_DRIVE_CLI, si ce fichier existe ;
+      2. Réglage 'proton_cli_path', si ce fichier existe ;
+      3. <dossier d'installation>/proton-drive, s'il est exécutable ;
+      4. `proton-drive` trouvé sur PATH ;
+      5. le premier chemin explicite, même absent, pour nommer l'erreur."""
+    return pick_proton_cli(
+        os.environ.get("PROTON_DRIVE_CLI"),
+        proton_cli_path(),
+        os.path.join(APP_DIR, "proton-drive"))
 
 
 def cli_is_usable(path=None):
@@ -654,32 +660,41 @@ def cli_missing_explanation():
           "official `proton-drive` binary, which you download separately. "
           "It looks in this order:"),
         "",
-        _("  1. the PROTON_DRIVE_CLI environment variable, if set;"),
-        _("  2. the “Proton CLI binary path” field in the Configuration window;"),
+        _("  1. the PROTON_DRIVE_CLI environment variable, when that file exists;"),
+        _("  2. the “Proton CLI binary path” field in the Configuration window, "
+          "when that file exists;"),
         _("  3. {p}, when that file is executable;").format(
             p=os.path.join(APP_DIR, "proton-drive")),
         _("  4. `proton-drive` on PATH;"),
-        _("  5. otherwise the path in step 3, so the error can name it."),
+        _("  5. otherwise the first explicit path, so the error can name it."),
         "",
-        _("Simplest fix: install the `proton-drive` binary on PATH, or place "
-          "it next to the scripts (step 3). To keep it elsewhere, fill in "
-          "the Configuration field."),
+        _("A path that does not exist is skipped, so `proton-drive` on PATH "
+          "is still used. Simplest fix: install that binary on PATH "
+          "(/usr/bin/proton-drive)."),
         "",
-        _("If you change this path AFTER installing the services, reinstall "
-          "them: generated systemd units embed the path when created, and "
-          "would otherwise keep pointing at the old one."),
+        _("Reinstall the services after you change a path that does exist: "
+          "generated systemd units embed that path."),
     ]
 
 
 def cli_env_value(default_template):
     """Valeur à écrire dans Environment=PROTON_DRIVE_CLI= d'une unité systemd
     GÉNÉRÉE (realtime_manager.py, schedule_manager.py) : le chemin CONFIGURÉ
-    (settings.json) s'il est explicitement réglé, sinon `default_template`
-    (généralement un gabarit %h, résolu par systemd lui-même à l'exécution —
-    PAS par Python ici). Centralisé pour que les deux générateurs d'unités
-    partagent EXACTEMENT la même règle, jamais dupliquée."""
+    (settings.json) s'il est explicitement réglé, sinon `default_template`."""
     configured = proton_cli_path()
     return configured if configured else default_template
+
+
+def cli_unit_value(default_template):
+    """Chemin à figer dans l'unité, ou None.
+
+    Un chemin absent ne doit pas être écrit : le consommateur le prendrait
+    avant `proton-drive` sur PATH et refuserait de lancer un passage.
+    """
+    chosen = cli_env_value(default_template)
+    if chosen and os.path.isfile(chosen) and os.access(chosen, os.X_OK):
+        return chosen
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────
