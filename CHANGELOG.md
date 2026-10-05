@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- The Dolphin plugin includes `proton_drive_sync_plugin.moc`, which AUTOMOC requires because the file uses `K_PLUGIN_CLASS_WITH_JSON`. Migration: none.
+- The Dolphin plugin includes `proton_drive_sync_plugin.moc`, which AUTOMOC requires because the file uses `K_PLUGIN_CLASS_WITH_JSON`. It includes `<Dolphin/KVersionControlPlugin>` and implements the two required action methods. Migration: none.
 
 ### Added
 

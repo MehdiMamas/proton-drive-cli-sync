@@ -12,6 +12,7 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
+#include <QAction>
 #include <QDir>
 #include <QVariantMap>
 
@@ -96,6 +97,18 @@ KVersionControlPlugin::ItemVersion ProtonDriveSyncPlugin::itemVersion(const KFil
         return UnversionedVersion;
     }
     return it.value();
+}
+
+QList<QAction *> ProtonDriveSyncPlugin::versionControlActions(const KFileItemList &items) const
+{
+    Q_UNUSED(items)
+    return {};
+}
+
+QList<QAction *> ProtonDriveSyncPlugin::outOfVersionControlActions(const KFileItemList &items) const
+{
+    Q_UNUSED(items)
+    return {};
 }
 
 #include "proton_drive_sync_plugin.moc"

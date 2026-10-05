@@ -6,14 +6,16 @@
 #ifndef PROTON_DRIVE_SYNC_PLUGIN_H
 #define PROTON_DRIVE_SYNC_PLUGIN_H
 
-#include <KVersionControlPlugin>
+#include <Dolphin/KVersionControlPlugin>
 
 #include <QHash>
 #include <QList>
 #include <QString>
 #include <QVariant>
 
+class QAction;
 class KFileItem;
+class KFileItemList;
 
 // Reads org.protondrivesync.FileStatus. A missing bus leaves every file unmarked.
 class ProtonDriveSyncPlugin : public KVersionControlPlugin
@@ -27,6 +29,8 @@ public:
     bool beginRetrieval(const QString &directory) override;
     void endRetrieval() override;
     ItemVersion itemVersion(const KFileItem &item) const override;
+    QList<QAction *> versionControlActions(const KFileItemList &items) const override;
+    QList<QAction *> outOfVersionControlActions(const KFileItemList &items) const override;
 
 private:
     QHash<QString, ItemVersion> m_versions;
