@@ -37,3 +37,4 @@ separate pull requests. New files added by the fork are not listed.
 | `config.py` | 6 | `RUN_LOG_DIR` is `~/.proton-drive-sync/logs` |
 | `README.md`, `README_fr.md` | 6 | File list names `unitexec.py` and `doctor.py`; run logs are under the data directory |
 | `README.md`, `LICENSE`, `CHANGELOG.md` | 6 | Fork notice and disclaimer on top, fork contributors line, 2.0.0 section |
+| `tray_indicator.py` | UI | The status icon opens `python -m ui` instead of the Tk editor |

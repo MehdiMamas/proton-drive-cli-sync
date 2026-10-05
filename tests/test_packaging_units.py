@@ -267,8 +267,11 @@ def test_doctor_redact_does_not_migrate_legacy_home(tmp_path):
 
 def test_gui_run_logs_not_under_app_dir():
     editor = (REPO / "proton_mapping_editor.py").read_text(encoding="utf-8")
+    ui_run = (REPO / "ui" / "run.py").read_text(encoding="utf-8")
     config = (REPO / "config.py").read_text(encoding="utf-8")
     assert 'os.path.join(APP_DIR, "logs")' not in editor
+    assert 'os.path.join(APP_DIR, "logs")' not in ui_run
+    assert "RUN_LOG_DIR" in ui_run
     assert 'RUN_LOG_DIR = os.path.join(DATA_DIR, "logs")' in config
     assert 'DATA_DIR = os.path.expanduser("~/.proton-drive-sync")' in config
     assert "def _dialog_dir(" in editor
@@ -317,13 +320,21 @@ def test_pkgbuild_syntax():
     assert (ARCH / install).is_file()
     for glob_pattern in re.findall(r"in (locale/[^;\s]+)", body):
         assert list(REPO.glob(glob_pattern)), glob_pattern
-    assert "depends=('python' 'tk' 'python-pyinotify')" in text
+    assert "depends=('python' 'tk' 'python-pyinotify' 'pyside6')" in text
     assert "check()" in text and "pytest" in text
+
+
+def test_gui_launcher_starts_qt_ui():
+    text = (ARCH / "launchers" / "proton-drive-sync-gui").read_text(encoding="utf-8")
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert lines[0] == "#!/bin/sh"
+    assert lines[1] == "cd %s || exit 1" % PACKAGED
+    assert lines[2] == 'exec python3 -m ui "$@"'
+    assert (REPO / "ui" / "__main__.py").is_file()
 
 
 @pytest.mark.parametrize("launcher,script", [
     ("proton-drive-sync", "proton_sync.py"),
-    ("proton-drive-sync-gui", "proton_mapping_editor.py"),
     ("proton-drive-sync-doctor", "doctor.py"),
 ])
 def test_launchers_exec_correct_scripts(launcher, script):

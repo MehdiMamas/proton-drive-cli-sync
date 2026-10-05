@@ -29,6 +29,13 @@ _PYTEST_SETTINGS = os.path.join(_PYTEST_HOME, "settings.json")
 with open(_PYTEST_SETTINGS, "w", encoding="utf-8") as _settings_handle:
     _settings_handle.write('{"language": "en"}\n')
 os.environ["PROTON_SYNC_SETTINGS"] = _PYTEST_SETTINGS
+# expanduser sous Windows suit USERPROFILE, pas HOME. Sans ça, importer
+# config.py crée le vrai ~/.proton-drive-sync pendant la suite.
+if os.name == "nt":
+    os.environ["USERPROFILE"] = _PYTEST_HOME
+    drive, tail = os.path.splitdrive(_PYTEST_HOME)
+    os.environ["HOMEDRIVE"] = drive
+    os.environ["HOMEPATH"] = tail or "\\"
 
 sys.path.insert(0, str(FAKES))
 import remote_state  # noqa: E402

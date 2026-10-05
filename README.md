@@ -16,7 +16,7 @@ cd proton-drive-cli-sync/packaging/arch
 makepkg -si
 ```
 
-Manual: install `python3`, `tk` and `python-pyinotify`, install Proton's [official CLI](https://proton.me/download/drive/cli/index.html) and sign in, then run `python3 proton_mapping_editor.py` from a checkout.
+Manual: install `python3`, `tk`, `python3-pyside6` (or `PySide6`) and `python-pyinotify`, install Proton's [official CLI](https://proton.me/download/drive/cli/index.html) and sign in, then run `python3 -m ui` from a checkout. The previous window remains available with `python3 proton_mapping_editor.py`.
 
 ## Quick start
 
@@ -40,16 +40,16 @@ for sync in both directions, this is not the right tool.
 
 Reference document for this project.
 
-> **To start the application:** `python3 proton_mapping_editor.py`
+> **To start the application:** `python3 -m ui`
 >
-> This is the **only** script you run: it opens the mappings editor, from which
-> everything is driven (sync, priming, scheduling, real-time, configuration). The
-> other `.py` files in the folder are internal modules — the engine, the watchers,
-> the service managers — called by the application, never directly by you.
+> This opens the Qt window (mappings, schedule, real-time, configuration).
+> `python3 proton_mapping_editor.py` still opens the previous Tk editor.
 
 ---
 
 ## Screenshots
+
+The pictures below are the previous Tk editor. `python3 -m ui` is the current window: the same actions, in a sidebar.
 
 The mappings editor — the main window: folders to sync, per-mapping exclusions, the shared output pane, and the run controls.
 

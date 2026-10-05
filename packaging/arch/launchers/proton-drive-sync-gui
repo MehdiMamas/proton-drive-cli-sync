@@ -1,2 +1,3 @@
 #!/bin/sh
-exec python3 /usr/lib/proton-drive-cli-sync/proton_mapping_editor.py "$@"
+cd /usr/lib/proton-drive-cli-sync || exit 1
+exec python3 -m ui "$@"

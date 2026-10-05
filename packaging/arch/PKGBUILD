@@ -8,7 +8,7 @@ pkgdesc="One-way local to Proton Drive backup built on Proton's official CLI (co
 arch=('any')
 url="https://github.com/MehdiMamas/proton-drive-cli-sync"
 license=('MIT')
-depends=('python' 'tk' 'python-pyinotify')
+depends=('python' 'tk' 'python-pyinotify' 'pyside6')
 makedepends=('git')
 checkdepends=('python-pytest')
 optdepends=('python-gobject: tray icon'
@@ -50,6 +50,13 @@ package() {
              schedule_manager.py proton_mapping_editor.py tray_indicator.py \
              nas_watcher.py nas_selftest.py nas_selftest_watcher.py; do
     install -Dm644 "${_py}" "${_lib}/${_py}"
+  done
+  local _ui
+  for _ui in ui/__init__.py ui/__main__.py ui/document.py ui/run.py ui/calendar.py \
+             ui/theme.py ui/widgets.py ui/launcher.py ui/shell.py \
+             ui/pages/__init__.py ui/pages/mapping_dialogs.py ui/pages/mappings.py \
+             ui/pages/schedule.py ui/pages/realtime.py ui/pages/settings.py; do
+    install -Dm644 "${_ui}" "${_lib}/${_ui}"
   done
   install -Dm644 VERSION "${_lib}/VERSION"
   local _png

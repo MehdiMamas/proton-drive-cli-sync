@@ -50,7 +50,8 @@ except ImportError:
 
 STATUS_FILE = (appconfig.STATUS_FILE if _HAS_CONFIG
                else os.path.expanduser("~/.proton-drive-sync/status.json"))
-EDITOR = os.path.join(APP_DIR, "proton_mapping_editor.py")
+# L'interface par défaut est le paquet Qt (`python -m ui`). L'éditeur Tk
+# reste lançable à part : python3 proton_mapping_editor.py
 
 ICONS = {
     "ok":            os.path.join(APP_DIR, "tray_connected.png"),
@@ -145,7 +146,7 @@ def build_editor_cmd(status, fallback_path=None):
     (typiquement le fichier du service planifié) s'il existe — sinon, ouverture
     simple. Fonction pure (testable sans GTK) : la résolution du repli est faite
     par l'appelant, pas ici."""
-    cmd = [sys.executable, EDITOR]
+    cmd = [sys.executable, "-m", "ui"]
     if isinstance(status, dict):
         mp = status.get("mappings_path")
         if isinstance(mp, str) and mp and os.path.isfile(mp):

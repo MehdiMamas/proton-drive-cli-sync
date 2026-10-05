@@ -12,17 +12,16 @@ le bon outil.
 
 Document de référence pour ce projet.
 
-> **Pour lancer l'application :** `python3 proton_mapping_editor.py`
+> **Pour lancer l'application :** `python3 -m ui`
 >
-> C'est le **seul** script à exécuter : il ouvre l'éditeur de mappings, d'où tout
-> se pilote (synchro, amorçage, planification, temps réel, configuration). Les
-> autres fichiers `.py` du dossier sont des modules internes — le moteur, les
-> watchers, les gestionnaires de services — appelés par l'application, jamais
-> directement par vous.
+> Cela ouvre la fenêtre Qt (mappings, planification, temps réel, configuration).
+> `python3 proton_mapping_editor.py` ouvre encore l'éditeur Tk précédent.
 
 ---
 
 ## Captures d'écran
+
+Les images ci-dessous montrent l'éditeur Tk précédent. `python3 -m ui` est la fenêtre actuelle : les mêmes actions, dans une barre latérale.
 
 L'éditeur de mappings — la fenêtre principale : dossiers à synchroniser, exclusions par mapping, la zone de sortie partagée, et les commandes de lancement.
 
