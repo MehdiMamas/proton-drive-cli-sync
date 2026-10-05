@@ -54,6 +54,7 @@ QLabel#AccountWait {
 QPushButton {
     border-radius: 8px;
     padding: 8px 14px;
+    margin: 0px;
     background: %(card)s;
     color: %(text)s;
     border: 1px solid %(border)s;
@@ -203,8 +204,8 @@ QRadioButton::indicator:hover {
     border: 2px solid %(purple)s;
 }
 QRadioButton::indicator:checked {
-    border: 5px solid %(purple)s;
-    background: %(card)s;
+    border: 2px solid %(purple)s;
+    background: %(purple)s;
 }
 QScrollArea {
     border: none;

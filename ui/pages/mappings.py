@@ -41,6 +41,8 @@ class MappingsPage:
 
         bar, bar_l = widgets.card(host)
         row = QHBoxLayout()
+        row.setSpacing(8)
+        row.setContentsMargins(0, 0, 0, 0)
         self.open_btn = QPushButton(_("📂 Open…"))
         self.save_btn = QPushButton(_("💾 Save"))
         self.save_as_btn = QPushButton(_("💾 Save as…"))
@@ -61,24 +63,30 @@ class MappingsPage:
         root.addWidget(bar)
 
         table_card, table_l = widgets.card(host)
-        actions = QHBoxLayout()
-        specs = (
+        def add_actions(labels):
+            actions = QHBoxLayout()
+            actions.setSpacing(8)
+            actions.setContentsMargins(0, 0, 0, 0)
+            for label, slot, name in labels:
+                button = QPushButton(label)
+                if name:
+                    button.setObjectName(name)
+                button.clicked.connect(slot)
+                actions.addWidget(button)
+            actions.addStretch(1)
+            table_l.addLayout(actions)
+
+        add_actions((
             (_("➕ Folder…"), lambda: self.on_add("folder"), None),
             (_("➕ File…"), lambda: self.on_add("file"), None),
             (_("Proton Drive volume…"), self.on_volume, None),
+        ))
+        add_actions((
             (_("✏ Edit"), self.on_edit, None),
             (_("🚫 Mapping exclusions"), self.on_mapping_exclusions, None),
             (_("🗑 Delete"), self.on_remove, "Danger"),
             (_("↪ Move to file…"), self.on_move, None),
-        )
-        for label, slot, name in specs:
-            button = QPushButton(label)
-            if name:
-                button.setObjectName(name)
-            button.clicked.connect(slot)
-            actions.addWidget(button)
-        actions.addStretch(1)
-        table_l.addLayout(actions)
+        ))
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels([
             _("Ready"), _("Type"), _("Deletion propagation"), _("Modified files"),
@@ -98,6 +106,7 @@ class MappingsPage:
         out_card, out_l = widgets.card(host)
         out_l.addWidget(QLabel(_("Sync output")))
         filters = QHBoxLayout()
+        filters.setSpacing(8)
         self.verbose = QCheckBox(_("Verbose"))
         self.errors_only = QCheckBox(_("❗ Errors only"))
         clear = QPushButton(_("🧹 Clear output"))
@@ -121,6 +130,7 @@ class MappingsPage:
         run_card, run_l = widgets.card(host)
         run_l.addWidget(QLabel(_("Manual sync")))
         opts = QHBoxLayout()
+        opts.setSpacing(8)
         self.dry = QCheckBox(_("Test (dry-run)"))
         self.delete = QCheckBox(_("Propagate deletions"))
         self.sha1 = QCheckBox(_("SHA1 check"))
@@ -130,6 +140,7 @@ class MappingsPage:
         opts.addStretch(1)
         run_l.addLayout(opts)
         buttons = QHBoxLayout()
+        buttons.setSpacing(8)
         self.prime_btn = QPushButton(_("🌱 Prime cache"))
         self.reset_btn = QPushButton(_("♻ Reset mapping"))
         self.copy_btn = QPushButton(_("📋 Copy command"))
