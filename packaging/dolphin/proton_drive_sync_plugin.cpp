@@ -5,8 +5,6 @@
 
 #include "proton_drive_sync_plugin.h"
 
-#include <KPluginFactory>
-
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
@@ -16,8 +14,6 @@
 #include <QVariantMap>
 
 #include <QDateTime>
-
-K_PLUGIN_CLASS_WITH_JSON(ProtonDriveSyncPlugin, "protondrivesyncdolphinplugin.json")
 
 namespace {
 
@@ -57,10 +53,9 @@ QDBusMessage callStatus(const QString &method, const QString &argument)
 
 }
 
-ProtonDriveSyncPlugin::ProtonDriveSyncPlugin(QObject *parent, const QList<QVariant> &args)
+ProtonDriveSyncPlugin::ProtonDriveSyncPlugin(QObject *parent)
     : KOverlayIconPlugin(parent)
 {
-    Q_UNUSED(args)
 }
 
 QStringList ProtonDriveSyncPlugin::getOverlays(const QUrl &item)
@@ -136,5 +131,3 @@ QString ProtonDriveSyncPlugin::fetchPath(const QString &path)
     }
     return reply.arguments().at(0).toString();
 }
-
-#include "proton_drive_sync_plugin.moc"

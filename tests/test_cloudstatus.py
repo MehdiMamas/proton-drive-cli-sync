@@ -110,12 +110,17 @@ def test_dolphin_plugin_uses_the_emblem_names():
     cpp = open(os.path.join(
         root, "packaging", "dolphin", "proton_drive_sync_plugin.cpp"),
         encoding="utf-8").read()
+    header = open(os.path.join(
+        root, "packaging", "dolphin", "proton_drive_sync_plugin.h"),
+        encoding="utf-8").read()
     cmake = open(os.path.join(
         root, "packaging", "dolphin", "CMakeLists.txt"),
         encoding="utf-8").read()
     for name in set(cloudstatus.EMBLEMS.values()):
         assert 'QLatin1String("%s")' % name in cpp
     assert "KOverlayIconPlugin" in cpp
+    assert "K_PLUGIN_CLASS" not in cpp
+    assert 'Q_PLUGIN_METADATA(IID "org.kde.overlayicon.protondrivesync")' in header
     assert 'kf6/overlayicon' in cmake
 
 

@@ -9,18 +9,17 @@
 #include <KOverlayIconPlugin>
 
 #include <QHash>
-#include <QList>
 #include <QString>
 #include <QUrl>
-#include <QVariant>
 
 // Overlay marks for mapped files. A missing status bus leaves every file unmarked.
 class ProtonDriveSyncPlugin : public KOverlayIconPlugin
 {
     Q_OBJECT
+    Q_PLUGIN_METADATA(IID "org.kde.overlayicon.protondrivesync")
 
 public:
-    explicit ProtonDriveSyncPlugin(QObject *parent, const QList<QVariant> &args);
+    explicit ProtonDriveSyncPlugin(QObject *parent = nullptr);
 
     QStringList getOverlays(const QUrl &item) override;
 

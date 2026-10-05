@@ -5,6 +5,7 @@
 ### Fixed
 
 - Dolphin marks come from an overlay plugin (`kf6/overlayicon`). A version-control plugin only runs inside a repository, so a mapped folder showed nothing. Migration: rebuild and install the plugin, remove any copy under `dolphin/vcs`, and restart Dolphin.
+- Dolphin loads that overlay plugin with `QPluginLoader` and keeps it only when the root object is a `KOverlayIconPlugin`. The factory entry was created and then deleted, so the folder stayed unmarked and Dolphin logged nothing about the plugin. Migration: rebuild and install the plugin, then restart Dolphin.
 
 ### Added
 
