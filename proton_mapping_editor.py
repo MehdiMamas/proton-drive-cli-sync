@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.25.6"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.25.7"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -1128,6 +1128,10 @@ class MappingEditor(tk.Tk):
         # (ni synchro, ni connexion, ni amorçage) — mais l'édition des mappings
         # reste possible, donc on informe sans jamais fermer l'application.
         self.after(400, self._check_cli_present_at_startup)
+        # Ancienne unité sans RestartPreventExitStatus=5 : le contrôle est
+        # différé comme la sonde CLI. Pas de lecture du fichier ni de
+        # systemctl dans __init__.
+        self.after(400, self._refresh_legacy_service_unit)
         self._start_cli_version_probe()
 
         # Détection automatique de l'état d'authentification Proton, en arrière-plan
@@ -1255,6 +1259,45 @@ class MappingEditor(tk.Tk):
         except Exception:
             # Un avis ne doit jamais empêcher l'application de démarrer.
             pass
+
+    def _refresh_legacy_service_unit(self):
+        """Réécrit l'unité planifiée si un passage en échec serait encore
+        relancé. Lecture et systemctl dans un fil démon ; le statut revient
+        par _ui. Silence s'il n'y a pas d'unité, ou si la ligne est déjà là."""
+        if not _HAS_SCHEDULE:
+            return
+
+        def work():
+            try:
+                needs = schedule_manager.service_missing_restart_prevent_5()
+            except Exception:
+                return
+            if not needs:
+                return
+            try:
+                ok, message = schedule_manager.refresh_units()
+            except Exception as exc:
+                ok, message = False, str(exc)
+
+            def apply():
+                self._report_legacy_unit_refresh(ok, message)
+
+            self._ui(apply)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _report_legacy_unit_refresh(self, ok, message):
+        """Annonce, sur le fil principal, le résultat de la réécriture."""
+        if ok:
+            self.status.set(_(
+                "Scheduled service updated so a failed pass is not restarted."))
+            return
+        detail = (message or "").strip().replace("\n", " ")
+        if detail and len(detail) <= 160:
+            self.status.set(
+                _("Scheduled service update failed: {e}").format(e=detail))
+        else:
+            self.status.set(_("Scheduled service update failed."))
 
     def _start_cli_version_probe(self):
         """Lance la sonde de version du CLI dans un FIL SÉPARÉ, puis scrute le

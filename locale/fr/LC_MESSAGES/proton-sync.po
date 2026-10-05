@@ -4176,3 +4176,12 @@ msgstr "Amorçage terminé avec des échecs (code 5)"
 msgid "Finished with failures (code 5)."
 msgstr "Terminé avec des échecs (code 5)."
 
+msgid "Scheduled service updated so a failed pass is not restarted."
+msgstr "Service planifié mis à jour pour qu'un passage en échec ne soit pas relancé."
+
+#, python-brace-format
+msgid "Scheduled service update failed: {e}"
+msgstr "Échec de la mise à jour du service planifié : {e}"
+
+msgid "Scheduled service update failed."
+msgstr "Échec de la mise à jour du service planifié."

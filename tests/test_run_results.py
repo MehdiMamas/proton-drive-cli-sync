@@ -445,3 +445,23 @@ def test_refresh_units_preserves_settings(tmp_path, monkeypatch):
     assert "RestartPreventExitStatus=5" in rewritten
     assert "SuccessExitStatus=0 2 4" in rewritten
     assert "OnCalendar=*-*-* 04:15:00" in timer.read_text(encoding="utf-8")
+
+
+def test_service_missing_restart_prevent_5(tmp_path, monkeypatch):
+    service = tmp_path / schedule_manager.SERVICE_NAME
+    monkeypatch.setattr(schedule_manager, "SERVICE_PATH", str(service))
+
+    assert schedule_manager.service_missing_restart_prevent_5() is False
+
+    service.write_text(
+        "[Service]\n"
+        "ExecStart=/usr/bin/python3 /opt/proton_sync.py /data/mappings.json --delete\n",
+        encoding="utf-8",
+    )
+    assert schedule_manager.service_missing_restart_prevent_5() is True
+
+    service.write_text(
+        service.read_text(encoding="utf-8") + "RestartPreventExitStatus=5\n",
+        encoding="utf-8",
+    )
+    assert schedule_manager.service_missing_restart_prevent_5() is False

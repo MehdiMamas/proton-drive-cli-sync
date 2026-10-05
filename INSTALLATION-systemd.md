@@ -198,14 +198,14 @@ Code 3 is only for `--subpath` when the folder has not been indexed yet. The sch
 
 The last line of a pass is a `[run-result]` JSON object (exit code, mode, counters). `~/.proton-drive-sync/last-run.json` keeps the last full pass and the last subpath pass separately.
 
-Units installed before this change do not contain `RestartPreventExitStatus=5`. Rewrite them without changing the mappings file, the clock or `--delete`:
+Units installed before this change do not contain `RestartPreventExitStatus=5`. Opening the mappings editor rewrites them from the mappings file, the clock and `--delete` already installed. If you never open the editor, rewrite them once yourself:
 
 ```bash
 python3 schedule_manager.py --refresh-units
 systemctl --user cat proton-sync.service | grep RestartPreventExitStatus
 ```
 
-Run that once for each user who already has a schedule. You should see `RestartPreventExitStatus=5` and `SuccessExitStatus=0 2 4`.
+You should see `RestartPreventExitStatus=5` and `SuccessExitStatus=0 2 4`.
 
 ---
 

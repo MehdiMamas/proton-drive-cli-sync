@@ -3363,3 +3363,12 @@ msgstr ""
 msgid "Finished with failures (code 5)."
 msgstr ""
 
+msgid "Scheduled service updated so a failed pass is not restarted."
+msgstr ""
+
+#, python-brace-format
+msgid "Scheduled service update failed: {e}"
+msgstr ""
+
+msgid "Scheduled service update failed."
+msgstr ""

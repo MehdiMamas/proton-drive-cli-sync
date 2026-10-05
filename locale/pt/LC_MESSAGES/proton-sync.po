@@ -4159,3 +4159,12 @@ msgstr "Preparação terminada com falhas (código 5)"
 msgid "Finished with failures (code 5)."
 msgstr "Terminado com falhas (código 5)."
 
+msgid "Scheduled service updated so a failed pass is not restarted."
+msgstr "Serviço agendado atualizado para que uma passagem falhada não seja reiniciada."
+
+#, python-brace-format
+msgid "Scheduled service update failed: {e}"
+msgstr "Falha ao atualizar o serviço agendado: {e}"
+
+msgid "Scheduled service update failed."
+msgstr "Falha ao atualizar o serviço agendado."

@@ -4211,3 +4211,12 @@ msgstr "Vorbereitung mit Fehlern beendet (Code 5)"
 msgid "Finished with failures (code 5)."
 msgstr "Mit Fehlern beendet (Code 5)."
 
+msgid "Scheduled service updated so a failed pass is not restarted."
+msgstr "Geplanter Dienst aktualisiert, damit ein fehlgeschlagener Durchlauf nicht neu gestartet wird."
+
+#, python-brace-format
+msgid "Scheduled service update failed: {e}"
+msgstr "Aktualisierung des geplanten Dienstes fehlgeschlagen: {e}"
+
+msgid "Scheduled service update failed."
+msgstr "Aktualisierung des geplanten Dienstes fehlgeschlagen."
