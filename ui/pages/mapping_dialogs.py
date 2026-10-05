@@ -45,7 +45,7 @@ class MappingDialog:
                 _("Add a folder") if m_type == "folder" else _("Add a file")),
             scroll=True)
         self._dlg = dlg
-        dlg.resize(680, 560)
+        dlg.resize(680, 680)
 
         place, place_l = widgets.section(body, _("Source (local)"))
         src_row = QHBoxLayout()
@@ -65,6 +65,25 @@ class MappingDialog:
         dest_row.addWidget(proton)
         place_l.addLayout(dest_row)
         content.addWidget(place)
+
+        direction, direction_l = widgets.section(body, _("Direction"))
+        twoway_init = bool(is_edit and mapping.get("direction") == "twoway")
+        self.upload = QRadioButton(_(
+            "Upload only — local files are backed up. Remote changes are not downloaded"))
+        self.twoway = QRadioButton(_("Two-way — for this mapping only"))
+        self.upload.setChecked(not twoway_init)
+        self.twoway.setChecked(twoway_init)
+        direction_l.addWidget(self.upload)
+        direction_l.addWidget(self.twoway)
+        self.keep_both = QLabel(_(
+            "If both sides change, both copies are kept and nothing is deleted. "
+            "Remote changes are checked about every 5 minutes, not every second."))
+        self.keep_both.setWordWrap(True)
+        self.keep_both.setObjectName("Muted")
+        direction_l.addWidget(self.keep_both)
+        content.addWidget(direction)
+        self.twoway.toggled.connect(self._direction_note)
+        self._direction_note()
 
         modified, modified_l = widgets.section(body, _("Modified files"))
         conf = (mapping.get("conflict_mode") or "replace") if is_edit else "replace"
@@ -151,6 +170,9 @@ class MappingDialog:
         if chosen:
             self.dest.setText(chosen)
 
+    def _direction_note(self):
+        self.keep_both.setVisible(self.twoway.isChecked())
+
     def _toggle(self):
         on = self.allow.isChecked()
         for widget in (self.trash, self.nfs, self.local):
@@ -215,26 +237,33 @@ class MappingDialog:
                 return
         if needed == "shared":
             remote = document.mapping_remote_path(dest, source) or dest.strip()
+            shared_text = _(
+                    "This destination is a folder shared with you — it "
+                    "belongs to someone else.\n\n"
+                    "With deletion enabled, every file inside\n{p}\n"
+                    "and its subfolders that is missing from your local "
+                    "source will be deleted and sent to the OWNER'S trash — "
+                    "including files other people put there. Only that "
+                    "subfolder is affected: neither the rest of the shared "
+                    "folder nor the rest of the Drive.\n\n"
+                    "Only enable deletion on a folder you are the sole "
+                    "contributor to, as one-way delivery to its owner. Any "
+                    "other use is potentially destructive.\n\n"
+                    "Enable deletion on this shared folder?").format(p=remote)
+            if self.twoway.isChecked():
+                shared_text += _("\n\nTwo-way is on for this mapping. "
+                                 "The same confirmation is required before a "
+                                 "file that disappeared locally can be trashed.")
             if not widgets.confirm(
-                    self._dlg,
-                    _("This destination is a folder shared with you — it "
-                      "belongs to someone else.\n\n"
-                      "With deletion enabled, every file inside\n{p}\n"
-                      "and its subfolders that is missing from your local "
-                      "source will be deleted and sent to the OWNER'S trash — "
-                      "including files other people put there. Only that "
-                      "subfolder is affected: neither the rest of the shared "
-                      "folder nor the rest of the Drive.\n\n"
-                      "Only enable deletion on a folder you are the sole "
-                      "contributor to, as one-way delivery to its owner. Any "
-                      "other use is potentially destructive.\n\n"
-                      "Enable deletion on this shared folder?").format(p=remote),
+                    self._dlg, shared_text,
                     _("Deletion on a shared folder"), _("Enable"), _("Cancel")):
                 return
         self.result = {
             "type": self._type,
             "source": source,
             "dest": dest,
+            "direction": "twoway" if self.twoway.isChecked() else "upload",
+            "shared_delete_confirmed": needed == "shared",
             "conflict_mode": "revision" if self.revision.isChecked() else "replace",
             "allow_delete": allow,
             "delete_mode": mode,

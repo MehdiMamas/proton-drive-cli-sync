@@ -172,8 +172,17 @@ def confirm_kind(dest, allow_delete, delete_mode):
     return None
 
 
+def backup_blurb(mappings):
+    """Sidebar line. Two-way is named only when a mapping opted in."""
+    if any(isinstance(row, dict) and row.get("direction") == "twoway"
+           for row in mappings or []):
+        return _("Two-way is on for those mappings only")
+    return _("Unofficial one-way backup")
+
+
 def build_mapping(old, m_type, source, dest, conflict_mode, allow_delete,
-                  delete_mode, source_kind):
+                  delete_mode, source_kind, direction="upload",
+                  shared_delete_confirmed=False):
     """Dict prêt à remplacer ``old``. Les clés hors dialogue sont reportées."""
     new_m = {
         "type": m_type,
@@ -190,6 +199,14 @@ def build_mapping(old, m_type, source, dest, conflict_mode, allow_delete,
         new_m["source_kind"] = source_kind
     if old:
         carry_unknown_keys(old, new_m)
+    if direction == "twoway":
+        new_m["direction"] = "twoway"
+    else:
+        new_m.pop("direction", None)
+    if shared_delete_confirmed:
+        new_m["shared_delete_confirmed"] = True
+    else:
+        new_m.pop("shared_delete_confirmed", None)
     return new_m
 
 

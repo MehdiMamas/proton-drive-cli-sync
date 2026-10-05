@@ -49,6 +49,35 @@ def test_edit_keeps_unknown_keys_and_drops_deletion_when_off():
     assert carry_unknown_keys(None, {"x": 1}) == {"x": 1}
 
 
+def test_twoway_direction_is_opt_in_and_unknown_keys_stay():
+    old = {
+        "type": "folder", "source": "/s", "dest_parent": "/my-files/d",
+        "direction": "twoway", "poll_minutes": 5, "future_key": 1,
+        "shared_delete_confirmed": True,
+    }
+    kept = document.build_mapping(
+        old, "folder", "/s", "/my-files/d", "replace", False, "trash", "",
+        direction="twoway")
+    assert kept["direction"] == "twoway"
+    assert kept["poll_minutes"] == 5
+    assert kept["future_key"] == 1
+    assert "shared_delete_confirmed" not in kept
+    upload = document.build_mapping(
+        old, "folder", "/s", "/my-files/d", "replace", False, "trash", "",
+        direction="upload")
+    assert "direction" not in upload
+    assert upload["poll_minutes"] == 5
+    confirmed = document.build_mapping(
+        old, "folder", "/s", "/shared-with-me/box", "replace", True, "trash",
+        "local", direction="twoway", shared_delete_confirmed=True)
+    assert confirmed["shared_delete_confirmed"] is True
+    assert document.backup_blurb([upload]) == "Unofficial one-way backup"
+    assert document.backup_blurb([kept]) == "Two-way is on for those mappings only"
+    carried = {"type": "folder", "source": "/s", "dest_parent": "/my-files"}
+    carry_unknown_keys(old, carried)
+    assert carried["direction"] == "twoway"
+
+
 def test_destination_and_source_rules():
     assert document.destination_ok("/my-files")
     assert document.destination_ok("/my-files/photos")

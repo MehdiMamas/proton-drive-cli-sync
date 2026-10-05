@@ -6,6 +6,7 @@
 
 - A mapping can opt in with `"direction": "twoway"`. Mappings without that key stay upload-only. A two-way pass lists the remote folder even when the local fingerprint is unchanged, uploads a local-only edit, downloads a remote-only edit into a temporary file and replaces the local file only after that download exits 0, and writes a ` (proton conflict)` copy when both sides changed. Nothing is deleted on a conflict. A local file whose remote copy disappeared is moved into `holding/` under the data directory. A failed listing does not update the sync database for that folder and the pass exits 5. Migration: no change unless you add the key.
 - Remote changes on a two-way mapping are picked up by the existing real-time consumer, every `poll_minutes` (default 5), by running the same engine pass. There is no separate daemon and no per-second remote sync. The nightly timer is still that same pass. Migration: none.
+- The Qt mapping dialog can set direction to upload or two-way. Two-way keeps both copies when both sides change, and the shared-folder deletion warning is the same confirmation the engine already requires. The sidebar stays "Unofficial one-way backup" until a mapping is two-way. The Tk editor does not offer the control; saving there keeps the key. Migration: none until you choose two-way.
 
 ## [2.1.0] - 2026-10-05
 

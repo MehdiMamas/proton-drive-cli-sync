@@ -10,7 +10,7 @@ except ImportError:
     def _(s):
         return s
 
-from ui.document import Document
+from ui.document import Document, backup_blurb
 from ui.pages.mappings import MappingsPage
 from ui.pages.realtime import RealtimePage
 from ui.pages.schedule import SchedulePage
@@ -65,10 +65,11 @@ class MainWindow:
         brand = QLabel("Drive sync")
         brand.setObjectName("Title")
         side_l.addWidget(brand)
-        sub = QLabel(_("Unofficial one-way backup"))
+        sub = QLabel(backup_blurb(self.doc.mappings))
         sub.setObjectName("Footer")
         sub.setWordWrap(True)
         side_l.addWidget(sub)
+        self._mode_label = sub
         side_l.addSpacing(12)
 
         self.stack = QStackedWidget()
@@ -201,6 +202,11 @@ class MainWindow:
         self.file_chip.setText(name)
         title = _("Mappings editor — Proton Drive sync")
         self._qt.setWindowTitle(f"{title} — {name}")
+
+    def refresh_direction_line(self):
+        label = getattr(self, "_mode_label", None)
+        if label is not None:
+            label.setText(backup_blurb(self.doc.mappings))
 
     def _confirm_close(self):
         if not self.doc.dirty:

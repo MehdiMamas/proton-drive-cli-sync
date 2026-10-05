@@ -281,7 +281,10 @@ class MappingsPage:
         marks = {"ready": "●", "pending": "○", "na": "—"}
         for row, mapping in enumerate(self.doc.mappings):
             state = document.ready_state(mapping, cache, glob)
-            kind = _("Folder") if mapping.get("type") == "folder" else _("File")
+            if mapping.get("direction") == "twoway":
+                kind = _("Two-way")
+            else:
+                kind = _("Folder") if mapping.get("type") == "folder" else _("File")
             if mapping.get("allow_delete"):
                 deletion = "!" if mapping.get("delete_mode") == "permanent" else "🗑"
             else:
@@ -316,6 +319,7 @@ class MappingsPage:
         summary = " | ".join(parts) if parts else _("(none)")
         self.excl_summary.setText(_("🌐 Global exclusions — ") + summary)
         self.window.refresh_file_chip()
+        self.window.refresh_direction_line()
 
     def _running(self):
         return self._worker is not None and self._worker.isRunning()
@@ -456,7 +460,9 @@ class MappingsPage:
         built = document.build_mapping(
             mapping, fields["type"], fields["source"], fields["dest"],
             fields["conflict_mode"], fields["allow_delete"],
-            fields["delete_mode"], fields["source_kind"])
+            fields["delete_mode"], fields["source_kind"],
+            direction=fields.get("direction") or "upload",
+            shared_delete_confirmed=bool(fields.get("shared_delete_confirmed")))
         if not self._nas_confirm(built):
             return None
         return built
