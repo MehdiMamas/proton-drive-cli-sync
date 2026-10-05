@@ -2,7 +2,7 @@
 # Community fork of lafontaj/proton-drive-cli-sync. Not affiliated with Proton AG.
 pkgname=proton-drive-cli-sync-git
 _reponame=proton-drive-cli-sync
-pkgver=2.1.0
+pkgver=2.2.0
 pkgrel=1
 pkgdesc="One-way local to Proton Drive backup built on Proton's official CLI (community fork)"
 arch=('any')
