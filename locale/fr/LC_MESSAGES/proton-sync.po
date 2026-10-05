@@ -4127,3 +4127,45 @@ msgstr "🔑 CLI Proton inutilisable — corrigez le chemin ci-dessous, puis OK"
 
 msgid "Choose the proton-drive binary"
 msgstr "Choisir le binaire proton-drive"
+
+msgid "Open…"
+msgstr "Ouvrir…"
+
+msgid "Save as…"
+msgstr "Enregistrer sous…"
+
+msgid "Global exclusions…"
+msgstr "Exclusions globales…"
+
+msgid "Folder…"
+msgstr "Dossier…"
+
+msgid "File…"
+msgstr "Fichier…"
+
+msgid "Edit"
+msgstr "Modifier"
+
+msgid "Delete"
+msgstr "Supprimer"
+
+msgid "Move to file…"
+msgstr "Déplacer vers un fichier…"
+
+msgid "Errors only"
+msgstr "Erreurs seules"
+
+msgid "Clear output"
+msgstr "Effacer la sortie"
+
+msgid "Copy command"
+msgstr "Copier la commande"
+
+msgid "Stop"
+msgstr "Arrêter"
+
+msgid "Run sync"
+msgstr "Lancer la synchro"
+
+msgid "Global exclusions — "
+msgstr "Exclusions globales — "

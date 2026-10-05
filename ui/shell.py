@@ -74,17 +74,17 @@ class MainWindow:
         self.stack = QStackedWidget()
         self.stack.setObjectName("PageHost")
         pages = (
-            ("mappings", _("Mappings")),
-            ("schedule", _("Sync schedule")),
-            ("realtime", _("Real-time")),
-            ("settings", _("Configuration")),
+            ("mappings", "📂", _("Mappings")),
+            ("schedule", "⏰", _("Sync schedule")),
+            ("realtime", "⚡", _("Real-time")),
+            ("settings", "⚙", _("Configuration")),
         )
         group = QButtonGroup(self._qt)
         group.setExclusive(True)
         self._pages = {}
         holders = {}
-        for index, (key, label) in enumerate(pages):
-            button = QPushButton(label)
+        for index, (key, icon, label) in enumerate(pages):
+            button = QPushButton(icon + "  " + label)
             button.setObjectName("Nav")
             button.setCheckable(True)
             group.addButton(button, index)

@@ -24,12 +24,15 @@ class SchedulePage:
         self.window = window
         root = QVBoxLayout(host)
         root.setContentsMargins(16, 16, 16, 16)
-        card, layout = widgets.card(host)
-        layout.addWidget(QLabel(_("Sync schedule")))
+        root.setSpacing(12)
+
+        status, status_l = widgets.section(host, _("Current state"))
         self.state = QLabel(_("Reading…"))
         self.state.setWordWrap(True)
-        layout.addWidget(self.state)
+        status_l.addWidget(self.state)
+        root.addWidget(status)
 
+        actions, layout = widgets.section(host, _("Actions"))
         row = QHBoxLayout()
         self.freq = QComboBox()
         self.freq.addItem(_("Daily"), "daily")
@@ -70,10 +73,14 @@ class SchedulePage:
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
+        root.addWidget(actions)
+
+        log_card, log_l = widgets.section(host, _("Log"))
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        layout.addWidget(self.log)
-        root.addWidget(card)
+        self.log.setMinimumHeight(160)
+        log_l.addWidget(self.log)
+        root.addWidget(log_card, 1)
         self._freq_changed()
         from PySide6.QtCore import QObject, Signal
 

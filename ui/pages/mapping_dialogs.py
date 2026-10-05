@@ -3,7 +3,6 @@
 Aucune règle de sauvegarde ici. La validation est dans ui.document.
 """
 
-import os
 import threading
 
 try:
@@ -15,56 +14,59 @@ except ImportError:
 from ui import document, widgets
 
 
+def _qt_exclusions():
+    from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit
+    return QDialog, QHBoxLayout, QLabel, QPlainTextEdit
+
+
 def _qt():
-    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
-        QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel,
-        QLineEdit, QPlainTextEdit, QPushButton, QRadioButton, QTreeWidget,
-        QTreeWidgetItem, QVBoxLayout, QWidget, QCheckBox,
+        QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+        QPushButton, QRadioButton,
     )
-    return Qt, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, \
-        QLineEdit, QPlainTextEdit, QPushButton, QRadioButton, QTreeWidget, \
-        QTreeWidgetItem, QVBoxLayout, QWidget, QCheckBox
+    return (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+            QPushButton, QRadioButton, QCheckBox)
 
 
 class MappingDialog:
     """Saisie d'un mapping. ``result`` est le dict des champs, ou None."""
 
     def __init__(self, parent, kind, mapping=None, revisions_ok=None, shared_ok=None):
-        Qt, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, \
-            QLineEdit, QPlainTextEdit, QPushButton, QRadioButton, QTreeWidget, \
-            QTreeWidgetItem, QVBoxLayout, QWidget, QCheckBox = _qt()
+        (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+         QPushButton, QRadioButton, QCheckBox) = _qt()
         self._QFileDialog = QFileDialog
         self.result = None
         is_edit = mapping is not None
         m_type = mapping["type"] if is_edit else kind
         self._type = m_type
-        dlg = QDialog(widgets.qt_parent(parent))
+        dlg, body, content, buttons = widgets.dialog(
+            parent,
+            _("Edit mapping") if is_edit else (
+                _("Add a folder") if m_type == "folder" else _("Add a file")),
+            scroll=True)
         self._dlg = dlg
-        dlg.setWindowTitle(_("Edit mapping") if is_edit else (
-            _("Add a folder") if m_type == "folder" else _("Add a file")))
         dlg.resize(680, 560)
-        root = QVBoxLayout(dlg)
 
-        root.addWidget(QLabel(_("Source (local)")))
+        place, place_l = widgets.section(body, _("Source (local)"))
         src_row = QHBoxLayout()
         self.source = QLineEdit(mapping["source"] if is_edit else "")
         src_row.addWidget(self.source)
         browse = QPushButton(_("Browse…"))
         browse.clicked.connect(self._browse_source)
         src_row.addWidget(browse)
-        root.addLayout(src_row)
+        place_l.addLayout(src_row)
 
-        root.addWidget(QLabel(_("Destination (parent folder on Proton Drive)")))
+        place_l.addWidget(QLabel(_("Destination (parent folder on Proton Drive)")))
         dest_row = QHBoxLayout()
         self.dest = QLineEdit(mapping["dest_parent"] if is_edit else "/my-files")
         dest_row.addWidget(self.dest)
         proton = QPushButton(_("Browse Proton…"))
         proton.clicked.connect(self._browse_proton)
         dest_row.addWidget(proton)
-        root.addLayout(dest_row)
+        place_l.addLayout(dest_row)
+        content.addWidget(place)
 
-        root.addWidget(QLabel(_("Modified files")))
+        modified, modified_l = widgets.section(body, _("Modified files"))
         conf = (mapping.get("conflict_mode") or "replace") if is_edit else "replace"
         self.replace = QRadioButton(_(
             "Replace — the previous version goes to the Proton trash"))
@@ -72,12 +74,12 @@ class MappingDialog:
             "Keep a revision — the previous version stays attached to the file"))
         self.replace.setChecked(conf != "revision")
         self.revision.setChecked(conf == "revision")
-        root.addWidget(self.replace)
-        root.addWidget(self.revision)
+        modified_l.addWidget(self.replace)
+        modified_l.addWidget(self.revision)
         self.conf_note = QLabel("")
         self.conf_note.setObjectName("Muted")
         self.conf_note.setWordWrap(True)
-        root.addWidget(self.conf_note)
+        modified_l.addWidget(self.conf_note)
         if revisions_ok is False:
             self.revision.setEnabled(False)
             if conf == "revision":
@@ -93,22 +95,23 @@ class MappingDialog:
                 "This mapping asks for revisions, but the Proton CLI version "
                 "could not be determined, so they cannot be used: it will run "
                 "in replace mode. The setting is kept."))
+        content.addWidget(modified)
 
-        root.addWidget(QLabel(_("Deletion propagation")))
+        deletion, deletion_l = widgets.section(body, _("Deletion propagation"))
         allow_init = bool(mapping.get("allow_delete")) if is_edit else False
         mode_init = (mapping.get("delete_mode") or "trash") if is_edit else "trash"
         kind_init = (mapping.get("source_kind") or "") if is_edit else ""
         self.allow = QCheckBox(_(
             "Allow this mapping to delete on Proton what was deleted locally"))
         self.allow.setChecked(allow_init)
-        root.addWidget(self.allow)
+        deletion_l.addWidget(self.allow)
         self.shared_note = QLabel("")
         self.shared_note.setWordWrap(True)
         self.shared_note.setObjectName("Muted")
-        root.addWidget(self.shared_note)
+        deletion_l.addWidget(self.shared_note)
         self.trash = QRadioButton(_("Proton trash (recoverable)"))
         self.trash.setChecked(mode_init != "permanent")
-        root.addWidget(self.trash)
+        deletion_l.addWidget(self.trash)
         self.perm_note = QLabel("")
         self.perm_note.setWordWrap(True)
         if mode_init == "permanent":
@@ -116,22 +119,21 @@ class MappingDialog:
                 "This mapping is set to permanent deletion, which the "
                 "Proton CLI no longer allows reliably: it deletes to the "
                 "trash instead. Pick trash mode to make that explicit."))
-        root.addWidget(self.perm_note)
+        deletion_l.addWidget(self.perm_note)
         self.nfs = QRadioButton(_("NFS (network/NAS)"))
         self.local = QRadioButton(_("Local (internal disk)"))
         self.nfs.setChecked(kind_init == "nfs")
         self.local.setChecked(kind_init == "local")
-        root.addWidget(self.nfs)
-        root.addWidget(self.local)
+        deletion_l.addWidget(self.nfs)
+        deletion_l.addWidget(self.local)
+        content.addWidget(deletion)
         self._shared_ok = shared_ok
         self.allow.toggled.connect(self._toggle)
         self.dest.textChanged.connect(self._shared_lock)
         self._shared_lock()
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._ok)
-        buttons.rejected.connect(dlg.reject)
-        root.addWidget(buttons)
+        widgets.action(buttons, _("Cancel"), dlg.reject)
+        widgets.action(buttons, _("OK"), self._ok, primary=True)
         self._accepted = dlg.exec() == QDialog.Accepted
 
     def _browse_source(self):
@@ -247,16 +249,13 @@ class MappingDialog:
 
 class ExclusionsDialog:
     def __init__(self, parent, title, current, context):
-        Qt, QDialog, QDialogButtonBox, _fd, QHBoxLayout, QLabel, \
-            _le, QPlainTextEdit, _pb, _rb, _tw, _ti, QVBoxLayout, _w, _cb = _qt()
+        QDialog, QHBoxLayout, QLabel, QPlainTextEdit = _qt_exclusions()
         self.result = None
-        dlg = QDialog(widgets.qt_parent(parent))
-        dlg.setWindowTitle(title)
-        dlg.resize(580, 520)
-        root = QVBoxLayout(dlg)
+        dlg, body, content, buttons = widgets.dialog(parent, title)
+        dlg.resize(640, 480)
         intro = QLabel(context)
         intro.setWordWrap(True)
-        root.addWidget(intro)
+        content.addWidget(intro)
         help_lbl = QLabel(_(
             "• Exact names: one per line (e.g. .caltrash, trash, .Trash-1000). "
             "Case-insensitive. Excludes any folder OR file with that name.\n"
@@ -264,19 +263,19 @@ class ExclusionsDialog:
             "The * matches any sequence of characters."))
         help_lbl.setWordWrap(True)
         help_lbl.setObjectName("Muted")
-        root.addWidget(help_lbl)
+        content.addWidget(help_lbl)
         row = QHBoxLayout()
         names = QPlainTextEdit("\n".join((current or {}).get("names", []) or []))
         pats = QPlainTextEdit("\n".join((current or {}).get("patterns", []) or []))
-        names.setPlaceholderText(_("Exact names (one per line)"))
-        pats.setPlaceholderText(_("Patterns (one per line)"))
-        row.addWidget(names)
-        row.addWidget(pats)
-        root.addLayout(row)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        root.addWidget(buttons)
+        names_card, names_l = widgets.section(body, _("Exact names (one per line)"))
+        pats_card, pats_l = widgets.section(body, _("Patterns (one per line)"))
+        names_l.addWidget(names)
+        pats_l.addWidget(pats)
+        row.addWidget(names_card)
+        row.addWidget(pats_card)
+        content.addLayout(row)
+        widgets.action(buttons, _("Cancel"), dlg.reject)
+        widgets.action(buttons, _("OK"), dlg.accept, primary=True)
         if dlg.exec() == QDialog.Accepted:
             self.result = {
                 "names": document.parse_lines(names.toPlainText()),
@@ -290,29 +289,17 @@ class RemoteFolderPicker:
     @staticmethod
     def pick(parent, start):
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import (
-            QDialog, QHBoxLayout, QLabel, QPushButton, QTreeWidget,
-            QTreeWidgetItem, QVBoxLayout,
-        )
-        dlg = QDialog(widgets.qt_parent(parent))
-        dlg.setWindowTitle(_("Browse Proton…"))
+        from PySide6.QtWidgets import QDialog, QLabel, QTreeWidget, QTreeWidgetItem
+        dlg, _body, content, buttons = widgets.dialog(parent, _("Browse Proton…"))
         dlg.resize(520, 420)
         chosen = {"path": None}
-        root = QVBoxLayout(dlg)
         status = QLabel(_("Double-click to open a folder; select the "
                           "destination, then “Choose this folder”."))
         status.setWordWrap(True)
-        root.addWidget(status)
+        content.addWidget(status)
         tree = QTreeWidget()
         tree.setHeaderHidden(True)
-        root.addWidget(tree)
-        buttons = QHBoxLayout()
-        choose = QPushButton(_("Choose this folder"))
-        cancel = QPushButton(_("Cancel"))
-        buttons.addStretch(1)
-        buttons.addWidget(cancel)
-        buttons.addWidget(choose)
-        root.addLayout(buttons)
+        content.addWidget(tree, 1)
 
         def add_placeholder(item):
             child = QTreeWidgetItem([_("Loading…")])
@@ -368,8 +355,8 @@ class RemoteFolderPicker:
             chosen["path"] = path
             dlg.accept()
 
-        choose.clicked.connect(accept)
-        cancel.clicked.connect(dlg.reject)
+        widgets.action(buttons, _("Cancel"), dlg.reject)
+        widgets.action(buttons, _("Choose this folder"), accept, primary=True)
         tree.itemDoubleClicked.connect(lambda *_a: accept())
         if dlg.exec() != QDialog.Accepted:
             return None
@@ -382,22 +369,19 @@ class LoginDialog:
     def __init__(self, parent):
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import (
-            QDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-            QPushButton, QVBoxLayout,
+            QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
         )
         import queue
         import subprocess
         self._queue = queue.Queue()
-        dlg = QDialog(widgets.qt_parent(parent))
-        dlg.setWindowTitle(_("Sign in to Proton"))
-        dlg.resize(640, 360)
-        root = QVBoxLayout(dlg)
+        dlg, body, content, buttons = widgets.dialog(parent, _("Sign in to Proton"))
+        dlg.resize(640, 420)
         intro = QLabel(_(
             "A browser window will open for you to sign in to Proton "
             "(password and 2FA stay in the browser — never handled here).\n"
             "Keep this window open until it confirms success."))
         intro.setWordWrap(True)
-        root.addWidget(intro)
+        content.addWidget(intro)
         url_row = QHBoxLayout()
         self._url = QLineEdit()
         self._url.setReadOnly(True)
@@ -405,14 +389,16 @@ class LoginDialog:
         copy.setEnabled(False)
         url_row.addWidget(self._url)
         url_row.addWidget(copy)
-        root.addLayout(url_row)
+        content.addLayout(url_row)
+        progress, progress_l = widgets.section(body, _("Sign-in progress"))
         out = QPlainTextEdit()
         out.setReadOnly(True)
-        root.addWidget(out)
+        out.setMinimumHeight(120)
+        progress_l.addWidget(out)
         status = QLabel(_("Starting sign-in…"))
-        root.addWidget(status)
-        close = QPushButton(_("Close"))
-        root.addWidget(close)
+        status.setWordWrap(True)
+        progress_l.addWidget(status)
+        content.addWidget(progress)
         found = {"url": None}
         proc = {"p": None}
 
@@ -476,6 +462,6 @@ class LoginDialog:
             dlg.reject()
 
         copy.clicked.connect(copy_url)
-        close.clicked.connect(close_dlg)
+        widgets.action(buttons, _("Close"), close_dlg)
         threading.Thread(target=reader, daemon=True).start()
         dlg.exec()

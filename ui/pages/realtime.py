@@ -28,14 +28,16 @@ class RealtimePage:
         self._tail = None
         root = QVBoxLayout(host)
         root.setContentsMargins(16, 16, 16, 16)
-        card, layout = widgets.card(host)
-        self.title = QLabel(_("Real-time"))
-        self.title.setObjectName("Title")
-        layout.addWidget(self.title)
+        root.setSpacing(12)
+
+        status, status_l = widgets.section(host, _("Real-time"))
+        self.title = status.title_label
         self.state = QLabel(_("Reading…"))
         self.state.setWordWrap(True)
-        layout.addWidget(self.state)
+        status_l.addWidget(self.state)
+        root.addWidget(status)
 
+        actions, layout = widgets.section(host, _("Actions"))
         buttons = QHBoxLayout()
         specs = (
             (_("Install / Update"), self.on_install, "Primary"),
@@ -79,12 +81,15 @@ class RealtimePage:
             nas.addWidget(button)
         nas.addStretch(1)
         layout.addLayout(nas)
+        root.addWidget(actions)
 
+        log_card, log_l = widgets.section(host, _("Log"))
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(5000)
-        layout.addWidget(self.log)
-        root.addWidget(card)
+        self.log.setMinimumHeight(160)
+        log_l.addWidget(self.log)
+        root.addWidget(log_card, 1)
         self._delays_seen = False
         from PySide6.QtCore import QObject, Signal
 

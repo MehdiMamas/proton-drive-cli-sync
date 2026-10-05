@@ -3319,3 +3319,45 @@ msgstr ""
 
 msgid "Choose the proton-drive binary"
 msgstr ""
+
+msgid "Open…"
+msgstr ""
+
+msgid "Save as…"
+msgstr ""
+
+msgid "Global exclusions…"
+msgstr ""
+
+msgid "Folder…"
+msgstr ""
+
+msgid "File…"
+msgstr ""
+
+msgid "Edit"
+msgstr ""
+
+msgid "Delete"
+msgstr ""
+
+msgid "Move to file…"
+msgstr ""
+
+msgid "Errors only"
+msgstr ""
+
+msgid "Clear output"
+msgstr ""
+
+msgid "Copy command"
+msgstr ""
+
+msgid "Stop"
+msgstr ""
+
+msgid "Run sync"
+msgstr ""
+
+msgid "Global exclusions — "
+msgstr ""
