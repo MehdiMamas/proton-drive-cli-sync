@@ -12,8 +12,6 @@ except ImportError:
 
 from ui.document import Document, backup_blurb
 from ui.pages.mappings import MappingsPage
-from ui.pages.realtime import RealtimePage
-from ui.pages.schedule import SchedulePage
 from ui.pages.settings import SettingsPage
 from ui import widgets
 
@@ -46,9 +44,9 @@ class MainWindow:
             status_sig = Signal(str)
             auth_sig = Signal(bool)
             account_sig = Signal(str)
+            authed_sig = Signal(bool, str)
 
             def closeEvent(self_inner, event):
-                self.realtime.stop_tail()
                 tray = getattr(self, "_tray", None)
                 if tray is not None:
                     tray.handle_close(event)
@@ -93,8 +91,6 @@ class MainWindow:
         self.stack.setObjectName("PageHost")
         pages = (
             ("mappings", "📂", _("Mappings")),
-            ("schedule", "⏰", _("Sync schedule")),
-            ("realtime", "⚡", _("Real-time")),
             ("settings", "⚙", _("Configuration")),
         )
         group = QButtonGroup(self._qt)
@@ -136,17 +132,15 @@ class MainWindow:
         outer.addWidget(wrap, 1)
 
         self.mappings = MappingsPage(holders["mappings"], self)
-        self.schedule = SchedulePage(holders["schedule"], self)
-        self.realtime = RealtimePage(holders["realtime"], self)
         self.settings = SettingsPage(holders["settings"], self)
-        self._pages = {
-            0: self.mappings, 1: self.schedule, 2: self.realtime, 3: self.settings,
-        }
+        self._pages = {0: self.mappings, 1: self.settings}
+        self._signed = False
         self.stack.currentChanged.connect(self._shown)
 
         self._qt.status_sig.connect(self.status.setText)
         self._qt.auth_sig.connect(self._paint_auth)
         self._qt.account_sig.connect(self._paint_account)
+        self._qt.authed_sig.connect(self._on_auth)
 
         if not (config_path and os.path.exists(config_path)):
             config_path = _mappings_from_units()
@@ -157,7 +151,6 @@ class MainWindow:
             except Exception as exc:
                 widgets.error(self._qt, str(exc), _("Load error"))
         self.refresh_file_chip()
-        QTimer.singleShot(300, self._probe_auth)
         QTimer.singleShot(300, self._probe_cli)
         from ui.tray import Tray
         from ui.launcher import install_ui_autostart
@@ -185,7 +178,6 @@ class MainWindow:
         self._qt.show()
 
     def close(self):
-        self.realtime.stop_tail()
         self._qt.close()
 
     def set_status(self, text):
@@ -198,28 +190,40 @@ class MainWindow:
         self._qt.account_sig.emit(text or "")
 
     def _paint_auth(self, ok):
+        self._signed = bool(ok)
         if ok:
             if self.account_chip.text() in ("", _("Checking…"), _("Session unavailable")):
                 self.account_chip.setText(_("Signed in."))
             self.account_chip.setObjectName("AccountOk")
         else:
-            self.account_chip.setText(_("Session unavailable"))
+            if self.account_chip.text() in ("", _("Checking…")):
+                self.account_chip.setText(_("Session unavailable"))
             self.account_chip.setObjectName("AccountBad")
         self.account_chip.style().unpolish(self.account_chip)
         self.account_chip.style().polish(self.account_chip)
+        self.settings.apply_account(self.account_chip.text())
+
+    def _on_auth(self, ok, detail):
+        source = getattr(self.mappings, "_pending_source", "") or ""
+        announce = bool(getattr(self.mappings, "_announce_cli", False))
+        self.mappings._pending_source = ""
+        self.mappings._announce_cli = False
+        self._signed = bool(ok)
         if ok:
-            current = self.settings.account.text()
-            if current in ("", _("Checking…"), _("Session unavailable")):
-                self.settings.apply_account(_("Signed in."))
-            else:
-                self.settings.sign_in.hide()
-                self.settings.signed_badge.show()
-        else:
-            self.settings.apply_account(_("Session unavailable"))
+            self.set_account_line(detail or _("Signed in."))
+            if source:
+                self.mappings._launch_mapping_pass(source, announce_cli=announce)
+            return
+        text = detail or _("Session unavailable")
+        self.account_chip.setText(text)
+        self.set_auth(False)
+        self.set_account_line(text)
+        if announce:
+            widgets.error(self, text, _("Proton account"))
 
     def _paint_account(self, text):
         self.account_chip.setText(text)
-        bad = text == _("Session unavailable")
+        bad = not self._signed
         self.account_chip.setObjectName("AccountBad" if bad else "AccountOk")
         self.account_chip.style().unpolish(self.account_chip)
         self.account_chip.style().polish(self.account_chip)
@@ -249,30 +253,8 @@ class MainWindow:
             _("Some changes have not been saved. Quit without saving?"),
             _("Unsaved changes"), _("Quit without saving"), _("Cancel"))
 
-    def _probe_auth(self):
-        def work():
-            ok = False
-            email = ""
-            try:
-                import realtime_manager
-                ok = bool(realtime_manager.check_auth())
-                if not ok:
-                    import time
-                    time.sleep(2.5)
-                    ok = bool(realtime_manager.check_auth())
-            except Exception:
-                ok = False
-            if ok:
-                try:
-                    import proton_sync
-                    email = proton_sync.get_account_email() or ""
-                except Exception:
-                    email = ""
-            if ok:
-                self.set_account_line(email or _("Signed in."))
-            else:
-                self.set_auth(False)
-        threading.Thread(target=work, daemon=True).start()
+    def report_auth(self, ok, detail):
+        self._qt.authed_sig.emit(bool(ok), detail or "")
 
     def _probe_cli(self):
         def work():

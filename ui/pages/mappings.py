@@ -531,11 +531,11 @@ class MappingsPage:
         self._arm_live(mapping["source"], announce_cli=True)
 
     def resume_live(self):
-        """Reopen the chosen folder's watcher and run one pass, without a button."""
-        live = self._live_mapping()
-        if live is None or not self.doc.path:
-            return
-        self._arm_live(live["source"], announce_cli=False)
+        """Reopen the chosen folder's watcher. A pass starts after the session check."""
+        live = self._live_mapping() if self.doc.path else None
+        if live is not None:
+            self._prepare_live(live["source"])
+        self._auth_then(live["source"] if live is not None else "", announce_cli=False)
 
     def _live_mapping(self):
         for row in self.doc.mappings:
@@ -545,6 +545,10 @@ class MappingsPage:
         return None
 
     def _arm_live(self, source, announce_cli):
+        self._prepare_live(source)
+        self._auth_then(source, announce_cli=announce_cli)
+
+    def _prepare_live(self, source):
         import volume as volume_mod
         volume_mod.ensure_dolphin_place(source)
         started, message = volume_mod.start_watcher(self.doc.path)
@@ -554,7 +558,32 @@ class MappingsPage:
             tray.refresh()
         if not started:
             self.window.set_status(message or _("The real-time watcher was not started."))
-        self._launch_mapping_pass(source, announce_cli=announce_cli)
+
+    def _auth_then(self, source, announce_cli):
+        self._pending_source = source
+        self._announce_cli = announce_cli
+
+        def work():
+            try:
+                import realtime_manager
+                ok, detail = realtime_manager.auth_status()
+                if not ok:
+                    import time
+                    time.sleep(2.5)
+                    ok, detail = realtime_manager.auth_status()
+            except Exception as exc:
+                ok, detail = False, str(exc)
+            email = ""
+            if ok:
+                try:
+                    import proton_sync
+                    email = proton_sync.get_account_email() or ""
+                except Exception:
+                    email = ""
+            self.window.report_auth(ok, email if ok else detail)
+
+        import threading
+        threading.Thread(target=work, daemon=True).start()
 
     def _launch_mapping_pass(self, source, announce_cli):
         import config as appconfig

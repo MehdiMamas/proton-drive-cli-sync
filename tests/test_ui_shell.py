@@ -19,7 +19,7 @@ def test_window_builds(monkeypatch):
     theme.apply(app)
     window = MainWindow()
     window.show()
-    assert window.stack.count() == 4
+    assert window.stack.count() == 2
     assert window.mappings.run_btn.objectName() == "Primary"
     assert window.mappings.stop_btn.objectName() == "Danger"
     mappings = window.stack.widget(0)
@@ -32,8 +32,8 @@ def test_window_builds(monkeypatch):
         button.text() for button in window._qt.findChildren(QPushButton)
         if button.objectName() == "Nav"
     ]
-    assert [text[0] for text in nav] == ["📂", "⏰", "⚡", "⚙"]
+    assert [text[0] for text in nav] == ["📂", "⚙"]
     assert isinstance(window.settings.scroll, QScrollArea)
-    assert window.stack.widget(3).findChild(QScrollArea) is window.settings.scroll
+    assert window.stack.widget(1).findChild(QScrollArea) is window.settings.scroll
     assert os.environ.get("QT_QPA_PLATFORM") == "offscreen"
     window.close()

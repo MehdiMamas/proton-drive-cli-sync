@@ -60,21 +60,29 @@ class Tray:
         from PySide6.QtWidgets import QMenu, QSystemTrayIcon
         self.window = window
         self.service = StatusService()
-        self._ready = QSystemTrayIcon.isSystemTrayAvailable()
-        self._icon = QSystemTrayIcon(window._qt)
+        from PySide6.QtWidgets import QApplication
+        # Parent is the application, not the window. Hiding the window would
+        # otherwise drop the icon with it, and the process would keep running.
+        self._icon = QSystemTrayIcon(QApplication.instance())
         self._icon.setIcon(QIcon(_icon_file("stopped")))
         menu = QMenu()
         menu.addAction(_("Open"), self._open)
         menu.addAction(_("Quit"), self._quit)
         self._icon.setContextMenu(menu)
         self._icon.activated.connect(self._activated)
-        if self._ready:
-            self._icon.show()
-        self._timer = QTimer(window._qt)
+        self._ready = False
+        QTimer.singleShot(0, self._show_when_ready)
+        self._timer = QTimer(QApplication.instance())
         self._timer.setInterval(2000)
         self._timer.timeout.connect(self.refresh)
         self._timer.start()
         self.refresh()
+
+    def _show_when_ready(self):
+        from PySide6.QtWidgets import QSystemTrayIcon
+        self._ready = QSystemTrayIcon.isSystemTrayAvailable()
+        if self._ready:
+            self._icon.show()
 
     def refresh(self):
         from PySide6.QtGui import QIcon
@@ -120,16 +128,20 @@ class Tray:
         dirty = bool(self.window.doc.dirty)
         confirmed = True if not dirty else self.window._confirm_close()
         action = close_action(self.window._quitting, dirty, confirmed)
-        if action == "quit":
-            self.service.stop()
-            event.accept()
+        if action == "stay":
+            event.ignore()
             return
-        if action == "stay" or not self._ready:
-            if action == "stay":
-                event.ignore()
-                return
-            self.service.stop()
-            event.accept()
+        self._show_when_ready()
+        if action == "hide" and self._icon.isVisible():
+            event.ignore()
+            self.window._qt.hide()
             return
-        event.ignore()
-        self.window._qt.hide()
+        self._exit(event)
+
+    def _exit(self, event):
+        self.service.stop()
+        self._timer.stop()
+        self._icon.hide()
+        event.accept()
+        from PySide6.QtWidgets import QApplication
+        QApplication.quit()

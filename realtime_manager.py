@@ -28,6 +28,7 @@ __version__ = "1.6.1"   # version propre à CE fichier ; incrémentée quand il 
 
 import os
 import re
+import sys
 import json
 import glob
 import time
@@ -948,21 +949,34 @@ def journal_follow_command(lines=500):
 # ─────────────────────────────────────────────────────────────────────────
 #  Authentification Proton Drive (session du CLI)
 # ─────────────────────────────────────────────────────────────────────────
+def auth_status():
+    """(ok, détail). Le détail est la dernière ligne du CLI, pas un motif inventé."""
+    try:
+        env = dict(os.environ)
+        env["PROTON_DRIVE_CLI"] = proton_cli()
+        r = subprocess.run(
+            [sys.executable, ENGINE, "--check-auth"],
+            capture_output=True, text=True, timeout=60, env=env)
+    except Exception as exc:
+        return False, str(exc)
+    if r.returncode == 0:
+        return True, ""
+    line = ""
+    for raw in ((r.stdout or "") + "\n" + (r.stderr or "")).splitlines():
+        raw = raw.strip()
+        if raw:
+            line = raw
+    return False, line or _("Session unavailable")
+
+
 def check_auth():
     """True si le CLI Proton est authentifié (session valide, trousseau accessible).
     Réutilise EXACTEMENT le préflight du moteur (`proton_sync.py --check-auth`,
     code 0 = OK, code 2 = indisponible) — aucune logique d'auth dupliquée ici. Ne
     prend pas le verrou, ne synchronise rien. Tolérant : en cas d'erreur, retourne
     False (on considère l'auth indisponible plutôt que de faire échouer le GUI)."""
-    try:
-        env = dict(os.environ)
-        env["PROTON_DRIVE_CLI"] = proton_cli()
-        r = subprocess.run(
-            ["python3", ENGINE, "--check-auth"],
-            capture_output=True, text=True, timeout=60, env=env)
-        return r.returncode == 0
-    except Exception:
-        return False
+    ok, _detail = auth_status()
+    return ok
 
 
 def auth_login_command():

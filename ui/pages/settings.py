@@ -178,9 +178,9 @@ class SettingsPage:
         def work():
             try:
                 import realtime_manager
-                ok = bool(realtime_manager.check_auth())
-            except Exception:
-                ok = False
+                ok, detail = realtime_manager.auth_status()
+            except Exception as exc:
+                ok, detail = False, str(exc)
             email = ""
             if ok:
                 try:
@@ -188,28 +188,28 @@ class SettingsPage:
                     email = proton_sync.get_account_email() or ""
                 except Exception:
                     email = ""
-            if ok:
-                text = email or _("Signed in.")
-            else:
-                text = _("Session unavailable")
-            self.window.set_account_line(text)
+            self.window.report_auth(ok, email if ok else detail)
 
         threading.Thread(target=work, daemon=True).start()
 
     def apply_account(self, text):
         """Met à jour l'e-mail, le badge et le bouton selon l'état de session."""
-        signed = text not in ("", _("Checking…"), _("Session unavailable"))
+        signed = bool(getattr(self.window, "_signed", False))
         if signed and text != _("Signed in."):
             self.account.setText(text)
         elif signed:
             self.account.setText("")
         else:
-            self.account.setText(text)
+            self.account.setText(text or _("Session unavailable"))
         self.sign_in.setVisible(not signed)
         self.signed_badge.setVisible(signed)
 
     def on_sign_in(self):
         LoginDialog(self.window)
+        live = self.window.mappings._live_mapping()
+        if live is not None and self.window.doc.path:
+            self.window.mappings._pending_source = live["source"]
+            self.window.mappings._announce_cli = False
         self._refresh_account()
 
     def on_sign_out(self):

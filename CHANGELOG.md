@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Closing the window left the process running with no tray icon, because the icon was tied to the window and a hidden window does not quit the application. The icon now stays up after the window hides. If the desktop has no tray, closing quits the process. Migration: none.
+- The account line shows the Proton CLI's own message when the session check fails, instead of only "Session unavailable". A pass of the chosen folder starts after that check succeeds. Migration: none.
 - A missing `PROTON_DRIVE_CLI` path, including the one a systemd unit embeds next to the scripts, no longer hides `proton-drive` on PATH or the path in Configuration. A path that does not exist is not written into a new unit. Migration: open the window again (or choose the mapping again) so the units are rewritten, then the chosen folder syncs on its own.
 - Dolphin marks come from an overlay plugin (`kf6/overlayicon`). A version-control plugin only runs inside a repository, so a mapped folder showed nothing. Migration: rebuild and install the plugin, remove any copy under `dolphin/vcs`, and restart Dolphin.
 - Dolphin loads that overlay plugin with `QPluginLoader` and keeps it only when the root object is a `KOverlayIconPlugin`. The factory entry was created and then deleted, so the folder stayed unmarked and Dolphin logged nothing about the plugin. Migration: rebuild and install the plugin, then restart Dolphin.
@@ -18,7 +20,7 @@
 
 ### Changed
 
-- **Choose mapping…** points the existing Dolphin place named Proton Drive at that folder, starts the local watcher, and starts a pass of that folder. Opening the window again does the same for the mapping already chosen. The Real-time and Sync schedule pages are not required for that folder. The place is not a second bookmark of the folder. Choosing a mapping does not download the rest of the account. Migration: none. The earlier whole-account volume button is no longer in the window.
+- **Choose mapping…** points the existing Dolphin place named Proton Drive at that folder, starts the local watcher, and starts a pass of that folder after the Proton session check. Opening the window again does the same for the mapping already chosen. The Real-time and Sync schedule pages are no longer in the window. The place is not a second bookmark of the folder. Choosing a mapping does not download the rest of the account. Migration: none. The earlier whole-account volume button is no longer in the window.
 - The mapping dialog explains each deletion choice under the control: whether a local delete is sent to Proton, that removed files go to the Proton trash, and whether the folder is on a network drive or an internal disk. The trash choice and the disk choice are separate. Picking the disk no longer clears the trash selection on screen. Migration: none.
 - The project is presented as two-way sync maintained in this repository. It was forked from lafontaj/proton-drive-cli-sync and is not sent upstream as a pull request. A new mapping defaults to two-way. A mapping that was already saved without `"direction": "twoway"` stays upload-only until you change it. Migration: none for existing mappings.
 
