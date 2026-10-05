@@ -38,3 +38,4 @@ separate pull requests. New files added by the fork are not listed.
 | `README.md`, `README_fr.md` | 6 | File list names `unitexec.py` and `doctor.py`; run logs are under the data directory |
 | `README.md`, `LICENSE`, `CHANGELOG.md` | 6 | Fork notice and disclaimer on top, fork contributors line, 2.0.0 section |
 | `tray_indicator.py` | UI | The status icon opens `python -m ui` instead of the Tk editor |
+| `proton_sync.py` | 2.1.0 | A pass re-checked every ancestor of a folder it had already seen. Within one pass it now lists or creates the next folder directly, and falls back to the level-by-level check when that direct list fails |

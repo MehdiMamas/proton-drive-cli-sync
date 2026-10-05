@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
-## [2.1.0] - 2026-10-04
+## [2.1.0] - 2026-10-05
 
 ### Added
 
 - PySide6 window (`python -m ui`): sidebar, mappings, schedule, real-time and configuration, in separate cards, with the previous toolbar icons on the sidebar and the mapping actions. Dropdowns use a chevron and a padded menu. It is unofficial one-way backup, not a Drive file browser. The tray icon and the Arch launcher `proton-drive-sync-gui` open this window. `python3 proton_mapping_editor.py` still opens the previous Tk editor. Headless sync does not import Qt. Migration: install PySide6 (`pyside6` on Arch, already a package dependency).
+
+### Fixed
+
+- A pass no longer asks Proton whether every ancestor of a folder exists when this pass has already seen, created, or listed that folder. The next full pass makes fewer CLI calls. No settings change is required. A failed direct listing is not treated as an empty folder: the engine falls back to the level-by-level check, then lists again. A listing that still fails skips that folder and exits 5, as before.
 
 ## [2.0.0] - 2026-10-03
 

@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.25.4"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.25.5"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -634,12 +634,15 @@ OPTION_HELP = {
     ),
     "verify-hash": _(
         "Content verification (--verify-hash)\n\n"
-        "In addition to comparing file sizes, computes a SHA1 fingerprint of "
-        "the content to detect modified files whose size did not change "
-        "(e.g. a rewritten music tag).\n\n"
+        "A normal pass already compares the content (SHA1 fingerprint) of "
+        "every file whose date changed while its size did not. This option "
+        "extends the comparison to ALL files of equal size, without trusting "
+        "what the previous pass recorded — the only way to catch a change "
+        "that kept both the size and the date (e.g. a rewritten music "
+        "tag).\n\n"
         "SLOWER: reads every file in full. Also ignores the cache.\n"
-        "Reserve it for an occasional check (e.g. once a month), not for "
-        "daily use."
+        "Run it once after updating from an older version, then keep it for "
+        "an occasional check (e.g. once a month), not for daily use."
     ),
     "verbose": _(
         "Detailed mode\n\n"
