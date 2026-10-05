@@ -145,6 +145,12 @@ class SyncDB:
             return None
         return dict(zip(_COLUMNS, row))
 
+    def rows(self):
+        found = self._conn.execute(
+            "SELECT {cols} FROM files".format(cols=", ".join(_COLUMNS))
+        ).fetchall()
+        return [dict(zip(_COLUMNS, row)) for row in found]
+
     def upsert(self, row):
         if not isinstance(row, dict):
             raise TypeError("row must be a dict")
