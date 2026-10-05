@@ -603,3 +603,53 @@ def test_editor_shows_failure_summary_in_the_default_view():
     warning = ("    ⚠  Could not list /my-files/Backups/Docs — "
                "folder skipped this pass\n")
     assert show([warning], errors_only=True) == [warning]
+
+
+def test_errors_only_wins_over_detailed():
+    show = _editor_lines()
+    detail = "    [DRY-RUN] would upload: /data/Docs/a.txt\n"
+    blank = "\n"
+    warning = "    ⚠  Could not list /my-files/Backups — folder skipped\n"
+    summary = (
+        "Summary: uploaded 1, would upload 0, failed 0, vanished 0, "
+        "listing failed 0, unreadable 0, permission denied 0, "
+        "stall-skipped 0, trashed 0, trash failed 0, deletions refused 0, "
+        "sources missing 0, mappings 1/1.\n"
+    )
+    machine = (
+        '[run-result] {"exit": 0, "files_failed": 0, '
+        '"folders_listing_failed": 0, "folders_unreadable": 0, '
+        '"folders_permission_denied": 0, "folders_stall_skipped": 0, '
+        '"trash_failed": 0, "deletions_refused": 0, "sources_missing": 0}\n'
+    )
+    lines = ["📂 /data/Docs\n", detail, blank, warning, summary, machine]
+    both = show(lines, verbose=True, errors_only=True)
+    only = show(lines, verbose=False, errors_only=True)
+    detailed = show(lines, verbose=True, errors_only=False)
+    assert both == only
+    assert warning in both
+    assert detail not in both
+    assert blank not in both
+    assert machine not in both
+    assert summary not in both
+    assert detail in detailed
+
+
+def test_detailed_keeps_blank_lines():
+    show = _editor_lines()
+    lines = [
+        "=== Launch ===\n",
+        "\n",
+        "▶ Mapping 1/1 : /data/Docs  =>  /my-files/Backups\n",
+        "📂 /data/Docs\n",
+        "\n",
+        "Done.\n",
+        '[run-result] {"exit": 0, "files_failed": 0, '
+        '"folders_listing_failed": 0, "folders_unreadable": 0, '
+        '"folders_permission_denied": 0, "folders_stall_skipped": 0, '
+        '"trash_failed": 0, "deletions_refused": 0, "sources_missing": 0}\n',
+    ]
+    shown = show(lines, verbose=True, errors_only=False)
+    assert shown == lines[:-1]
+    assert shown[1] == "\n"
+    assert shown[-2] == "\n"

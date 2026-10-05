@@ -1107,8 +1107,10 @@ def _hold_for_summary(line, verbose, errors_only):
     """True si la ligne doit attendre la suivante avant d'être affichée.
 
     Le résumé est la ligne juste avant [run-result]. On ne retient pas une
-    ligne de statut ni une erreur à glyphe : le balayage reste immédiat."""
-    if verbose:
+    ligne de statut ni une erreur à glyphe : le balayage reste immédiat.
+    « Erreurs seules » prime sur « Détaillé » : les deux cochées ensemble
+    retiennent le résumé comme « Erreurs seules » seul."""
+    if verbose and not errors_only:
         return False
     stripped = line.strip()
     if not stripped or stripped.startswith("[run-result]"):
@@ -1121,14 +1123,19 @@ def _hold_for_summary(line, verbose, errors_only):
 
 
 def _ordinary_visible(line, verbose, errors_only):
-    """Filtre historique, sans le cas particulier du résumé."""
+    """Filtre historique, sans le cas particulier du résumé.
+
+    « Erreurs seules » prime sur « Détaillé ». « Détaillé » seul est le flux
+    brut, lignes vides comprises, moins [run-result]."""
     stripped = line.strip()
-    if not stripped or stripped.startswith("[run-result]"):
+    if stripped.startswith("[run-result]"):
         return False
-    if verbose:
-        return True
     if errors_only:
         return line_is_error(stripped)
+    if verbose:
+        return True
+    if not stripped:
+        return False
     return line_is_status(stripped)
 
 
@@ -1142,7 +1149,7 @@ def editor_output_step(pending, line, verbose, errors_only):
         shown = []
         if pending is not None and _run_result_has_failures(line):
             shown.append(pending)
-        elif pending is not None and verbose:
+        elif pending is not None and verbose and not errors_only:
             shown.append(pending)
         return None, shown
     shown = []
