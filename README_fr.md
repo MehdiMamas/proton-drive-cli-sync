@@ -1,27 +1,5 @@
 🇬🇧 [English](README.md) | 🇫🇷 Français
 
-## Installation
-
-Arch Linux (paquet `-git`, construit depuis ce dépôt) :
-
-```bash
-git clone https://github.com/lafontaj/proton-drive-cli-sync.git
-cd proton-drive-cli-sync/packaging/arch
-makepkg -si
-```
-
-Sur une autre distribution : installer `python3`, `tk` et `python-pyinotify`, installer le [CLI officiel](https://proton.me/download/drive/cli/index.html) de Proton et se connecter, puis lancer `python3 proton_mapping_editor.py` depuis une copie du dépôt.
-
-## Démarrage
-
-1. `proton-drive-sync-gui` (ou `python3 proton_mapping_editor.py`), ajouter un mapping pour un **dossier de test**, faire un essai (`--dry-run`), puis un vrai passage.
-2. Planifier le passage nocturne depuis le GUI (Planification). Cette fenêtre écrit le service et le timer. `systemctl --user enable --now proton-sync.timer` ne fait que réactiver un timer déjà écrit.
-3. Si quelque chose cloche : `proton-drive-sync-doctor --redact` et joindre la sortie à un ticket.
-
-Plus loin : [CHANGELOG.md](CHANGELOG.md), [docs/change-detection.md](docs/change-detection.md), [SECURITY.md](SECURITY.md).
-
----
-
 # Synchro Proton Drive via CLI officiel (Linux)
 
 **Sauvegarde à sens unique** : ce logiciel envoie vos dossiers locaux **vers**
