@@ -14,6 +14,7 @@ STATES = (
     "pending-down",
     "conflict",
     "error",
+    "unsynced",
 )
 
 _COLUMNS = (
@@ -43,11 +44,27 @@ CREATE TABLE IF NOT EXISTS files (
     local_inode INTEGER,
     local_mtime REAL,
     state TEXT NOT NULL CHECK (
-        state IN ('synced', 'pending-up', 'pending-down', 'conflict', 'error')
+        state IN ('synced', 'pending-up', 'pending-down', 'conflict', 'error', 'unsynced')
     )
 );
 CREATE INDEX IF NOT EXISTS files_by_remote ON files (remote_path);
 CREATE INDEX IF NOT EXISTS files_by_state ON files (state);
+"""
+
+_FILES_V2 = """
+CREATE TABLE files_v2 (
+    local_path TEXT PRIMARY KEY,
+    remote_path TEXT NOT NULL,
+    remote_node_id TEXT,
+    sha1 TEXT,
+    claimed_size INTEGER,
+    claimed_mtime REAL,
+    local_inode INTEGER,
+    local_mtime REAL,
+    state TEXT NOT NULL CHECK (
+        state IN ('synced', 'pending-up', 'pending-down', 'conflict', 'error', 'unsynced')
+    )
+);
 """
 
 
@@ -117,12 +134,32 @@ class SyncDB:
         ).fetchone()
         if row is None:
             self._conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('schema_version', '1')"
+                "INSERT INTO meta (key, value) VALUES ('schema_version', '2')"
             )
             self._conn.commit()
             return
-        if row[0] != "1":
+        if row[0] == "1":
+            self._migrate_unsynced()
+            return
+        if row[0] != "2":
             raise ValueError("unsupported sync database version")
+
+    def _migrate_unsynced(self):
+        """Rebuild the file table so ``unsynced`` passes the state check."""
+        self._conn.executescript(
+            _FILES_V2 + """
+            INSERT INTO files_v2
+                SELECT local_path, remote_path, remote_node_id, sha1,
+                       claimed_size, claimed_mtime, local_inode, local_mtime, state
+                FROM files;
+            DROP TABLE files;
+            ALTER TABLE files_v2 RENAME TO files;
+            CREATE INDEX IF NOT EXISTS files_by_remote ON files (remote_path);
+            CREATE INDEX IF NOT EXISTS files_by_state ON files (state);
+            UPDATE meta SET value = '2' WHERE key = 'schema_version';
+            """
+        )
+        self._conn.commit()
 
     def close(self):
         self._conn.close()

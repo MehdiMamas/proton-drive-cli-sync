@@ -114,6 +114,25 @@ def apply_launcher(menu_enabled, desktop_enabled, target_path):
         pass
 
 
+def install_ui_autostart():
+    """Plasma login starts ``python -m ui``. The XApp tray file is not touched."""
+    path = os.path.expanduser("~/.config/autostart/proton-drive-sync-ui.desktop")
+    body = (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Proton Drive Sync\n"
+        "Comment=Two-way sync for Proton Drive. Not affiliated with Proton AG.\n"
+        f"Exec={_quote(sys.executable)} -m ui\n"
+        f"Path={APP_DIR}\n"
+        f"Icon={os.path.join(APP_DIR, 'icone.png')}\n"
+        "Terminal=false\n"
+        "X-GNOME-Autostart-enabled=true\n")
+    try:
+        _write(path, body)
+    except OSError:
+        pass
+
+
 def apply_tray(enabled):
     """Autostart de l'indicateur. Le script reste tray_indicator.py."""
     path = os.path.expanduser("~/.config/autostart/proton-drive-sync-tray.desktop")

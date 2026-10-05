@@ -29,12 +29,14 @@ STATUS_ERROR = 3
 EMBLEM_SYNCED = "emblem-default"
 EMBLEM_TRANSFERRING = "emblem-synchronizing"
 EMBLEM_PROBLEM = "emblem-important"
+EMBLEM_UNSYNCED = "emblem-new"
 EMBLEMS = {
     "synced": EMBLEM_SYNCED,
     "pending-up": EMBLEM_TRANSFERRING,
     "pending-down": EMBLEM_TRANSFERRING,
     "conflict": EMBLEM_PROBLEM,
     "error": EMBLEM_PROBLEM,
+    "unsynced": EMBLEM_UNSYNCED,
 }
 
 BUS_NAME = "org.protondrivesync.CloudProviders"
@@ -114,8 +116,9 @@ def path_emblem(db, local_path):
     prefix = root + os.sep
     rank = {
         EMBLEM_SYNCED: 1,
-        EMBLEM_TRANSFERRING: 2,
-        EMBLEM_PROBLEM: 3,
+        EMBLEM_UNSYNCED: 2,
+        EMBLEM_TRANSFERRING: 3,
+        EMBLEM_PROBLEM: 4,
     }
     best = ""
     for row in db.rows():
@@ -158,8 +161,9 @@ def directory_status(db, directory):
 def account_status(rows):
     """CloudProviders status code and a stable count string for these rows.
 
-    A conflict or an error is status 3. A pending upload or download with no
-    conflict is status 2. Anything else, including an empty folder, is idle.
+    A conflict or an error is status 3. A pending transfer or a file not yet
+    synced, with no conflict, is status 2. Anything else, including an empty
+    folder, is idle.
     """
     counts = {state: 0 for state in STATES}
     for row in rows or []:
@@ -168,7 +172,7 @@ def account_status(rows):
             counts[state] += 1
     if counts["conflict"] or counts["error"]:
         code = STATUS_ERROR
-    elif counts["pending-up"] or counts["pending-down"]:
+    elif counts["pending-up"] or counts["pending-down"] or counts["unsynced"]:
         code = STATUS_SYNCING
     else:
         code = STATUS_IDLE

@@ -17,6 +17,13 @@ import cloudstatus
 import syncdb
 
 
+def _db_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+
 def load_mapping_sources(path):
     """Local sources, in file order. Accepts a list or an object with mappings."""
     with open(path, "r", encoding="utf-8") as handle:
@@ -143,6 +150,10 @@ def serve(mappings_file, data_dir=None):
             return dbus.Dictionary(
                 {"Name": dbus.String(cloudstatus.provider_name())}, signature="sv")
 
+        @dbus.service.signal(cloudstatus.FILE_STATUS_INTERFACE, signature="")
+        def StatusChanged(self):
+            """The sync database changed. File managers should ask again."""
+
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
     # The name is released when this object is garbage-collected.
@@ -154,6 +165,16 @@ def serve(mappings_file, data_dir=None):
         accounts.append(Account(bus, path, source))
     provider = Provider(bus, accounts)
     provider.name_owner = name_owner
+    seen = {"mtime": _db_mtime(database)}
+
+    def _watch_database():
+        current = _db_mtime(database)
+        if current != seen["mtime"]:
+            seen["mtime"] = current
+            provider.StatusChanged()
+        return True
+
+    GLib.timeout_add_seconds(2, _watch_database)
     GLib.MainLoop().run()
 
 

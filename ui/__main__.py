@@ -13,6 +13,7 @@ def main(argv=None):
     if primary is None and signal_existing():
         return 0
     app = QApplication(sys.argv[:1] + args)
+    app.setQuitOnLastWindowClosed(False)
     theme.apply(app)
     path = args[0] if args else None
     window = MainWindow(path)

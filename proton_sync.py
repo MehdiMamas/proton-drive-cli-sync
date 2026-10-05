@@ -2285,6 +2285,10 @@ def _wipe_mapping_remote(mapping, dry_run=False, verbose=False):
         print(_("  ⛔ Remote wipe REFUSED (mount guard): {r}").format(r=raison))
         print(_("     Nothing deleted remotely — this mapping was NOT reset."))
         return False
+    if mapping.get("direction") == "twoway" and mapping.get("volume") is True:
+        print(_("  ⛔ Remote wipe REFUSED: a volume is the account root."))
+        print(_("     Nothing deleted remotely — this mapping was NOT reset."))
+        return False
     remote_folder = (mapping["dest_parent"].rstrip("/") + "/"
                      + os.path.basename(source.rstrip("/")))
     if not remote_exists(remote_folder):
@@ -2888,9 +2892,14 @@ def _remote_parent_for_subpath(mapping, subpath):
     if rel == ".":
         rel = ""
 
-    # Racine distante du mapping = dest_parent/basename(source).
+    # Racine distante = dest_parent/basename(source), sauf un volume : le
+    # dossier local EST /my-files, le nom local n'est pas ajouté.
     source_base = os.path.basename(source.rstrip("/"))
-    remote_root = mapping["dest_parent"].rstrip("/") + "/" + source_base
+    dest = mapping["dest_parent"].rstrip("/")
+    if mapping.get("direction") == "twoway" and mapping.get("volume") is True:
+        remote_root = dest
+    else:
+        remote_root = dest + "/" + source_base
 
     if not rel:
         # Le sous-chemin est la racine du mapping : parent distant = dest_parent

@@ -9,6 +9,10 @@
 
 ### Added
 
+- A Proton Drive volume is a two-way mapping whose local folder is My files (`/my-files`), not a new remote folder named after the local directory. The Qt window can create an empty `~/Proton Drive`, add it to Dolphin's Places, and start the existing local watcher. Deletion stays off. The first download starts only after a confirmation. Migration: none until you create the volume.
+- A changed file inside that volume is marked not yet synced immediately. An upload in progress is marked pending, then synced when it finishes. A failed upload is marked as an error. Dolphin draws those as the existing check mark, a modified mark, and the pending mark, and refreshes an open folder when the database changes. Migration: rebuild and install the Dolphin plugin.
+- `python -m ui` stays in the Plasma tray after the window is closed and keeps the file-manager status process running. Quit, from the tray menu, stops that process. Login starts the window again. The older XApp tray applet is unchanged. Migration: none. You no longer start `cloudproviders.py` yourself.
+
 - File managers read sync status from the database on the session bus. Saving or refreshing the schedule starts `proton-drive-sync-cloud` for that mappings file. Nautilus keeps the cloud-provider account entry and, with `nautilus-python`, shows a per-file emblem. Dolphin shows the same states through the `proton-drive-cli-sync-dolphin` package. A missing bus or a missing mappings file leaves files unmarked. Migration: install `python-dbus` and `python-gobject` (already required by the Arch package). On Arch, install `nautilus` and `nautilus-python` for Files, and `proton-drive-cli-sync-dolphin` for Dolphin, then rewrite units once (`schedule_manager.py --refresh-units`).
 
 ### Changed

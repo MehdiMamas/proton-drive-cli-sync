@@ -49,6 +49,63 @@ def _db(isolated_home, cfg):
         data_dir=str(isolated_home / ".proton-drive-sync"))
 
 
+def test_volume_downloads_into_the_local_root(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({})
+    fake_drive.seed_file("/my-files/hello.txt", b"HELLO", 1_000_000_000)
+    cfg = write_mappings([
+        _mapping(src, "/my-files", direction="twoway", volume=True,
+                 allow_delete=False),
+    ])
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (src / "hello.txt").read_bytes() == b"HELLO"
+    assert not (src / src.name).exists()
+    listed = _json_lists(fake_drive.calls())
+    assert "/my-files" in listed
+    assert "/my-files/" + src.name not in listed
+
+
+def test_volume_subpath_does_not_append_the_local_folder_name():
+    import proton_sync
+    volume = {
+        "source": "/data/Proton Drive",
+        "dest_parent": "/my-files",
+        "direction": "twoway",
+        "volume": True,
+    }
+    parent, err = proton_sync._remote_parent_for_subpath(
+        volume, "/data/Proton Drive/Docs")
+    assert err is None
+    assert parent == "/my-files"
+    root, err = proton_sync._remote_parent_for_subpath(
+        volume, "/data/Proton Drive")
+    assert err is None
+    assert root == "/my-files"
+    normal = {
+        "source": "/data/Docs",
+        "dest_parent": "/my-files/Backups",
+        "direction": "twoway",
+    }
+    parent, err = proton_sync._remote_parent_for_subpath(normal, "/data/Docs/Sub")
+    assert err is None
+    assert parent == "/my-files/Backups/Docs"
+
+
+def test_failed_upload_is_recorded_as_error(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([
+        _mapping(src / "Docs", "/my-files/Backups", direction="twoway"),
+    ])
+    fake_drive.add_fault(cmd="upload", match="a.txt", mode="fail", times=5)
+    result = engine(cfg)
+    assert result.returncode == 5, result.stdout + result.stderr
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        row = database.get(str(src / "Docs" / "a.txt"))
+    assert row["state"] == "error"
+
+
 def test_twoway_round_trip_and_one_way_does_not_download(
         fake_drive, local_tree, write_mappings, engine):
     src = local_tree({

@@ -402,6 +402,14 @@ def run_watcher(config_path, log=None, rescan_interval=30, fast_interval=3,
                     return
 
             try:
+                if not want_delete and not is_dir:
+                    # Le fichier change avant le passage : l'overlay peut
+                    # l'afficher tout de suite, sans attendre la fin de l'envoi.
+                    try:
+                        import volume as volume_mod
+                        volume_mod.note_local_change(config_path, mappings, path)
+                    except (OSError, ValueError):
+                        pass
                 write_marker(LOCAL_QUEUE, target_dir, want_delete)
                 tag = "DEL" if want_delete else "ADD"
                 log(_("  {t} {p} -> marker on {d}").format(t=tag, p=path, d=target_dir))

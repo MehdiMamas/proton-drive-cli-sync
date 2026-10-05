@@ -32,6 +32,9 @@ QStringList iconForEmblem(const QString &emblem)
     if (emblem == QLatin1String("emblem-important")) {
         return {QStringLiteral("vcs-conflicting")};
     }
+    if (emblem == QLatin1String("emblem-new")) {
+        return {QStringLiteral("vcs-locally-modified")};
+    }
     return {};
 }
 
@@ -56,6 +59,24 @@ QDBusMessage callStatus(const QString &method, const QString &argument)
 ProtonDriveSyncPlugin::ProtonDriveSyncPlugin(QObject *parent)
     : KOverlayIconPlugin(parent)
 {
+    QDBusConnection::sessionBus().connect(
+        QStringLiteral("org.protondrivesync.CloudProviders"),
+        QStringLiteral("/org/protondrivesync/CloudProviders"),
+        QStringLiteral("org.protondrivesync.FileStatus"),
+        QStringLiteral("StatusChanged"),
+        this, SLOT(onStatusChanged()));
+}
+
+void ProtonDriveSyncPlugin::onStatusChanged()
+{
+    QStringList paths = m_byDirectory.keys();
+    paths += m_byPath.keys();
+    m_fetchedAt.clear();
+    m_pathFetchedAt.clear();
+    for (const QString &path : paths) {
+        const QUrl url = QUrl::fromLocalFile(path);
+        Q_EMIT overlaysChanged(url, getOverlays(url));
+    }
 }
 
 QStringList ProtonDriveSyncPlugin::getOverlays(const QUrl &item)

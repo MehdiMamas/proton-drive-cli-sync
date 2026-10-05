@@ -45,6 +45,11 @@ def is_twoway(mapping):
     return isinstance(mapping, dict) and mapping.get("direction") == "twoway"
 
 
+def is_volume(mapping):
+    """The local folder is My files itself, not a folder created under it."""
+    return is_twoway(mapping) and mapping.get("volume") is True
+
+
 def sync_mapping(mapping, config_path, cache, exclusions, dry_run=False,
                  verbose=False, allow_mass_delete=False):
     """Reconcile one twoway mapping. Returns True when the tree completed."""
@@ -106,10 +111,23 @@ def _sync_file(local_file, remote_parent, ctx):
     return _reconcile_file(local_file, remote_parent, listing.get(name), ctx)
 
 
+def _remote_folder(local_dir, remote_parent, ctx):
+    """Remote directory this local directory lists.
+
+    A volume root lists ``dest_parent`` (``/my-files``). Every other folder,
+    including children of a volume, still appends its own name.
+    """
+    parent = (remote_parent or "").rstrip("/")
+    root = os.path.normpath(ctx.source_root or "")
+    if is_volume(ctx.mapping) and os.path.normpath(local_dir) == root:
+        return parent
+    name = os.path.basename(os.path.normpath(local_dir))
+    return parent + "/" + name if parent else "/" + name
+
+
 def _sync_dir(local_dir, remote_parent, ctx):
     """List this folder even when the one-way fingerprint is unchanged."""
-    folder_name = os.path.basename(local_dir.rstrip("/"))
-    remote_folder = remote_parent.rstrip("/") + "/" + folder_name
+    remote_folder = _remote_folder(local_dir, remote_parent, ctx)
     print("📂 " + local_dir)
     if not ctx.dry_run and not _ps.ensure_remote_path(remote_folder):
         return False
@@ -244,15 +262,42 @@ def _reconcile_file(local_path, remote_folder, remote_info, ctx):
     return True
 
 
+def _remember(local_path, remote_path, state, ctx):
+    """Record a state without claiming the upload already finished."""
+    if ctx.dry_run:
+        return
+    row = ctx.db.get(local_path)
+    if row:
+        stored = dict(row)
+        stored["state"] = state
+        if remote_path:
+            stored["remote_path"] = remote_path
+        ctx.db.upsert(stored)
+        return
+    ctx.db.upsert({
+        "local_path": local_path,
+        "remote_path": remote_path,
+        "remote_node_id": None,
+        "sha1": None,
+        "claimed_size": None,
+        "claimed_mtime": None,
+        "local_inode": None,
+        "local_mtime": None,
+        "state": state,
+    })
+
+
 def _upload(local_path, remote_folder, remote_info, ctx):
+    remote_path = remote_folder.rstrip("/") + "/" + os.path.basename(local_path)
+    _remember(local_path, remote_path, "pending-up", ctx)
     ok = _ps.upload_batch(
         [local_path], remote_folder, dry_run=ctx.dry_run, verbose=ctx.verbose,
         conflict_mode=ctx.mapping.get("conflict_mode", "replace"))
     if not ok:
+        _remember(local_path, remote_path, "error", ctx)
         return False
     if not ctx.dry_run:
-        _save_synced(local_path, remote_folder.rstrip("/") + "/" + os.path.basename(local_path),
-                     remote_info, ctx)
+        _save_synced(local_path, remote_path, remote_info, ctx)
     return True
 
 

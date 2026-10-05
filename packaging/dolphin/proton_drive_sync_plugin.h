@@ -23,6 +23,9 @@ public:
 
     QStringList getOverlays(const QUrl &item) override;
 
+private Q_SLOTS:
+    void onStatusChanged();
+
 private:
     QString emblemFor(const QString &path);
     void fetchDirectory(const QString &directory);

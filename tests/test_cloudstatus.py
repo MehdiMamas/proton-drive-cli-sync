@@ -51,8 +51,12 @@ def test_account_status_is_error_when_any_row_conflicts():
     assert "conflict=0" in idle_details
     assert cloudstatus.account_status([]) == (
         cloudstatus.STATUS_IDLE,
-        "synced=0 pending-up=0 pending-down=0 conflict=0 error=0",
+        "synced=0 pending-up=0 pending-down=0 conflict=0 error=0 unsynced=0",
     )
+    unsynced, _unsynced_details = cloudstatus.account_status([
+        _row("/data/New/a.txt", "unsynced"),
+    ])
+    assert unsynced == cloudstatus.STATUS_SYNCING
 
 
 def test_emblem_map_marks_sync_transfer_and_problem():
@@ -61,10 +65,11 @@ def test_emblem_map_marks_sync_transfer_and_problem():
     assert cloudstatus.emblem_for("pending-down") == cloudstatus.EMBLEM_TRANSFERRING
     assert cloudstatus.emblem_for("conflict") == cloudstatus.EMBLEM_PROBLEM
     assert cloudstatus.emblem_for("error") == cloudstatus.EMBLEM_PROBLEM
+    assert cloudstatus.emblem_for("unsynced") == cloudstatus.EMBLEM_UNSYNCED
     assert cloudstatus.emblem_for("unknown") == ""
     assert cloudstatus.emblem_for(None) == ""
     assert set(cloudstatus.EMBLEMS) == {
-        "synced", "pending-up", "pending-down", "conflict", "error",
+        "synced", "pending-up", "pending-down", "conflict", "error", "unsynced",
     }
 
 
@@ -120,6 +125,11 @@ def test_dolphin_plugin_uses_the_emblem_names():
         assert 'QLatin1String("%s")' % name in cpp
     assert "KOverlayIconPlugin" in cpp
     assert "K_PLUGIN_CLASS" not in cpp
+    assert 'QLatin1String("emblem-new")' in cpp
+    assert 'QStringLiteral("vcs-locally-modified")' in cpp
+    assert "StatusChanged" in cpp
+    assert "Q_SLOTS" in header
+    assert "onStatusChanged" in header
     assert 'Q_PLUGIN_METADATA(IID "org.kde.overlayicon.protondrivesync")' in header
     assert 'kf6/overlayicon' in cmake
 

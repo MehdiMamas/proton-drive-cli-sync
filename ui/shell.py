@@ -36,13 +36,18 @@ class MainWindow:
             account_sig = Signal(str)
 
             def closeEvent(self_inner, event):
+                self.realtime.stop_tail()
+                tray = getattr(self, "_tray", None)
+                if tray is not None:
+                    tray.handle_close(event)
+                    return
                 if not self._confirm_close():
                     event.ignore()
                     return
-                self.realtime.stop_tail()
                 event.accept()
 
         self._qt = _Window()
+        self._quitting = False
         self.doc = Document()
         self.cli_flags = {"revisions": None, "shared": None}
         self._qt.setWindowTitle(_("Mappings editor — Proton Drive sync"))
@@ -140,6 +145,10 @@ class MainWindow:
         self.refresh_file_chip()
         QTimer.singleShot(300, self._probe_auth)
         QTimer.singleShot(300, self._probe_cli)
+        from ui.tray import Tray
+        from ui.launcher import install_ui_autostart
+        self._tray = Tray(self)
+        install_ui_autostart()
 
     def _fit_screen(self):
         from PySide6.QtWidgets import QApplication
@@ -322,6 +331,7 @@ def listen_raises(window, server):
         except queue.Empty:
             pass
         if raised:
+            window._qt.show()
             window._qt.raise_()
             window._qt.activateWindow()
 
