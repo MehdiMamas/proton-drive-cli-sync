@@ -97,3 +97,5 @@ KVersionControlPlugin::ItemVersion ProtonDriveSyncPlugin::itemVersion(const KFil
     }
     return it.value();
 }
+
+#include "proton_drive_sync_plugin.moc"

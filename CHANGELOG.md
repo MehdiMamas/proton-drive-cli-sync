@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The Dolphin plugin includes `proton_drive_sync_plugin.moc`, which AUTOMOC requires because the file uses `K_PLUGIN_CLASS_WITH_JSON`. Migration: none.
+
 ### Added
 
 - File managers read sync status from the database on the session bus. Saving or refreshing the schedule starts `proton-drive-sync-cloud` for that mappings file. Nautilus keeps the cloud-provider account entry and, with `nautilus-python`, shows a per-file emblem. Dolphin shows the same states through the `proton-drive-cli-sync-dolphin` package. A missing bus or a missing mappings file leaves files unmarked. Migration: install `python-dbus` and `python-gobject` (already required by the Arch package). On Arch, install `nautilus` and `nautilus-python` for Files, and `proton-drive-cli-sync-dolphin` for Dolphin, then rewrite units once (`schedule_manager.py --refresh-units`).
