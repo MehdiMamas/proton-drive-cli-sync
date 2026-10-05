@@ -2945,7 +2945,7 @@ def _first_excluded_segment(mapping, subpath, exclusions):
 def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=False,
                  cache=None, ignore_cache=False, exclusions=None, delete=False,
                  rename_ext=True, collision_suffix=_EXT_COLLISION_SUFFIX_DEFAULT,
-                 allow_mass_delete=False):
+                 allow_mass_delete=False, config_path=None):
     """Synchronise UN sous-dossier précis d'un mapping (mode temps réel).
 
     sync_folder étant récursive, le sous-dossier ET son sous-arbre sont traités.
@@ -3059,6 +3059,14 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
             print(_("  🗑  Deletion propagation ACTIVE ({l}) for this subpath").format(l=label))
 
     print(_("  ↪ subpath: {s}  =>  {d}").format(s=subpath, d=remote_parent))
+    if mapping.get("direction") == "twoway":
+        # Le cache d'empreinte ne doit pas éviter le list : twoway.sync_tree
+        # liste toujours. Le garde-fou froid ci-dessus reste celui du temps réel.
+        import twoway
+        complete = twoway.sync_tree(
+            mapping, subpath, remote_parent, config_path, cache, exclusions,
+            dry_run=dry_run, verbose=verbose, allow_mass_delete=allow_mass_delete)
+        return "ok" if complete else "failed"
     complete = sync_folder(subpath, remote_parent, dry_run=dry_run, verbose=verbose,
                            verify_hash=verify_hash,
                            conflict_mode=mapping.get("conflict_mode", "replace"),
@@ -3629,7 +3637,8 @@ def main():
                      cache=cache, ignore_cache=args.ignore_cache, exclusions=eff_ex,
                      delete=args.delete, rename_ext=effective_rename_ext,
                      collision_suffix=effective_collision_suffix,
-                     allow_mass_delete=args.allow_mass_delete)
+                     allow_mass_delete=args.allow_mass_delete,
+                     config_path=args.config)
         cache.save()
         if result == "cold":
             # Sous-dossier froid : rien n'a été traité, la planification prendra
@@ -3702,7 +3711,17 @@ def main():
             continue
         # Exclusions effectives pour ce mapping = globales + propres au mapping.
         eff_ex = mapping_exclusions(m, global_ex)
-        if m["type"] == "folder":
+        if m.get("direction") == "twoway":
+            # Opt-in. Sans cette clé, ou avec une autre valeur, le mapping
+            # reste à sens unique et ne télécharge rien.
+            import twoway
+            complete = twoway.sync_mapping(
+                m, args.config, cache, eff_ex, dry_run=args.dry_run,
+                verbose=args.verbose, allow_mass_delete=args.allow_mass_delete)
+            if complete:
+                _RUN.add("mappings_complete")
+            health.append((m["source"], bool(complete), _take_unreadable()))
+        elif m["type"] == "folder":
             # sync_folder_guarded applique le garde-fou de montage avant toute
             # suppression. Le mode de suppression (corbeille/définitif) est celui
             # déclaré dans le mapping ('delete_mode') — il fait foi.

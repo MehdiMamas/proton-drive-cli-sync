@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- A mapping can opt in with `"direction": "twoway"`. Mappings without that key stay upload-only. A two-way pass lists the remote folder even when the local fingerprint is unchanged, uploads a local-only edit, downloads a remote-only edit into a temporary file and replaces the local file only after that download exits 0, and writes a ` (proton conflict)` copy when both sides changed. Nothing is deleted on a conflict. A local file whose remote copy disappeared is moved into `holding/` under the data directory. A failed listing does not update the sync database for that folder and the pass exits 5. Migration: no change unless you add the key.
+
 ## [2.1.0] - 2026-10-05
 
 ### Added
