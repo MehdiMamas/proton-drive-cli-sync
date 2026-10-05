@@ -2,9 +2,11 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-04
+
 ### Added
 
-- PySide6 window (`python -m ui`): sidebar, mappings, schedule, real-time and configuration, in Proton's visual language (purple primary action, cards). It is unofficial one-way backup, not a Drive file browser. The tray icon and the Arch launcher `proton-drive-sync-gui` open this window. `python3 proton_mapping_editor.py` still opens the previous Tk editor. Headless sync does not import Qt. Migration: install PySide6 (`pyside6` on Arch, already a package dependency).
+- PySide6 window (`python -m ui`): sidebar, mappings, schedule, real-time and configuration, in separate cards, with the previous toolbar icons on the sidebar and the mapping actions. Dropdowns use a chevron and a padded menu. It is unofficial one-way backup, not a Drive file browser. The tray icon and the Arch launcher `proton-drive-sync-gui` open this window. `python3 proton_mapping_editor.py` still opens the previous Tk editor. Headless sync does not import Qt. Migration: install PySide6 (`pyside6` on Arch, already a package dependency).
 
 ## [2.0.0] - 2026-10-03
 
