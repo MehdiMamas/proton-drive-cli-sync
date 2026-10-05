@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- File managers read sync status from the database on the session bus. Saving or refreshing the schedule starts `proton-drive-sync-cloud` for that mappings file. Nautilus keeps the cloud-provider account entry and, with `nautilus-python`, shows a per-file emblem. Dolphin shows the same states through the `proton-drive-cli-sync-dolphin` package. A missing bus or a missing mappings file leaves files unmarked. Migration: install `python-dbus` and `python-gobject` (already required by the Arch package). On Arch, install `nautilus` and `nautilus-python` for Files, and `proton-drive-cli-sync-dolphin` for Dolphin, then rewrite units once (`schedule_manager.py --refresh-units`).
+
 ### Changed
 
 - The mapping dialog explains each deletion choice under the control: whether a local delete is sent to Proton, that removed files go to the Proton trash, and whether the folder is on a network drive or an internal disk. The trash choice and the disk choice are separate. Picking the disk no longer clears the trash selection on screen. Migration: none.

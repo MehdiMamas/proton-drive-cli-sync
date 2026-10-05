@@ -3,8 +3,9 @@
 libcloudproviders shows one status per account folder: invalid (0), idle (1),
 syncing (2), or error (3). It does not draw a per-file emblem. ``file_status``
 still names the sync-database state of one path, so a conflict file is
-distinguishable from a synced file. This module does not call the Proton CLI
-and does not change local or remote files.
+distinguishable from a synced file. ``directory_status`` maps the same states
+to theme emblem names for Dolphin and Nautilus. This module does not call the
+Proton CLI and does not change local or remote files.
 """
 
 import os
@@ -23,6 +24,19 @@ STATUS_IDLE = 1
 STATUS_SYNCING = 2
 STATUS_ERROR = 3
 
+# Theme emblem names (Adwaita and Breeze). An empty string means no mark.
+# Dolphin maps these same three names onto its built-in overlays.
+EMBLEM_SYNCED = "emblem-default"
+EMBLEM_TRANSFERRING = "emblem-synchronizing"
+EMBLEM_PROBLEM = "emblem-important"
+EMBLEMS = {
+    "synced": EMBLEM_SYNCED,
+    "pending-up": EMBLEM_TRANSFERRING,
+    "pending-down": EMBLEM_TRANSFERRING,
+    "conflict": EMBLEM_PROBLEM,
+    "error": EMBLEM_PROBLEM,
+}
+
 BUS_NAME = "org.protondrivesync.CloudProviders"
 OBJECT_PATH = "/org/protondrivesync/CloudProviders"
 ACCOUNT_INTERFACE = "org.freedesktop.CloudProviders.Account"
@@ -31,6 +45,13 @@ FILE_STATUS_INTERFACE = "org.protondrivesync.FileStatus"
 def provider_name():
     """Name Nautilus shows for this unofficial account."""
     return _("Proton Drive Sync")
+
+
+def emblem_for(state):
+    """Theme emblem for a sync-database state, or "" when the file stays unmarked."""
+    if not isinstance(state, str):
+        return ""
+    return EMBLEMS.get(state, "")
 
 
 def file_status(db, local_path):
@@ -64,6 +85,39 @@ def rows_under(rows, source):
         normalized = os.path.normpath(path)
         if normalized == root or normalized.startswith(prefix):
             found.append(row)
+    return found
+
+
+def _is_immediate(normalized, root, prefix):
+    """True for ``root`` itself or a direct child, not a nested path."""
+    if normalized == root:
+        return True
+    if not normalized.startswith(prefix):
+        return False
+    return os.sep not in normalized[len(prefix):]
+
+
+def directory_status(db, directory):
+    """Emblem name for each immediate child row of ``directory``.
+
+    Keys are normalized absolute paths. A row with no emblem is omitted so
+    clients show no mark. Nested files wait until that folder is opened.
+    """
+    if not isinstance(directory, str) or not directory:
+        return {}
+    root = os.path.normpath(directory)
+    prefix = root + os.sep
+    found = {}
+    for row in db.rows():
+        path = row.get("local_path") if isinstance(row, dict) else None
+        if not isinstance(path, str) or not path:
+            continue
+        normalized = os.path.normpath(path)
+        if not _is_immediate(normalized, root, prefix):
+            continue
+        emblem = emblem_for(row.get("state"))
+        if emblem:
+            found[normalized] = emblem
     return found
 
 

@@ -17,6 +17,11 @@ post_install() {
     out, but it does NOT unlock a keyring: with a locked keyring the run exits
     with code 2 and nothing is uploaded.
  5. For a bug report, run `proton-drive-sync-doctor --redact`.
+ 6. File-manager marks follow the schedule's mappings file. Saving the
+    schedule starts a user service that publishes status on the session bus.
+    Nautilus shows a cloud-provider entry, and per-file emblems when
+    `nautilus` and `nautilus-python` are installed. Dolphin shows per-file
+    marks when `proton-drive-cli-sync-dolphin` is installed.
 EOF
 }
 
@@ -26,5 +31,6 @@ post_upgrade() {
     stable launcher and current options: open the GUI Schedule tab and save,
     or run: python3 /usr/lib/proton-drive-cli-sync/schedule_manager.py --refresh-units
     then: systemctl --user daemon-reload
+    That rewrite also installs the file-manager status service.
 EOF
 }

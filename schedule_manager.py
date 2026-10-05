@@ -43,6 +43,7 @@ except ImportError:
 SYSTEMD_USER_DIR = os.path.expanduser("~/.config/systemd/user")
 SERVICE_NAME = "proton-sync.service"
 TIMER_NAME = "proton-sync.timer"
+CLOUD_SERVICE_NAME = "proton-drive-sync-cloud.service"
 SERVICE_PATH = os.path.join(SYSTEMD_USER_DIR, SERVICE_NAME)
 TIMER_PATH = os.path.join(SYSTEMD_USER_DIR, TIMER_NAME)
 
@@ -133,6 +134,36 @@ RuntimeMaxSec=6h
 [Install]
 WantedBy=default.target
 """
+
+
+def build_cloud_service_text(mappings_path):
+    """Unité utilisateur du bus de statut (Dolphin et Nautilus).
+
+    Le chemin de mappings est celui du service moteur. Cette unité ne lance
+    pas le moteur et n'appelle pas le CLI Proton : elle publie la base de
+    synchro sur le bus de session, pour la session graphique seulement.
+    """
+    script = os.path.join(APP_DIR, "cloudlaunch.py")
+    exec_line = unitexec.exec_line(script, [mappings_path], app_dir=APP_DIR)
+    desc = _("Proton Drive Sync file-manager status")
+    return f"""[Unit]
+Description={desc}
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+{exec_line}
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target
+"""
+
+
+def _cloud_service_path():
+    return os.path.join(SYSTEMD_USER_DIR, CLOUD_SERVICE_NAME)
 
 
 def build_timer_text(on_calendar="*-*-* 03:00:00"):
@@ -487,6 +518,7 @@ def install_or_update(mappings_path, on_calendar="*-*-* 03:00:00", delete=False,
     try:
         _write(SERVICE_PATH, build_service_text(mappings_path, delete=delete))
         _write(TIMER_PATH, build_timer_text(on_calendar))
+        _write(_cloud_service_path(), build_cloud_service_text(mappings_path))
     except OSError as e:
         return False, _("Failed to write the systemd files: {e}").format(e=e)
 
@@ -494,20 +526,36 @@ def install_or_update(mappings_path, on_calendar="*-*-* 03:00:00", delete=False,
     if rc != 0:
         return False, _("daemon-reload failed: {e}").format(e=err or out)
 
+    timer_enabled = False
     if enable:
         rc, out, err = _run(["systemctl", "--user", "enable", "--now", TIMER_NAME])
         if rc != 0:
             return False, _("Enabling the timer failed: {e}").format(e=err or out)
+        timer_enabled = True
+
+    # Le statut des gestionnaires de fichiers ne doit pas empêcher le timer
+    # déjà activé de rester en place, mais l'échec reste visible.
+    rc, out, err = _run(["systemctl", "--user", "enable", "--now", CLOUD_SERVICE_NAME])
+    if rc != 0:
+        detail = err or out
+        if timer_enabled:
+            return False, _(
+                "Schedule installed and timer enabled, but the file-manager status service failed: {e}"
+            ).format(e=detail)
+        return False, _(
+            "The file-manager status service failed: {e}").format(e=detail)
+    if timer_enabled:
         return True, _("Schedule installed and timer enabled.")
     return True, _("Schedule installed (timer not enabled).")
 
 
 def refresh_units():
-    """Réécrit service + timer à partir de leurs valeurs actuelles.
+    """Réécrit service, timer et l'unité de statut depuis leurs valeurs actuelles.
 
     Les installations déjà en place gardent l'ancien texte d'unité. Cette
-    fonction y remet RestartPreventExitStatus=5 sans changer le fichier de
-    mappings, l'heure du timer, ni l'option --delete."""
+    fonction y remet RestartPreventExitStatus=5 et l'unité de statut des
+    gestionnaires de fichiers, sans changer le fichier de mappings, l'heure
+    du timer, ni l'option --delete."""
     mappings_path = read_service_mappings_path()
     if mappings_path is None:
         return False, _("Service not found — install the schedule first.")
@@ -585,7 +633,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Proton Drive sync schedule")
     parser.add_argument(
         "--refresh-units", action="store_true",
-        help="Rewrite the user service and timer from their current settings",
+        help="Rewrite the user service, timer and file-manager status unit from their current settings",
     )
     args = parser.parse_args(argv)
     if not args.refresh_units:

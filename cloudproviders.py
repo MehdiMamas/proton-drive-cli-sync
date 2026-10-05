@@ -1,10 +1,11 @@
-"""Session-bus status for Nautilus and Nemo, read from the sync database.
+"""Session-bus status for file managers, read from the sync database.
 
 The process owns ``org.protondrivesync.CloudProviders`` and exports the
 libcloudproviders account interface (one status per mapping folder) plus
-``GetFileStatus``. It does not call the Proton CLI. Nautilus discovers the
-name from ``packaging/proton-drive-sync-cloud.desktop`` while this process
-is running; that file is not installed by the package.
+``GetFileStatus`` and ``GetDirectoryStatus``. It does not call the Proton CLI.
+Nautilus discovers the name from ``packaging/proton-drive-sync-cloud.desktop``
+while this process is running. Dolphin does not read this bus itself; its
+plugin calls ``GetDirectoryStatus``.
 """
 
 import argparse
@@ -114,6 +115,13 @@ def serve(mappings_file, data_dir=None):
         def GetFileStatus(self, local_path):
             with open_db() as db:
                 return cloudstatus.file_status(db, str(local_path))
+
+        @dbus.service.method(
+            cloudstatus.FILE_STATUS_INTERFACE, in_signature="s", out_signature="a{ss}")
+        def GetDirectoryStatus(self, directory):
+            with open_db() as db:
+                found = cloudstatus.directory_status(db, str(directory))
+            return dbus.Dictionary(found, signature="ss")
 
         @dbus.service.method(
             dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v")

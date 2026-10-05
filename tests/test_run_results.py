@@ -445,3 +445,8 @@ def test_refresh_units_preserves_settings(tmp_path, monkeypatch):
     assert "RestartPreventExitStatus=5" in rewritten
     assert "SuccessExitStatus=0 2 4" in rewritten
     assert "OnCalendar=*-*-* 04:15:00" in timer.read_text(encoding="utf-8")
+    cloud = unit_dir / schedule_manager.CLOUD_SERVICE_NAME
+    cloud_text = cloud.read_text(encoding="utf-8")
+    assert "/data/mappings.json" in cloud_text
+    assert "WantedBy=graphical-session.target" in cloud_text
+    assert "proton_sync.py" not in cloud_text

@@ -304,7 +304,9 @@ def test_pkgbuild_syntax():
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     text = pkgbuild.read_text(encoding="utf-8")
-    body = text[text.index("package() {"):]
+    start = text.index("package_proton-drive-cli-sync-git() {")
+    end = text.index("package_proton-drive-cli-sync-dolphin() {")
+    body = text[start:end]
     # Destinations (${pkgdir}/usr/...) are not repository files.
     body = re.sub(r"\$\{pkgdir\}\S*", "", body)
     body = re.sub(r"\$\{_lib\}\S*", "", body)
@@ -320,7 +322,11 @@ def test_pkgbuild_syntax():
     assert (ARCH / install).is_file()
     for glob_pattern in re.findall(r"in (locale/[^;\s]+)", body):
         assert list(REPO.glob(glob_pattern)), glob_pattern
-    assert "depends=('python' 'tk' 'python-pyinotify' 'pyside6')" in text
+    assert "python-dbus" in text and "python-gobject" in text
+    assert "arch=('x86_64')" in text
+    assert "packaging/dolphin" in text
+    assert (REPO / "packaging" / "dolphin" / "CMakeLists.txt").is_file()
+    assert "proton-drive-cli-sync-dolphin" in text
     assert "check()" in text and "pytest" in text
 
 
@@ -336,6 +342,7 @@ def test_gui_launcher_starts_qt_ui():
 @pytest.mark.parametrize("launcher,script", [
     ("proton-drive-sync", "proton_sync.py"),
     ("proton-drive-sync-doctor", "doctor.py"),
+    ("proton-drive-sync-cloud", "cloudlaunch.py"),
 ])
 def test_launchers_exec_correct_scripts(launcher, script):
     text = (ARCH / "launchers" / launcher).read_text(encoding="utf-8")
@@ -345,3 +352,53 @@ def test_launchers_exec_correct_scripts(launcher, script):
     assert (REPO / script).is_file()
     assert unitexec.PACKAGED_DIR == PACKAGED
     assert unitexec.PACKAGED_LAUNCHERS.get("proton_sync.py") == "/usr/bin/proton-drive-sync"
+    assert unitexec.PACKAGED_LAUNCHERS.get("cloudlaunch.py") == "/usr/bin/proton-drive-sync-cloud"
+
+
+def test_cloud_unit_uses_the_engine_mappings_path(tmp_path):
+    path = str(tmp_path / "my maps" / "mappings.json")
+    engine = schedule_manager.build_service_text(path)
+    cloud = schedule_manager.build_cloud_service_text(path)
+    assert path in engine
+    assert path in cloud
+    assert "WantedBy=graphical-session.target" in cloud
+    assert "cloudlaunch.py" in cloud or "proton-drive-sync-cloud" in cloud
+    assert "proton_sync.py" not in cloud
+    assert "proton-drive-sync " not in cloud
+
+
+def test_cloudlaunch_exits_without_owning_the_bus(tmp_path, monkeypatch):
+    import cloudlaunch
+    import cloudproviders
+
+    monkeypatch.setattr(schedule_manager, "read_service_mappings_path", lambda: None)
+    called = []
+    monkeypatch.setattr(cloudproviders, "main", lambda argv: called.append(argv) or 0)
+    assert cloudlaunch.main([]) == 0
+    assert called == []
+    missing = str(tmp_path / "missing.json")
+    assert cloudlaunch.main([missing]) == 0
+    assert called == []
+
+
+def test_cloudlaunch_forwards_an_existing_mappings_file(tmp_path, monkeypatch):
+    import cloudlaunch
+    import cloudproviders
+
+    mappings = tmp_path / "mappings.json"
+    mappings.write_text("{}", encoding="utf-8")
+    called = []
+    monkeypatch.setattr(
+        cloudproviders, "main", lambda argv: called.append(list(argv)) or 0)
+    assert cloudlaunch.main([str(mappings), "--data-dir", str(tmp_path)]) == 0
+    assert called == [["--mappings", str(mappings), "--data-dir", str(tmp_path)]]
+
+
+def test_nautilus_extension_reads_directory_status():
+    text = (REPO / "packaging" / "nautilus" / "proton_drive_sync.py").read_text(
+        encoding="utf-8")
+    assert "GetDirectoryStatus" in text
+    assert "add_emblem" in text
+    assert "run_cli" not in text
+    assert "proton_sync" not in text
+    assert "emblem-default" not in text

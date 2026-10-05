@@ -16,6 +16,7 @@ PACKAGED_DIR = "/usr/lib/proton-drive-cli-sync"
 # Stable launchers (packaging/arch/launchers), by script name.
 PACKAGED_LAUNCHERS = {
     "proton_sync.py": "/usr/bin/proton-drive-sync",
+    "cloudlaunch.py": "/usr/bin/proton-drive-sync-cloud",
 }
 
 _NEEDS_QUOTES = set(" \t\r\n\"'\\;")

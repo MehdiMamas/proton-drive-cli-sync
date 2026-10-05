@@ -55,6 +55,50 @@ def test_account_status_is_error_when_any_row_conflicts():
     )
 
 
+def test_emblem_map_marks_sync_transfer_and_problem():
+    assert cloudstatus.emblem_for("synced") == cloudstatus.EMBLEM_SYNCED
+    assert cloudstatus.emblem_for("pending-up") == cloudstatus.EMBLEM_TRANSFERRING
+    assert cloudstatus.emblem_for("pending-down") == cloudstatus.EMBLEM_TRANSFERRING
+    assert cloudstatus.emblem_for("conflict") == cloudstatus.EMBLEM_PROBLEM
+    assert cloudstatus.emblem_for("error") == cloudstatus.EMBLEM_PROBLEM
+    assert cloudstatus.emblem_for("unknown") == ""
+    assert cloudstatus.emblem_for(None) == ""
+    assert set(cloudstatus.EMBLEMS) == {
+        "synced", "pending-up", "pending-down", "conflict", "error",
+    }
+
+
+def test_directory_status_is_one_folder_of_emblems(tmp_path):
+    mappings = tmp_path / "mappings.json"
+    mappings.write_text("{}", encoding="utf-8")
+    with syncdb.SyncDB(syncdb.database_path(str(mappings), str(tmp_path))) as db:
+        db.upsert(_row("/data/Ok/a.txt", "synced"))
+        db.upsert(_row("/data/Ok/b.txt", "pending-up"))
+        db.upsert(_row("/data/Ok/c.txt", "pending-down"))
+        db.upsert(_row("/data/Ok/d.txt", "conflict"))
+        db.upsert(_row("/data/Ok/e.txt", "error"))
+        db.upsert(_row("/data/Ok/sub/f.txt", "conflict"))
+        db.upsert(_row("/data/Okay/nope.txt", "synced"))
+        found = cloudstatus.directory_status(db, "/data/Ok")
+    assert found == {
+        "/data/Ok/a.txt": cloudstatus.EMBLEM_SYNCED,
+        "/data/Ok/b.txt": cloudstatus.EMBLEM_TRANSFERRING,
+        "/data/Ok/c.txt": cloudstatus.EMBLEM_TRANSFERRING,
+        "/data/Ok/d.txt": cloudstatus.EMBLEM_PROBLEM,
+        "/data/Ok/e.txt": cloudstatus.EMBLEM_PROBLEM,
+    }
+    assert cloudstatus.directory_status(db, "") == {}
+
+
+def test_dolphin_plugin_uses_the_emblem_names():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cpp = open(os.path.join(
+        root, "packaging", "dolphin", "proton_drive_sync_plugin.cpp"),
+        encoding="utf-8").read()
+    for name in set(cloudstatus.EMBLEMS.values()):
+        assert 'QLatin1String("%s")' % name in cpp
+
+
 def test_rows_under_keeps_one_mapping_folder():
     rows = [
         _row("/data/Ok/a.txt", "synced"),
@@ -67,7 +111,7 @@ def test_rows_under_keeps_one_mapping_folder():
 
 def test_status_modules_do_not_call_the_cli():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for name in ("cloudstatus.py", "cloudproviders.py"):
+    for name in ("cloudstatus.py", "cloudproviders.py", "cloudlaunch.py"):
         text = open(os.path.join(root, name), encoding="utf-8").read()
         assert "run_cli" not in text
         assert "proton_sync" not in text
@@ -85,6 +129,9 @@ root = bus.get_object(
 files = dbus.Interface(root, "org.protondrivesync.FileStatus")
 print(files.GetFileStatus(sys.argv[2]))
 print(files.GetFileStatus(sys.argv[3]))
+directory = files.GetDirectoryStatus("/data/Bad")
+items = sorted("%s=%s" % (key, directory[key]) for key in directory)
+print(",".join(items))
 props = dbus.Interface(
     bus.get_object("org.protondrivesync.CloudProviders", sys.argv[4]),
     "org.freedesktop.DBus.Properties")
@@ -154,9 +201,13 @@ def test_running_service_distinguishes_conflict_from_synced(tmp_path):
         assert lines[0] == "conflict"
         assert lines[1] == "synced"
         assert lines[0] != lines[1]
-        assert lines[2] == str(cloudstatus.STATUS_ERROR)
-        assert lines[3] == str(cloudstatus.STATUS_IDLE)
-        assert lines[4] == "True"
+        assert lines[2] == ",".join(sorted([
+            "/data/Bad/b.txt=" + cloudstatus.EMBLEM_PROBLEM,
+            "/data/Bad/c.txt=" + cloudstatus.EMBLEM_SYNCED,
+        ]))
+        assert lines[3] == str(cloudstatus.STATUS_ERROR)
+        assert lines[4] == str(cloudstatus.STATUS_IDLE)
+        assert lines[5] == "True"
     finally:
         if service is not None and service.poll() is None:
             service.terminate()
