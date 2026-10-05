@@ -22,9 +22,9 @@ Document de référence pour ce projet.
 
 ## Captures d'écran
 
-Les images ci-dessous montrent l'éditeur Tk précédent. `python3 -m ui` est la fenêtre actuelle : les mêmes actions, dans une barre latérale.
+Ce sont celles de la fenêtre Qt (`python3 -m ui`). Le fichier d'exemple n'est pas un vrai compte : un mapping est à deux sens, l'autre reste en envoi seul, et Proton n'est pas connecté.
 
-L'éditeur de mappings — la fenêtre principale : dossiers à synchroniser, exclusions par mapping, la zone de sortie partagée, et les commandes de lancement.
+La page Mappings : la liste des dossiers, les exclusions, la zone de sortie partagée, et les commandes de lancement.
 
 ![Éditeur de mappings](docs/images/mappings-editor.png)
 
@@ -35,17 +35,17 @@ Le bas de la fenêtre sépare deux types d'action, parce qu'ils n'obéissent pas
 
 La zone de sortie est commune aux deux : c'est pourquoi ses contrôles d'affichage (*Erreurs seules*, *Effacer la sortie*) se trouvent avec la sortie elle-même.
 
-La fenêtre Temps réel : état des démons, délais, état du NAS, et le journal d'événements en direct.
+La page Temps réel : état des démons, délais, état du NAS, et le journal d'événements en direct.
 
 ![Fenêtre Temps réel](docs/images/real-time.png)
 
-La fenêtre Planification (le timer systemd nocturne) :
+La page Planification (le timer systemd) :
 
 ![Fenêtre Planification](docs/images/schedule.png)
 
-Le dialogue de configuration — compte Proton, chemin du CLI, langue de l'interface, réglages NAS, extensions de fichiers, barre des tâches, et le lanceur d'application (menu d'applications et/ou raccourci sur le bureau, ouvrant l'éditeur vide ou sur le fichier de mappings courant) :
+La page Configuration — compte Proton, chemin du CLI, langue de l'interface, réglages NAS, extensions de fichiers, barre des tâches, et le lanceur d'application (menu d'applications et/ou raccourci sur le bureau, ouvrant l'éditeur vide ou sur le fichier de mappings courant) :
 
-![Dialogue de configuration](docs/images/configuration.png)
+![Page Configuration](docs/images/configuration.png)
 
 ---
 

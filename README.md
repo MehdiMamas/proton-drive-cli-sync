@@ -48,9 +48,9 @@ Reference document for this project.
 
 ## Screenshots
 
-The pictures below are the previous Tk editor. `python3 -m ui` is the current window: the same actions, in a sidebar.
+These are the Qt window (`python3 -m ui`). The sample file is not a real account: one mapping is two-way, the other is still upload-only, and Proton is not signed in.
 
-The mappings editor — the main window: folders to sync, per-mapping exclusions, the shared output pane, and the run controls.
+The mappings page: the folder list, exclusions, the shared output pane, and the run controls.
 
 ![Mappings editor](docs/images/mappings-editor.png)
 
@@ -61,17 +61,17 @@ The bottom of the window separates two kinds of action, because they do not obey
 
 The output pane is shared by both, which is why its view controls (*Errors only*, *Clear output*) sit with the output itself.
 
-The real-time window: daemon state, delays, NAS status, and the live event log.
+The real-time page: daemon state, delays, NAS status, and the live event log.
 
 ![Real-time window](docs/images/real-time.png)
 
-The schedule window (the nightly systemd timer):
+The schedule page (the systemd timer):
 
 ![Schedule window](docs/images/schedule.png)
 
-The configuration dialog — Proton account, CLI path, interface language, NAS settings, file extensions, system tray, and the application launcher (applications menu and/or desktop shortcut, opening the editor empty or on the current mappings file):
+The configuration page — Proton account, CLI path, interface language, NAS settings, file extensions, system tray, and the application launcher (applications menu and/or desktop shortcut, opening the editor empty or on the current mappings file):
 
-![Configuration dialog](docs/images/configuration.png)
+![Configuration page](docs/images/configuration.png)
 
 ---
 
