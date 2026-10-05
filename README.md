@@ -29,6 +29,28 @@ More: [CHANGELOG.md](CHANGELOG.md), [docs/change-detection.md](docs/change-detec
 ---
 🇬🇧 English | 🇫🇷 [Français](README_fr.md)
 
+## Install
+
+Arch Linux (AUR-style `-git` package, built from this repository):
+
+```bash
+git clone https://github.com/lafontaj/proton-drive-cli-sync.git
+cd proton-drive-cli-sync/packaging/arch
+makepkg -si
+```
+
+On any other distribution: install `python3`, `tk` and `python-pyinotify`, install Proton's [official CLI](https://proton.me/download/drive/cli/index.html) and sign in, then run `python3 proton_mapping_editor.py` from a checkout.
+
+## Quick start
+
+1. `proton-drive-sync-gui` (or `python3 proton_mapping_editor.py`), add a mapping for a **test folder**, run a dry-run, then a real run.
+2. Schedule the nightly run from the GUI (Schedule). That window writes the service and the timer. `systemctl --user enable --now proton-sync.timer` only re-enables a timer that has already been written.
+3. If something looks wrong: `proton-drive-sync-doctor --redact` and attach the output to an issue.
+
+More: [CHANGELOG.md](CHANGELOG.md), [docs/change-detection.md](docs/change-detection.md), [SECURITY.md](SECURITY.md).
+
+---
+
 # Proton Drive sync via the official CLI (Linux)
 
 **One-way backup**: this software pushes your local folders **to** Proton Drive,
