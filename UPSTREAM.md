@@ -49,3 +49,7 @@ separate pull requests. New files added by the fork are not listed.
 | `schedule_manager.py` | twoway C | Comment only: the nightly unit is the same engine pass, including twoway mappings. Unit text is still generated only here |
 | `schedule_manager.py` | file managers | Installing or refreshing the schedule also writes and enables the file-manager status unit for the same mappings file |
 | `config.py`, `schedule_manager.py`, `realtime_manager.py` | live folder | A missing CLI path is skipped, and a missing path is not embedded in a generated unit, so `proton-drive` on PATH is used. The session check returns the CLI's own message |
+| `proton_sync.py` | twoway | A global exclusion still trashes. The mass-deletion guard can be turned off in settings. The default stays keep, and the guard stays on |
+| `config.py` | twoway | `mass_delete_guard` defaults to on, with setters for the guard and the two thresholds |
+| `schedule_manager.py` | twoway | `service_missing_restart_prevent_5` so the window can rewrite an old unit. `--refresh-units` is unchanged |
+| `README.md`, `README_fr.md`, `CHANGELOG.md` | twoway | Global exclusions still clean up. The window can set keep or prune and the guard. Defaults are unchanged |

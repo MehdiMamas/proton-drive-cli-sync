@@ -172,6 +172,29 @@ class MappingDialog:
         self.local.setChecked(kind_init == "local")
         content.addWidget(deletion)
         self._shared_ok = shared_ok
+        self.keep_remote = QCheckBox(_(
+            "Keep the Drive copy of names excluded only on this mapping"))
+        self.keep_remote.setChecked((mapping or {}).get("excluded_remote") != "prune")
+        deletion_l.addWidget(self.keep_remote)
+        deletion_l.addWidget(self._hint(_(
+            "Names you exclude on this mapping stay on Drive. A global "
+            "exclusion still removes the Drive copy. Turn this off to trash "
+            "the Drive copy of this mapping's exclusions too.")))
+        limits = QHBoxLayout()
+        self.delete_min = QLineEdit()
+        self.delete_ratio = QLineEdit()
+        self.delete_min.setPlaceholderText(_("minimum, blank = global"))
+        self.delete_ratio.setPlaceholderText(_("fraction, blank = global"))
+        saved = mapping or {}
+        if saved.get("max_delete_min") is not None:
+            self.delete_min.setText(str(saved.get("max_delete_min")))
+        if saved.get("max_delete_ratio") is not None:
+            self.delete_ratio.setText(str(saved.get("max_delete_ratio")))
+        limits.addWidget(QLabel(_("Mass-delete minimum")))
+        limits.addWidget(self.delete_min)
+        limits.addWidget(QLabel(_("Mass-delete fraction")))
+        limits.addWidget(self.delete_ratio)
+        deletion_l.addLayout(limits)
         self.allow.toggled.connect(self._toggle)
         self.dest.textChanged.connect(self._shared_lock)
         self._shared_lock()
@@ -302,6 +325,9 @@ class MappingDialog:
             "allow_delete": allow,
             "delete_mode": mode,
             "source_kind": kind,
+            "excluded_remote": "keep" if self.keep_remote.isChecked() else "prune",
+            "max_delete_min": self.delete_min.text().strip(),
+            "max_delete_ratio": self.delete_ratio.text().strip(),
         }
         self._dlg.accept()
 

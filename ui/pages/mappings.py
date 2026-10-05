@@ -473,12 +473,36 @@ class MappingsPage:
         if not dlg.accepted:
             return None
         fields = dlg.result
+        min_text = (fields.get("max_delete_min") or "").strip()
+        ratio_text = (fields.get("max_delete_ratio") or "").strip()
+        try:
+            parsed_min = int(min_text) if min_text else None
+            parsed_ratio = float(ratio_text) if ratio_text else None
+        except ValueError:
+            widgets.warn(
+                self.window,
+                _("The mass-delete minimum is a whole number and the fraction "
+                  "is between 0 and 1. Leave both blank to use Configuration."),
+                _("Deletion propagation"))
+            return None
+        if parsed_min is not None and parsed_min < 0:
+            parsed_min = None
+        if parsed_ratio is not None and not 0.0 <= parsed_ratio <= 1.0:
+            widgets.warn(
+                self.window,
+                _("The mass-delete fraction has to be between 0 and 1."),
+                _("Deletion propagation"))
+            return None
         built = document.build_mapping(
             mapping, fields["type"], fields["source"], fields["dest"],
             fields["conflict_mode"], fields["allow_delete"],
             fields["delete_mode"], fields["source_kind"],
             direction=fields.get("direction") or "upload",
-            shared_delete_confirmed=bool(fields.get("shared_delete_confirmed")))
+            shared_delete_confirmed=bool(fields.get("shared_delete_confirmed")),
+            excluded_remote=fields.get("excluded_remote") or "keep",
+            edit_delete_limits=True,
+            max_delete_min=parsed_min,
+            max_delete_ratio=parsed_ratio)
         if not self._nas_confirm(built):
             return None
         return built
@@ -636,12 +660,37 @@ class MappingsPage:
     def _after_sync(self):
         self._busy(False)
         self._last_pass_at = time.time()
+        self._offer_mass_delete_rerun()
         if self._follow.finished():
             source = getattr(self, "_live_source", "")
             if source:
                 self._queue_pass(source, False)
                 return
         self._show_live_status()
+
+    def _offer_mass_delete_rerun(self):
+        """Une seule fois : le passage a refusé une suppression de masse."""
+        cmd = getattr(self, "_manual_cmd", None)
+        refused = bool(getattr(self._control, "mass_refused", False))
+        self._control.mass_refused = False
+        if (not cmd or not refused or "--dry-run" in cmd
+                or "--allow-mass-delete" in cmd):
+            return
+        self._manual_cmd = None
+        if not widgets.confirm(
+                self.window,
+                _("This pass refused to trash most of a remote folder. "
+                  "Run the same command again and allow that deletion?"),
+                _("Mass deletion"),
+                _("Run again"), _("Leave it")):
+            return
+        rerun = list(cmd) + ["--allow-mass-delete"]
+        log_path = self._log_file()
+        self._append(_("=== Launch: {c} ===").format(
+            c=" ".join(shlex.quote(part) for part in rerun)) + "\n")
+        self.window.set_status(_("Sync in progress…"))
+        self._start(lambda: run.run_sync(
+            rerun, log_path, run.engine_env(), self._control))
 
     def _queue_pass(self, source, announce_cli):
         if not source:
@@ -697,6 +746,7 @@ class MappingsPage:
             return
         if not self._follow.request(self._running()):
             return
+        self._manual_cmd = None
         log_path = self._log_file()
         args = run.live_pass_args(self.doc.path, source)
         cmd = run.engine_cmd(args)
@@ -934,6 +984,8 @@ class MappingsPage:
             verify_hash=self.sha1.isChecked(), verbose=self.verbose.isChecked(),
             delete=self.delete.isChecked(), only_sources=only)
         cmd = run.engine_cmd(args)
+        self._manual_cmd = cmd
+        self._control.mass_refused = False
         env = run.engine_env()
         self._append("▶ " + scope + "\n")
         self._append(_("=== Launch: {c} ===").format(

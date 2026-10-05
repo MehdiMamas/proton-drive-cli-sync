@@ -12,7 +12,7 @@ contente de LIRE l'état du linger et de rappeler la commande à l'utilisateur.
 Tout est centré sur l'utilisateur courant : chaque GUI gère la planification
 de son propre utilisateur (sessions et homes séparés).
 """
-__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.1.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
@@ -188,6 +188,17 @@ WantedBy=timers.target
 
 def service_exists():
     return os.path.exists(SERVICE_PATH)
+
+
+def service_missing_restart_prevent_5():
+    """True seulement si le fichier service installé existe et ne contient pas
+    encore RestartPreventExitStatus=5. Absent ou illisible : rien à réécrire."""
+    try:
+        with open(SERVICE_PATH, "r", encoding="utf-8") as handle:
+            content = handle.read()
+    except OSError:
+        return False
+    return "RestartPreventExitStatus=5" not in content
 
 
 def timer_exists():

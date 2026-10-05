@@ -46,6 +46,32 @@ class SettingsPage:
         cli_l.addWidget(self.cli)
         root.addWidget(cli_card)
 
+        file_card, file_l = widgets.section(inner, _("Settings file"))
+        self.settings_path = QLabel("")
+        self.settings_path.setWordWrap(True)
+        self.settings_path.setObjectName("Muted")
+        file_l.addWidget(self.settings_path)
+        root.addWidget(file_card)
+
+        guard_card, guard_l = widgets.section(inner, _("Mass deletion"))
+        self.guard = QCheckBox(_(
+            "Stop a pass that would trash most of a remote folder"))
+        guard_l.addWidget(self.guard)
+        guard_l.addWidget(QLabel(_(
+            "On by default. A folder is left untouched when the pass would "
+            "trash at least the minimum and more than the fraction of its "
+            "remote children. The window can run that pass again if you "
+            "meant it.")))
+        grow = QHBoxLayout()
+        grow.addWidget(QLabel(_("Minimum")))
+        self.guard_min = QLineEdit()
+        grow.addWidget(self.guard_min)
+        grow.addWidget(QLabel(_("Fraction")))
+        self.guard_ratio = QLineEdit()
+        grow.addWidget(self.guard_ratio)
+        guard_l.addLayout(grow)
+        root.addWidget(guard_card)
+
         lang_card, lang_l = widgets.section(inner, _("Interface language"))
         self.language = QComboBox()
         self.language.addItem(_("Automatic"), "auto")
@@ -154,6 +180,14 @@ class SettingsPage:
         except Exception:
             return
         self.cli.setText(appconfig.proton_cli_path() or "")
+        try:
+            import paths
+            self.settings_path.setText(paths.settings_path())
+        except Exception:
+            self.settings_path.setText("")
+        self.guard.setChecked(appconfig.mass_delete_guard())
+        self.guard_min.setText(str(appconfig.max_delete_min()))
+        self.guard_ratio.setText(str(appconfig.max_delete_ratio()))
         lang = i18n.read_language_setting()
         idx = self.language.findData(lang)
         if idx >= 0:
@@ -231,7 +265,20 @@ class SettingsPage:
             widgets.error(self.window, str(exc), _("Configuration"))
             return
         i18n.write_language_setting(self.language.currentData())
+        if not appconfig.set_max_delete_min(self.guard_min.text().strip()):
+            widgets.warn(
+                self.window,
+                _("The mass-delete minimum has to be a whole number, 0 or more."),
+                _("Mass deletion"))
+            return
+        if not appconfig.set_max_delete_ratio(self.guard_ratio.text().strip()):
+            widgets.warn(
+                self.window,
+                _("The mass-delete fraction has to be between 0 and 1."),
+                _("Mass deletion"))
+            return
         appconfig.set_proton_cli_path(self.cli.text().strip())
+        appconfig.set_mass_delete_guard(self.guard.isChecked())
         appconfig.set_nas_enabled(self.nas.isChecked())
         mount = self.mount.text().strip()
         if mount:

@@ -54,25 +54,29 @@ def is_volume(mapping):
 
 
 def sync_mapping(mapping, config_path, cache, exclusions, dry_run=False,
-                 verbose=False, allow_mass_delete=False):
+                 verbose=False, allow_mass_delete=False, global_ex=None):
     """Reconcile one twoway mapping. Returns True when the tree completed."""
     source = mapping.get("source") or ""
     if mapping.get("type") == "file":
         ctx = _context(mapping, config_path, cache, exclusions, dry_run,
-                       verbose, allow_mass_delete, source_root=os.path.dirname(source))
+                       verbose, allow_mass_delete, source_root=os.path.dirname(source),
+                       global_ex=global_ex)
         with ctx.db:
             return _sync_file(source, mapping.get("dest_parent") or "", ctx)
     ctx = _context(mapping, config_path, cache, exclusions, dry_run,
-                   verbose, allow_mass_delete, source_root=source)
+                   verbose, allow_mass_delete, source_root=source,
+                   global_ex=global_ex)
     with ctx.db:
         return _sync_dir(source, mapping.get("dest_parent") or "", ctx)
 
 
 def sync_tree(mapping, local_dir, remote_parent, config_path, cache, exclusions,
-              dry_run=False, verbose=False, allow_mass_delete=False):
+              dry_run=False, verbose=False, allow_mass_delete=False, global_ex=None):
     """Reconcile one folder of a twoway mapping (a full pass or a subpath)."""
     ctx = _context(mapping, config_path, cache, exclusions, dry_run,
-                   verbose, allow_mass_delete, source_root=mapping.get("source") or local_dir)
+                   verbose, allow_mass_delete,
+                   source_root=mapping.get("source") or local_dir,
+                   global_ex=global_ex)
     with ctx.db:
         return _sync_dir(local_dir, remote_parent, ctx)
 
@@ -92,9 +96,9 @@ class _Ctx:
 
 
 def _context(mapping, config_path, cache, exclusions, dry_run, verbose,
-             allow_mass_delete, source_root):
+             allow_mass_delete, source_root, global_ex=None):
     opts = _ps.build_delete_opts(
-        mapping, source_root, allow_mass_delete, verbose)
+        mapping, source_root, allow_mass_delete, verbose, global_ex=global_ex)
     db = syncdb.SyncDB(syncdb.database_path(config_path))
     return _Ctx(mapping, db, cache, exclusions, dry_run, verbose, opts,
                 source_root, config_path)
@@ -186,6 +190,13 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
         if name in local_names:
             continue
         if ctx.exclusions and ctx.exclusions.is_excluded(name):
+            if _ps._keep_excluded_remote(name, ctx.exclusions, ctx.opts):
+                continue
+            remote_path = remote_folder.rstrip("/") + "/" + name
+            if _can_trash(ctx, remote_path):
+                if not _ps.remote_trash(
+                        remote_path, permanent=False, dry_run=ctx.dry_run):
+                    ok = False
             continue
         local_path = os.path.join(local_dir, name)
         remote_path = remote_folder.rstrip("/") + "/" + name
@@ -419,6 +430,8 @@ def _can_trash(ctx, remote_path):
 
 def _refusing_mass_delete(gone, listing, ctx):
     if not gone or ctx.opts.get("allow_mass_delete"):
+        return False
+    if not ctx.opts.get("mass_delete_guard", True):
         return False
     n_remote = len(listing)
     if not n_remote:

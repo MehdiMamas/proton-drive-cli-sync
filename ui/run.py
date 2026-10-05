@@ -64,7 +64,7 @@ def live_pass_args(config_path, source):
 
 
 def sync_args(config_path, dry_run=False, verify_hash=False, verbose=False,
-              delete=False, only_sources=None):
+              delete=False, only_sources=None, allow_mass_delete=False):
     """Arguments du moteur pour une synchro manuelle. Sans sélection : tout le fichier."""
     args = [config_path]
     if dry_run:
@@ -75,6 +75,8 @@ def sync_args(config_path, dry_run=False, verify_hash=False, verbose=False,
         args.append("-v")
     if delete:
         args.append("--delete")
+    if allow_mass_delete:
+        args.append("--allow-mass-delete")
     for source in only_sources or []:
         args += ["--only-source", source]
     return args
@@ -265,6 +267,8 @@ def _emit_line(control, line, log_handle):
         control.auth_failed = True
     if "[upload-failed]" in line:
         control.upload_failed = True
+    if "[delete-guard]" in line and "refusing to trash" in line:
+        control.mass_refused = True
     marker = "[unreadable] "
     index = line.find(marker)
     if index >= 0:
@@ -463,6 +467,7 @@ class PassControl:
         self.unreadable = []
         self.auth_failed = False
         self.upload_failed = False
+        self.mass_refused = False
         self.on_text = lambda _s: None
         self.on_status = lambda _s: None
         self.on_progress = lambda _s: None

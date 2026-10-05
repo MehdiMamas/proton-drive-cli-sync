@@ -56,6 +56,40 @@ def test_remote_only_item_still_trashed_in_mirror_mode(
     assert not fake_drive.trashed(REMOTE + "/keep.txt")
 
 
+def test_global_exclusion_trashes_even_when_mapping_keeps(
+        fake_drive, local_tree, write_mappings, engine):
+    src = _upload_secret(local_tree, write_mappings, engine)
+    cfg = write_mappings(
+        [_mapping(src / "Docs")],
+        exclusions=_exclude("secret.txt"))
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.trashed(REMOTE + "/secret.txt")
+
+
+def test_twoway_global_exclusion_trashes_without_downloading(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/keep.txt": (b"keep", 1_000_000_000)})
+    fake_drive.seed_file(REMOTE + "/secret.txt", b"hide")
+    cfg = write_mappings(
+        [_mapping(src / "Docs", direction="twoway")],
+        exclusions=_exclude("secret.txt"))
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.trashed(REMOTE + "/secret.txt")
+    assert not (src / "Docs" / "secret.txt").exists()
+
+
+def test_mass_delete_guard_off_allows_the_pass(
+        fake_drive, local_tree, write_mappings, engine):
+    cfg = _emptied_tree(local_tree, write_mappings, engine, 30, 30)
+    result = engine(
+        cfg, "--delete",
+        settings_doc={"language": "en", "mass_delete_guard": False})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _trashed_count(fake_drive, 30) == 30
+
+
 def test_unknown_excluded_remote_value_defaults_to_keep(
         fake_drive, local_tree, write_mappings, engine):
     src = _upload_secret(local_tree, write_mappings, engine)

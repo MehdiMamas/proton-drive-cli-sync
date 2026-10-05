@@ -397,6 +397,17 @@ def test_consumer_auth_code_does_not_arm_backoff(tmp_path):
     assert state.fail_wait == {}
 
 
+def test_service_missing_restart_prevent_5(tmp_path, monkeypatch):
+    service = tmp_path / "service"
+    monkeypatch.setattr(schedule_manager, "SERVICE_PATH", str(service))
+    assert schedule_manager.service_missing_restart_prevent_5() is False
+    service.write_text("[Service]\nRestart=on-failure\n", encoding="utf-8")
+    assert schedule_manager.service_missing_restart_prevent_5() is True
+    service.write_text(
+        "[Service]\nRestartPreventExitStatus=5\n", encoding="utf-8")
+    assert schedule_manager.service_missing_restart_prevent_5() is False
+
+
 def test_service_unit_prevents_restart_on_5(tmp_path):
     text = schedule_manager.build_service_text(str(tmp_path / "mappings.json"))
     assert "RestartPreventExitStatus=5" in text

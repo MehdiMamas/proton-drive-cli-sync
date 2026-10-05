@@ -170,11 +170,48 @@ class MainWindow:
                 widgets.error(self._qt, str(exc), _("Load error"))
         self.refresh_file_chip()
         QTimer.singleShot(300, self._probe_cli)
+        QTimer.singleShot(500, self._startup_notices)
         from ui.tray import Tray
         from ui.launcher import install_ui_autostart
         self._tray = Tray(self)
         install_ui_autostart()
         QTimer.singleShot(400, self.mappings.resume_live)
+
+    def _startup_notices(self):
+        """Avis de déplacement des réglages, puis réécriture d'une vieille unité.
+        Ni l'un ni l'autre ne tournent dans le constructeur."""
+        try:
+            import paths
+            text = paths.settings_move_notice_text_if_due()
+        except Exception:
+            text = None
+        if text:
+            widgets.info(self._qt, text, _("Settings moved"))
+            try:
+                paths.acknowledge_settings_move_notice()
+            except Exception:
+                pass
+        self._refresh_legacy_unit()
+
+    def _refresh_legacy_unit(self):
+        """Réécrit le service s'il relancerait encore un passage en échec.
+        systemctl reste dans un fil ; la ligne de statut revient par le signal."""
+        def work():
+            try:
+                import schedule_manager
+                if not schedule_manager.service_missing_restart_prevent_5():
+                    return
+                ok, message = schedule_manager.refresh_units()
+            except Exception as exc:
+                ok, message = False, str(exc)
+            if ok:
+                self._qt.status_sig.emit(_(
+                    "Scheduled service updated so a failed pass is not restarted."))
+            else:
+                self._qt.status_sig.emit(_(
+                    "Could not update the scheduled service: {e}").format(e=message))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _fit_screen(self):
         from PySide6.QtWidgets import QApplication

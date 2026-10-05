@@ -184,7 +184,9 @@ def backup_blurb(mappings):
 
 def build_mapping(old, m_type, source, dest, conflict_mode, allow_delete,
                   delete_mode, source_kind, direction="upload",
-                  shared_delete_confirmed=False):
+                  shared_delete_confirmed=False, excluded_remote=None,
+                  edit_delete_limits=False, max_delete_min=None,
+                  max_delete_ratio=None):
     """Dict prêt à remplacer ``old``. Les clés hors dialogue sont reportées."""
     new_m = {
         "type": m_type,
@@ -209,6 +211,19 @@ def build_mapping(old, m_type, source, dest, conflict_mode, allow_delete,
         new_m["shared_delete_confirmed"] = True
     else:
         new_m.pop("shared_delete_confirmed", None)
+    if excluded_remote == "keep":
+        new_m.pop("excluded_remote", None)
+    elif excluded_remote == "prune":
+        new_m["excluded_remote"] = "prune"
+    if edit_delete_limits:
+        if max_delete_min is None:
+            new_m.pop("max_delete_min", None)
+        else:
+            new_m["max_delete_min"] = max_delete_min
+        if max_delete_ratio is None:
+            new_m.pop("max_delete_ratio", None)
+        else:
+            new_m["max_delete_ratio"] = max_delete_ratio
     return new_m
 
 

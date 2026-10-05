@@ -117,7 +117,10 @@ def test_settings_migrated_from_legacy_once(tmp_path, monkeypatch, capsys):
     dest = Path(paths.settings_path())
     err = capsys.readouterr().err
     assert dest.is_file()
-    assert dest.read_bytes() == legacy.read_bytes()
+    copied = json.loads(dest.read_text(encoding="utf-8"))
+    assert copied["language"] == "fr"
+    assert copied["rename_ext_enabled"] is False
+    assert copied["settings_move_notice_pending"] is True
     assert legacy.read_text(encoding="utf-8") == payload
     assert legacy.stat().st_mtime_ns == legacy_mtime
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
@@ -130,7 +133,7 @@ def test_settings_migrated_from_legacy_once(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(paths, "APP_DIR", str(app))
     assert paths.settings_path() == str(dest)
     assert capsys.readouterr().err == ""
-    assert dest.read_text(encoding="utf-8") == payload
+    assert json.loads(dest.read_text(encoding="utf-8"))["settings_move_notice_pending"] is True
     assert legacy.stat().st_mtime_ns == legacy_mtime
 
 

@@ -109,8 +109,10 @@ DEFAULTS = {
     "cli_stall_max_kills": 0,
     # Garde-fou de suppression de masse (par dossier distant) : un passage qui
     # enverrait à la corbeille au moins `max_delete_min` éléments ET plus de
-    # `max_delete_ratio` des enfants distants du dossier est refusé. Surchargeable
-    # par mapping (clés du même nom) ; --allow-mass-delete le coupe pour un passage.
+    # `max_delete_ratio` des enfants distants du dossier est refusé. Allumé par
+    # défaut. Surchargeable par mapping (clés du même nom) ; --allow-mass-delete
+    # le coupe pour un passage.
+    "mass_delete_guard": True,
     "max_delete_min": 20,
     "max_delete_ratio": 0.5,
     "tray_enabled": False,            # icône d'état dans la barre des tâches (tray_indicator.py)
@@ -536,6 +538,39 @@ def cli_stall_max_kills():
     except (TypeError, ValueError):
         return DEFAULTS["cli_stall_max_kills"]
     return n if n >= 0 else DEFAULTS["cli_stall_max_kills"]
+
+
+def mass_delete_guard():
+    """True : un dossier qu'on viderait en grande partie n'est pas touché.
+    Absent ou illisible : allumé. Seul un false explicite l'éteint."""
+    value = get("mass_delete_guard")
+    if isinstance(value, bool):
+        return value
+    return True
+
+
+def set_mass_delete_guard(value):
+    return _put("mass_delete_guard", bool(value))
+
+
+def set_max_delete_min(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return False
+    if number < 0:
+        return False
+    return _put("max_delete_min", number)
+
+
+def set_max_delete_ratio(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    if not 0.0 <= number <= 1.0:
+        return False
+    return _put("max_delete_ratio", number)
 
 
 def max_delete_min():

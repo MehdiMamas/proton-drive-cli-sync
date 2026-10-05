@@ -5,6 +5,7 @@ of them, so those imports cannot cycle. Nothing here raises: a missing home,
 a read-only config directory, or a failed copy falls back to a path.
 """
 
+import json
 import os
 import shutil
 import sys
@@ -13,6 +14,8 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 _MIGRATED_NOTICE = "Settings copied to {p}. The previous file was left in place."
 _UNWRITABLE_NOTICE = "Could not write settings to {p}; reading {legacy} instead."
+_NOTICE_PENDING = "settings_move_notice_pending"
+_NOTICE_SEEN = "settings_move_notice_seen"
 _unwritable_said = False
 
 
@@ -46,6 +49,101 @@ def _say(template, **kwargs):
         pass
 
 
+def _read_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_json(path, data):
+    tmp = "%s.%d.notice.tmp" % (path, os.getpid())
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, mode=0o700, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=1)
+            handle.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+        return True
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _mark_notice_pending(dest):
+    """The editor still has to say the file moved. Other keys stay."""
+    data = _read_json(dest)
+    if data is None or data.get(_NOTICE_SEEN) is True:
+        return
+    data[_NOTICE_PENDING] = True
+    _write_json(dest, data)
+
+
+def settings_move_notice_text_if_due():
+    """The three points, or None. An override path and a fresh install stay quiet."""
+    if os.environ.get("PROTON_SYNC_SETTINGS", "").strip():
+        return None
+    try:
+        path = settings_path()
+        legacy = legacy_settings_path()
+    except Exception:
+        return None
+    try:
+        if os.path.normcase(os.path.normpath(path)) == os.path.normcase(os.path.normpath(legacy)):
+            return None
+    except Exception:
+        return None
+    data = _read_json(path)
+    if not isinstance(data, dict) or data.get(_NOTICE_SEEN) is True:
+        return None
+    try:
+        legacy_exists = os.path.isfile(legacy)
+    except OSError:
+        legacy_exists = False
+    if data.get(_NOTICE_PENDING) is not True and not legacy_exists:
+        return None
+    folder = os.path.join(xdg_config_home(), "proton-drive-sync")
+    module = sys.modules.get("i18n")
+    translate = getattr(module, "_", None) if module is not None else None
+    text = (
+        "Settings now live in {path}.\n\n"
+        "The file beside the scripts is no longer read.\n\n"
+        "A backup of the scripts folder no longer includes the configuration. "
+        "Add this folder to your backups: {folder}."
+    )
+    if callable(translate):
+        try:
+            text = translate(text)
+        except Exception:
+            pass
+    return text.format(path=path, folder=folder)
+
+
+def acknowledge_settings_move_notice():
+    """Remember that the notice was shown. Every other key stays."""
+    if os.environ.get("PROTON_SYNC_SETTINGS", "").strip():
+        return False
+    try:
+        path = settings_path()
+    except Exception:
+        return False
+    data = _read_json(path)
+    if not isinstance(data, dict):
+        return False
+    data.pop(_NOTICE_PENDING, None)
+    data[_NOTICE_SEEN] = True
+    return _write_json(path, data)
+
+
 def _migrate_legacy(legacy, dest):
     """Copy legacy settings onto dest. Leave legacy in place. Mode 0600."""
     tmp = "%s.%d.tmp" % (dest, os.getpid())
@@ -61,6 +159,7 @@ def _migrate_legacy(legacy, dest):
         except OSError:
             pass
         return False
+    _mark_notice_pending(dest)
     _say(_MIGRATED_NOTICE, p=dest)
     return True
 
