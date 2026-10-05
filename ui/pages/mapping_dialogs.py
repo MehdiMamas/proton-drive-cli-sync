@@ -21,11 +21,11 @@ def _qt_exclusions():
 
 def _qt():
     from PySide6.QtWidgets import (
-        QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-        QPushButton, QRadioButton,
+        QButtonGroup, QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
+        QLineEdit, QPushButton, QRadioButton,
     )
     return (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-            QPushButton, QRadioButton, QCheckBox)
+            QPushButton, QRadioButton, QCheckBox, QButtonGroup)
 
 
 class MappingDialog:
@@ -33,7 +33,7 @@ class MappingDialog:
 
     def __init__(self, parent, kind, mapping=None, revisions_ok=None, shared_ok=None):
         (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-         QPushButton, QRadioButton, QCheckBox) = _qt()
+         QPushButton, QRadioButton, QCheckBox, QButtonGroup) = _qt()
         self._QFileDialog = QFileDialog
         self.result = None
         is_edit = mapping is not None
@@ -124,27 +124,52 @@ class MappingDialog:
             "Allow this mapping to delete on Proton what was deleted locally"))
         self.allow.setChecked(allow_init)
         deletion_l.addWidget(self.allow)
+        deletion_l.addWidget(self._hint(_(
+            "Leave this off and a file you delete on this computer stays on "
+            "Proton. Turn it on and the next sync removes that file from "
+            "Proton. Files are never removed while this is off.")))
         self.shared_note = QLabel("")
         self.shared_note.setWordWrap(True)
         self.shared_note.setObjectName("Muted")
         deletion_l.addWidget(self.shared_note)
+        deletion_l.addWidget(QLabel(_("Where a removed file goes")))
         self.trash = QRadioButton(_("Proton trash (recoverable)"))
-        self.trash.setChecked(mode_init != "permanent")
         deletion_l.addWidget(self.trash)
+        deletion_l.addWidget(self._hint(_(
+            "The file moves to your Proton trash. You can restore it from "
+            "the Proton website or app. This window does not offer permanent "
+            "deletion.")))
         self.perm_note = QLabel("")
         self.perm_note.setWordWrap(True)
+        self.perm_note.setObjectName("Muted")
         if mode_init == "permanent":
             self.perm_note.setText(_(
                 "This mapping is set to permanent deletion, which the "
                 "Proton CLI no longer allows reliably: it deletes to the "
                 "trash instead. Pick trash mode to make that explicit."))
         deletion_l.addWidget(self.perm_note)
+        deletion_l.addWidget(QLabel(_("Where this folder is stored")))
         self.nfs = QRadioButton(_("NFS (network/NAS)"))
         self.local = QRadioButton(_("Local (internal disk)"))
+        deletion_l.addWidget(self.nfs)
+        deletion_l.addWidget(self._hint(_(
+            "The folder is on a network drive. Deletion runs only while that "
+            "drive is still mounted. If it disconnects and the folder looks "
+            "empty, nothing is deleted on Proton.")))
+        deletion_l.addWidget(self.local)
+        deletion_l.addWidget(self._hint(_(
+            "The folder is on a disk in this computer. Deletion runs only "
+            "while the folder is still there and can be read.")))
+        # Deux questions distinctes. Sans groupes, Qt rend exclusifs tous les
+        # boutons radio du même parent : choisir « Local » décoche la corbeille.
+        self._mode_group = QButtonGroup(dlg)
+        self._mode_group.addButton(self.trash)
+        self._kind_group = QButtonGroup(dlg)
+        self._kind_group.addButton(self.nfs)
+        self._kind_group.addButton(self.local)
+        self.trash.setChecked(mode_init != "permanent")
         self.nfs.setChecked(kind_init == "nfs")
         self.local.setChecked(kind_init == "local")
-        deletion_l.addWidget(self.nfs)
-        deletion_l.addWidget(self.local)
         content.addWidget(deletion)
         self._shared_ok = shared_ok
         self.allow.toggled.connect(self._toggle)
@@ -154,6 +179,15 @@ class MappingDialog:
         widgets.action(buttons, _("Cancel"), dlg.reject)
         widgets.action(buttons, _("OK"), self._ok, primary=True)
         self._accepted = dlg.exec() == QDialog.Accepted
+
+    def _hint(self, text):
+        """Explication sous une option, alignée sur le libellé du bouton."""
+        from PySide6.QtWidgets import QLabel
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setObjectName("Muted")
+        label.setContentsMargins(26, 0, 0, 2)
+        return label
 
     def _browse_source(self):
         if self._type == "folder":
