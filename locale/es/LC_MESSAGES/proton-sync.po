@@ -4138,3 +4138,34 @@ msgstr ""
 "Ejecútelo una vez tras actualizar desde una versión anterior y luego "
 "resérvelo para una comprobación ocasional (p. ej. una vez al mes), no para "
 "uso diario."
+
+#, python-brace-format
+msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."
+msgstr "Resumen: enviados {files_uploaded}, se enviarían {files_would_upload}, fallidos {files_failed}, desaparecidos {files_vanished}, listado fallido {folders_listing_failed}, ilegibles {folders_unreadable}, permiso denegado {folders_permission_denied}, omitidos por bloqueo {folders_stall_skipped}, a la papelera {items_trashed}, papelera fallida {trash_failed}, eliminaciones rechazadas {deletions_refused}, orígenes ausentes {sources_missing}, asignaciones {mappings_complete}/{mappings_total}."
+
+#, python-brace-format
+msgid "  ⚠  Could not write the last-run file: {e}"
+msgstr "  ⚠  No se pudo escribir el archivo de la última ejecución: {e}"
+
+msgid "    ⚠ partial failure, markers kept"
+msgstr "    ⚠ fallo parcial, marcadores conservados"
+
+msgid "⚠ completed with failures (code 5)"
+msgstr "⚠ terminado con fallos (código 5)"
+
+#, python-brace-format
+msgid "=== Finished with failures (code 5) — log: {p} ==="
+msgstr "=== Terminado con fallos (código 5) — registro: {p} ==="
+
+msgid "Sync finished with failures (code 5)."
+msgstr "Sincronización terminada con fallos (código 5)."
+
+msgid "Reset finished with failures (code 5)"
+msgstr "Reinicio terminado con fallos (código 5)"
+
+msgid "Priming finished with failures (code 5)"
+msgstr "Preparación terminada con fallos (código 5)"
+
+msgid "Finished with failures (code 5)."
+msgstr "Terminado con fallos (código 5)."
+

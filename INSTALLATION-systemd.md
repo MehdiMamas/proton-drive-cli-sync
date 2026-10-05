@@ -133,7 +133,7 @@ If the timer fires while the user's session isn't open (keyring locked):
 1. The engine runs its authentication test (`filesystem list /`) at startup
 2. It fails (keyring locked)
 3. The engine prints a clear message and exits with **code 2**
-4. systemd treats this as a success (thanks to `SuccessExitStatus=0 2`), so NO
+4. systemd treats this as a success (thanks to `SuccessExitStatus=0 2 4`), so NO
    failure notification, NO service in "failed" state
 5. The cache is untouched, the lock is released
 6. The next day at 3:00 am (or as soon as the session reopens), a new attempt
@@ -158,7 +158,7 @@ with `Restart=on-failure` + `RestartSec=120`: systemd **automatically retries
 ~2 minutes later**, once the consumer has finished and released the lock.
 `StartLimitBurst=6` (over `StartLimitIntervalSec=1h`) bounds the attempts to
 avoid any loop if the problem persists. Exit code 2 (locked keyring) remains a
-success (`SuccessExitStatus=0 2`) and therefore triggers **no** pointless retry.
+success (`SuccessExitStatus=0 2 4`) and therefore triggers **no** pointless retry.
 
 > These settings are generated automatically by the GUI's "⏰ Schedule…" window
 > ("Install / Update" button). After updating the project, replay
@@ -179,6 +179,33 @@ journalctl --user -u proton-sync.service --since today --no-pager
 
 You'll see a failure ("Another instance… is already running", `status=1`)
 followed, ~2 min later, by a new "Starting…" then a successful "Finished…".
+
+---
+
+## Exit codes
+
+The scheduled service runs a full pass. These are the engine codes that matter for that unit:
+
+| Code | Meaning | systemd |
+| --- | --- | --- |
+| 0 | Pass completed, nothing failed | success |
+| 1 | Lock held by another run, or the CLI cannot be started | `Restart=on-failure` (bounded) |
+| 2 | Authentication failed (locked keyring or Proton/network outage) | `SuccessExitStatus`, no restart |
+| 4 | Proton account changed; nothing was synced | `SuccessExitStatus`, no restart |
+| 5 | Pass finished, but at least one upload, listing, unreadable folder, permission refusal, stall-skip, trash or missing source failed | unit **failed**, `RestartPreventExitStatus=5` so systemd does not restart it. The next timer, or the real-time cycle, retries |
+
+Code 3 is only for `--subpath` when the folder has not been indexed yet. The scheduled unit does not use `--subpath`.
+
+The last line of a pass is a `[run-result]` JSON object (exit code, mode, counters). `~/.proton-drive-sync/last-run.json` keeps the last full pass and the last subpath pass separately.
+
+Units installed before this change do not contain `RestartPreventExitStatus=5`. Rewrite them without changing the mappings file, the clock or `--delete`:
+
+```bash
+python3 schedule_manager.py --refresh-units
+systemctl --user cat proton-sync.service | grep RestartPreventExitStatus
+```
+
+Run that once for each user who already has a schedule. You should see `RestartPreventExitStatus=5` and `SuccessExitStatus=0 2 4`.
 
 ---
 

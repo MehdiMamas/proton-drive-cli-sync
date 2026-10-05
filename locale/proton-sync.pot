@@ -3332,3 +3332,34 @@ msgid ""
 "Run it once after updating from an older version, then keep it for an "
 "occasional check (e.g. once a month), not for daily use."
 msgstr ""
+
+#, python-brace-format
+msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."
+msgstr ""
+
+#, python-brace-format
+msgid "  ⚠  Could not write the last-run file: {e}"
+msgstr ""
+
+msgid "    ⚠ partial failure, markers kept"
+msgstr ""
+
+msgid "⚠ completed with failures (code 5)"
+msgstr ""
+
+#, python-brace-format
+msgid "=== Finished with failures (code 5) — log: {p} ==="
+msgstr ""
+
+msgid "Sync finished with failures (code 5)."
+msgstr ""
+
+msgid "Reset finished with failures (code 5)"
+msgstr ""
+
+msgid "Priming finished with failures (code 5)"
+msgstr ""
+
+msgid "Finished with failures (code 5)."
+msgstr ""
+

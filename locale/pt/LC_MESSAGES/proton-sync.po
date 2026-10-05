@@ -4128,3 +4128,34 @@ msgstr ""
 "Execute-o uma vez após atualizar a partir de uma versão anterior e depois "
 "reserve-o para uma verificação ocasional (ex. uma vez por mês), não para uso "
 "diário."
+
+#, python-brace-format
+msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."
+msgstr "Resumo: enviados {files_uploaded}, enviaria {files_would_upload}, falhados {files_failed}, desaparecidos {files_vanished}, listagem falhou {folders_listing_failed}, ilegíveis {folders_unreadable}, permissão negada {folders_permission_denied}, ignorados após bloqueio {folders_stall_skipped}, para o lixo {items_trashed}, lixo falhou {trash_failed}, eliminações recusadas {deletions_refused}, origens em falta {sources_missing}, mapeamentos {mappings_complete}/{mappings_total}."
+
+#, python-brace-format
+msgid "  ⚠  Could not write the last-run file: {e}"
+msgstr "  ⚠  Não foi possível escrever o ficheiro da última execução: {e}"
+
+msgid "    ⚠ partial failure, markers kept"
+msgstr "    ⚠ falha parcial, marcadores mantidos"
+
+msgid "⚠ completed with failures (code 5)"
+msgstr "⚠ concluído com falhas (código 5)"
+
+#, python-brace-format
+msgid "=== Finished with failures (code 5) — log: {p} ==="
+msgstr "=== Terminado com falhas (código 5) — registo: {p} ==="
+
+msgid "Sync finished with failures (code 5)."
+msgstr "Sincronização terminada com falhas (código 5)."
+
+msgid "Reset finished with failures (code 5)"
+msgstr "Reinicialização terminada com falhas (código 5)"
+
+msgid "Priming finished with failures (code 5)"
+msgstr "Preparação terminada com falhas (código 5)"
+
+msgid "Finished with failures (code 5)."
+msgstr "Terminado com falhas (código 5)."
+

@@ -4145,3 +4145,34 @@ msgstr ""
 "À lancer une fois après la mise à jour depuis une version plus ancienne, "
 "puis à réserver à une vérification occasionnelle (ex. une fois par mois), "
 "pas au quotidien."
+
+#, python-brace-format
+msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."
+msgstr "Résumé : envoyés {files_uploaded}, enverrait {files_would_upload}, échecs {files_failed}, disparus {files_vanished}, listage échoué {folders_listing_failed}, illisibles {folders_unreadable}, permission refusée {folders_permission_denied}, sautés après blocage {folders_stall_skipped}, à la corbeille {items_trashed}, corbeille échouée {trash_failed}, suppressions refusées {deletions_refused}, sources absentes {sources_missing}, mappings {mappings_complete}/{mappings_total}."
+
+#, python-brace-format
+msgid "  ⚠  Could not write the last-run file: {e}"
+msgstr "  ⚠  Impossible d'écrire le fichier de dernier passage : {e}"
+
+msgid "    ⚠ partial failure, markers kept"
+msgstr "    ⚠ échec partiel, marqueurs conservés"
+
+msgid "⚠ completed with failures (code 5)"
+msgstr "⚠ terminé avec des échecs (code 5)"
+
+#, python-brace-format
+msgid "=== Finished with failures (code 5) — log: {p} ==="
+msgstr "=== Terminé avec des échecs (code 5) — journal : {p} ==="
+
+msgid "Sync finished with failures (code 5)."
+msgstr "Synchro terminée avec des échecs (code 5)."
+
+msgid "Reset finished with failures (code 5)"
+msgstr "Réinitialisation terminée avec des échecs (code 5)"
+
+msgid "Priming finished with failures (code 5)"
+msgstr "Amorçage terminé avec des échecs (code 5)"
+
+msgid "Finished with failures (code 5)."
+msgstr "Terminé avec des échecs (code 5)."
+

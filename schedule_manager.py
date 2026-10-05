@@ -12,12 +12,14 @@ contente de LIRE l'état du linger et de rappeler la commande à l'utilisateur.
 Tout est centré sur l'utilisateur courant : chaque GUI gère la planification
 de son propre utilisateur (sessions et homes séparés).
 """
-__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.1.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
+import sys
 import json
 import datetime
+import argparse
 import subprocess
 
 # i18n (import guardé : l'absence de i18n.py n'empêche rien — les
@@ -95,6 +97,13 @@ Environment=PROTON_DRIVE_CLI={appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFI
 #     nuit, ne ferait que polluer le journal et refaire la sonde d'auth + 2 appels
 #     CLI pour rien. L'état est déjà signalé par le consommateur et le GUI.
 SuccessExitStatus=0 2 4
+
+# Code 5 : le passage est allé au bout, mais des fichiers ou des dossiers ont
+# échoué. L'unité doit apparaître en échec (donc PAS dans SuccessExitStatus),
+# sans pour autant relancer 6 fois par heure : le prochain timer, ou le cycle
+# temps réel, reprendra. Restart=on-failure ignorerait ce code s'il était un
+# succès ; RestartPreventExitStatus le marque failed et ne le redémarre pas.
+RestartPreventExitStatus=5
 
 # Collision de verrou : si le consommateur temps réel tient le flock au moment du
 # déclenchement, le moteur sort en échec (code 1). On relance alors le passage
@@ -340,33 +349,60 @@ def _format_entries(entries):
     return "\n".join(out)
 
 
+def _run_result_exit(text):
+    """Code porté par la ligne stable [run-result], ou None.
+
+    Le mot « Done. » est imprimé aussi pour le code 5 (boucle terminée). Sans
+    cette lecture, un passage incomplet serait affiché comme un succès."""
+    for line in (text or "").splitlines():
+        idx = line.find("[run-result] ")
+        if idx < 0:
+            continue
+        try:
+            payload = json.loads(line[idx + len("[run-result] "):])
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("exit"), int):
+            return payload["exit"]
+    return None
+
+
 def _parse_result(text):
     """Déduit (ok, code) du texte d'une invocation. ok ∈ {True, False, None}
     (None = indéterminé, ex. passage encore en cours). Priorité à l'échec.
 
     On combine les marqueurs systemd (Failed with result, status=N/FAILURE,
     signal) et le marqueur applicatif du moteur (« Terminé. » = boucle de synchro
-    menée à son terme ; « Une autre instance » = collision de verrou)."""
+    menée à son terme ; « Une autre instance » = collision de verrou).
+    Le code 5 (terminé avec échecs) reste un échec même si « Done. » est présent."""
     # Marqueurs multilingues : le journal peut contenir des passages en
     # français (historique) ET en anglais (source i18n) — on matche les deux.
     LOCK_MARKERS = ("Une autre instance", "Another instance")
     DONE_MARKERS = ("Terminé.", "Done.")
+    run_exit = _run_result_exit(text)
     m = re.search(r"status=(\d+)/FAILURE", text)
     if "Failed with result" in text or (m and m.group(1) != "0"):
         if any(x in text for x in LOCK_MARKERS) and not m:
             return False, 1
-        return False, (int(m.group(1)) if m else None)
+        code = int(m.group(1)) if m else None
+        if code == 5 or run_exit == 5:
+            return False, 5
+        return False, code
     if "code=killed" in text or "/TERM" in text:
         return False, None  # interrompu par signal
     if any(x in text for x in LOCK_MARKERS):
         return False, 1     # collision de verrou (le moteur a refusé de démarrer)
+    if run_exit == 5:
+        return False, 5
     if (any(x in text for x in DONE_MARKERS) or "Finished " in text
-            or "Deactivated successfully" in text):
+            or "Deactivated successfully" in text or run_exit == 0):
         return True, 0
     return None, None       # indéterminé (ex. passage en cours)
 
 
 def _result_label(ok, code):
+    if ok is False and code == 5:
+        return _("⚠ completed with failures (code 5)")
     if ok is True:
         return _("✅ success") + (f" (code {code})" if code not in (None, 0) else "")
     if ok is False:
@@ -452,6 +488,21 @@ def install_or_update(mappings_path, on_calendar="*-*-* 03:00:00", delete=False,
     return True, _("Schedule installed (timer not enabled).")
 
 
+def refresh_units():
+    """Réécrit service + timer à partir de leurs valeurs actuelles.
+
+    Les installations déjà en place gardent l'ancien texte d'unité. Cette
+    fonction y remet RestartPreventExitStatus=5 sans changer le fichier de
+    mappings, l'heure du timer, ni l'option --delete."""
+    mappings_path = read_service_mappings_path()
+    if mappings_path is None:
+        return False, _("Service not found — install the schedule first.")
+    calendar = read_timer_calendar() or "*-*-* 03:00:00"
+    delete = read_service_delete()
+    return install_or_update(mappings_path, on_calendar=calendar, delete=delete,
+                             enable=timer_is_active())
+
+
 def set_delete(delete):
     """Bascule l'Option A/B en réécrivant le service avec le même mappings_path."""
     mappings_path = read_service_mappings_path()
@@ -514,3 +565,22 @@ def run_now():
     if rc != 0:
         return False, _("Start failed: {e}").format(e=err or out)
     return True, _("Service started (see journalctl for the result).")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Proton Drive sync schedule")
+    parser.add_argument(
+        "--refresh-units", action="store_true",
+        help="Rewrite the user service and timer from their current settings",
+    )
+    args = parser.parse_args(argv)
+    if not args.refresh_units:
+        parser.print_help()
+        return 2
+    ok, message = refresh_units()
+    print(message)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
