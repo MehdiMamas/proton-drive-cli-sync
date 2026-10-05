@@ -20,7 +20,7 @@ Compiled catalogs are expected under:
     <project dir>/locale/<lang>/LC_MESSAGES/proton-sync.mo
 Their absence never breaks anything: gettext falls back to the source strings.
 """
-__version__ = "1.0.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.0.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import gettext
 import json

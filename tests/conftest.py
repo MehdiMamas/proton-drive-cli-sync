@@ -1,4 +1,4 @@
-"""Isolation and the fake proton-drive harness. See fake-cli-testing skill."""
+"""Isolation and the fake proton-drive harness. See docs/dev/TESTING.md."""
 
 import json
 import os
@@ -202,7 +202,7 @@ def _isolate(monkeypatch, isolated_home, tmp_path):
             "FAILURES_LOG": base / "failures.log",
             "RENAMED_LOG": base / "renamed-extensions.log",
             "HEALTH_FILE": base / "health.json",
-            "CLI_VERSION_CACHE": isolated_home / ".proton_sync" / "cli-version.json",
+            "CLI_VERSION_CACHE": base / "cli-version.json",
         }
         for name in names:
             if hasattr(module, name):

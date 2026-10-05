@@ -1,13 +1,12 @@
 """JSON remote-drive state shared by the fake proton-drive CLI and the tests.
 
-`claimedModificationTime` is the local file's `st_mtime` in POSIX seconds,
-captured when the fake stores the upload. That mirrors a plausible CLI
-behaviour. A later change checks what the real `proton-drive` binary
-actually puts in that field (local mtime, server time, or nothing) and
-updates the fake to match.
+The state file stores a file's mtime as POSIX seconds. `filesystem list -j`
+emits `claimedModificationTime` as an ISO-8601 UTC string with milliseconds,
+which is what `Date.toISOString()` produces.
 """
 
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -116,6 +115,16 @@ def direct_children(state, path):
     return found
 
 
+def claimed_modification_time(mtime):
+    """POSIX seconds in the state file, ISO-8601 UTC in a listing."""
+    if mtime is None:
+        return None
+    if isinstance(mtime, str):
+        return mtime
+    stamp = datetime.datetime.fromtimestamp(int(mtime), datetime.timezone.utc)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def list_item(name, node, account):
     """One `filesystem list -j` element, in the shape `_unwrap` expects."""
     item = {
@@ -131,7 +140,7 @@ def list_item(name, node, account):
     # fallback, so the engine sees an unknown size and chooses to re-send.
     if not node.get("remove_size_meta"):
         item["totalStorageSize"] = size + STORAGE_OVERHEAD
-    revision = {"claimedModificationTime": node.get("mtime")}
+    revision = {"claimedModificationTime": claimed_modification_time(node.get("mtime"))}
     if not node.get("remove_size_meta"):
         revision["claimedSize"] = size
     if not node.get("remove_digest"):

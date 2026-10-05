@@ -2,7 +2,7 @@
 """Fake `proton-drive` binary. Reads and writes the JSON state in FAKE_PROTON_STATE.
 
 The engine launches this file as a subprocess (`PROTON_DRIVE_CLI`). It is not
-imported by the engine. See `.cursor/skills/fake-cli-testing/SKILL.md`.
+imported by the engine. See `docs/dev/TESTING.md`.
 """
 
 import json

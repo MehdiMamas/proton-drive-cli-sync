@@ -22,6 +22,7 @@ def test_list_json_shape(fake_drive):
     assert proton_sync._unwrap(item["keyAuthor"]) == "tester@example.com"
     revision = proton_sync._unwrap(item["activeRevision"])
     assert revision["claimedSize"] == 5
+    assert revision["claimedModificationTime"] == "2001-09-09T01:46:40.000Z"
     assert revision["claimedDigests"]["sha1"] == hashlib.sha1(b"hello").hexdigest()
     assert "activeRevision" not in json.loads(
         fake_drive.run("filesystem", "list", "/my-files", "-j").stdout

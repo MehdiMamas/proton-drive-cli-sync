@@ -22,8 +22,8 @@ runs reinstall only when that file is newer than the stamp. Extra arguments
 are passed to pytest.
 
 The default pytest options skip tests marked `slow` and turn off the cache
-provider. `xfail_strict` is on: a known-bug test that starts passing fails
-the run, so the change that fixes it has to remove the marker.
+provider. `xfail_strict` is on: a test marked `xfail` that starts passing
+fails the run.
 
 ## Fake CLI
 
@@ -49,9 +49,9 @@ makes that probe exit 1. `filesystem list <path> -j` returns a JSON array of
 direct children that are not trashed. Fields the engine unwraps (`type`,
 `keyAuthor`, `activeRevision`) use `{"ok": true, "value": ...}`. File items
 carry `claimedSize`, `claimedModificationTime` and `claimedDigests.sha1`.
-`claimedModificationTime` is the local file's mtime in POSIX seconds at the
-moment of upload. A later change checks whether the real CLI does the same
-and updates the fake if it does not.
+`claimedModificationTime` is an ISO-8601 UTC string with milliseconds
+(`2001-09-09T01:46:40.000Z`). The state file stores POSIX seconds; the
+listing converts them.
 
 Uploads read names relative to the process cwd, which is how the engine
 calls the CLI. Glob escapes are undone first (`a[[]b.txt` is the file
@@ -92,24 +92,10 @@ Assert on remote bytes and exit codes. Stable tags such as `[upload-failed]`
 and `[auth-failed]` are part of the API and may be asserted. Do not assert
 on translated sentences.
 
-Import `proton_sync` in-process only for a pure helper. The equal-size
-comparator test does not import the module: it execs the comparison helpers,
-so importing the engine cannot create directories as a side effect of that test.
-
-## Known bugs (strict xfail)
-
-`tests/test_known_bugs.py` pins bugs that later changes fix. Each test is
-`@pytest.mark.xfail(strict=True)`. The test states the behavior we want. On
-today's code it fails, and strict mode records that as an expected failure.
-The change that fixes the bug removes the marker in the same change. Leaving
-the marker on a test that now passes fails the suite.
-
-| Test | Fixed by |
-|---|---|
-| `test_equal_size_edit_is_uploaded` | equal-size upload |
-| `test_equal_size_edit_detected_by_comparator` | equal-size upload |
-| `test_batch_recovery_not_fooled_by_old_equal_size_remote` | equal-size upload |
-| `test_upload_failure_exits_nonzero` | partial-pass exit code |
-| `test_subpath_upload_failure_exits_nonzero` | partial-pass exit code |
-| `test_exclusion_added_later_keeps_remote_copy` | exclusion keeps the remote copy |
-| `test_headless_run_does_not_rename_extensions_on_modern_cli` | headless extension default |
+Import `proton_sync` in-process only when a test has to observe a helper
+the subprocess cannot show, such as whether a file was hashed.
+`tests/test_equal_size.py` covers the v1.17.0 upload rule through the
+engine: an equal-size edit is sent, an identical rewrite is not, a file
+that still matches the last pass is not read, a failed batch does not
+treat an older same-size copy as the new file, and a file edited while
+it was excluded is sent once that exclusion is removed.
