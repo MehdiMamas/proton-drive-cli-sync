@@ -124,6 +124,12 @@ def serve(mappings_file, data_dir=None):
             return dbus.Dictionary(found, signature="ss")
 
         @dbus.service.method(
+            cloudstatus.FILE_STATUS_INTERFACE, in_signature="s", out_signature="s")
+        def GetPathEmblem(self, local_path):
+            with open_db() as db:
+                return cloudstatus.path_emblem(db, str(local_path))
+
+        @dbus.service.method(
             dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v")
         def Get(self, interface, name):
             if name != "Name":

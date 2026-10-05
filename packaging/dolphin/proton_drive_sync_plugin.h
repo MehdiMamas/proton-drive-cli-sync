@@ -6,34 +6,33 @@
 #ifndef PROTON_DRIVE_SYNC_PLUGIN_H
 #define PROTON_DRIVE_SYNC_PLUGIN_H
 
-#include <Dolphin/KVersionControlPlugin>
+#include <KOverlayIconPlugin>
 
 #include <QHash>
 #include <QList>
 #include <QString>
+#include <QUrl>
 #include <QVariant>
 
-class QAction;
-class KFileItem;
-class KFileItemList;
-
-// Reads org.protondrivesync.FileStatus. A missing bus leaves every file unmarked.
-class ProtonDriveSyncPlugin : public KVersionControlPlugin
+// Overlay marks for mapped files. A missing status bus leaves every file unmarked.
+class ProtonDriveSyncPlugin : public KOverlayIconPlugin
 {
     Q_OBJECT
 
 public:
-    ProtonDriveSyncPlugin(QObject *parent, const QList<QVariant> &args);
+    explicit ProtonDriveSyncPlugin(QObject *parent, const QList<QVariant> &args);
 
-    QString fileName() const override;
-    bool beginRetrieval(const QString &directory) override;
-    void endRetrieval() override;
-    ItemVersion itemVersion(const KFileItem &item) const override;
-    QList<QAction *> versionControlActions(const KFileItemList &items) const override;
-    QList<QAction *> outOfVersionControlActions(const KFileItemList &items) const override;
+    QStringList getOverlays(const QUrl &item) override;
 
 private:
-    QHash<QString, ItemVersion> m_versions;
+    QString emblemFor(const QString &path);
+    void fetchDirectory(const QString &directory);
+    QString fetchPath(const QString &path);
+
+    QHash<QString, QString> m_byDirectory;
+    QHash<QString, qint64> m_fetchedAt;
+    QHash<QString, QString> m_byPath;
+    QHash<QString, qint64> m_pathFetchedAt;
 };
 
 #endif

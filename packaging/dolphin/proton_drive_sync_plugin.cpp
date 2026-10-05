@@ -5,110 +5,136 @@
 
 #include "proton_drive_sync_plugin.h"
 
-#include <KFileItem>
 #include <KPluginFactory>
 
-#include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
-#include <QAction>
+#include <QDBusArgument>
 #include <QDir>
+#include <QFileInfo>
 #include <QVariantMap>
+
+#include <QDateTime>
 
 K_PLUGIN_CLASS_WITH_JSON(ProtonDriveSyncPlugin, "protondrivesyncdolphinplugin.json")
 
 namespace {
 
-// Names are cloudstatus.EMBLEMS. An unknown name shows no overlay.
-KVersionControlPlugin::ItemVersion versionForEmblem(const QString &emblem)
+const int kTimeoutMs = 500;
+const qint64 kCacheMs = 2000;
+
+QStringList iconForEmblem(const QString &emblem)
 {
+    // Names are cloudstatus.EMBLEMS. Dolphin draws these as overlay icons.
     if (emblem == QLatin1String("emblem-default")) {
-        return KVersionControlPlugin::NormalVersion;
+        return {QStringLiteral("vcs-normal")};
     }
     if (emblem == QLatin1String("emblem-synchronizing")) {
-        return KVersionControlPlugin::UpdateRequiredVersion;
+        return {QStringLiteral("vcs-update-required")};
     }
     if (emblem == QLatin1String("emblem-important")) {
-        return KVersionControlPlugin::ConflictingVersion;
+        return {QStringLiteral("vcs-conflicting")};
     }
-    return KVersionControlPlugin::UnversionedVersion;
+    return {};
 }
 
-}
-
-ProtonDriveSyncPlugin::ProtonDriveSyncPlugin(QObject *parent, const QList<QVariant> &args)
-    : KVersionControlPlugin(parent)
+QDBusMessage callStatus(const QString &method, const QString &argument)
 {
-    Q_UNUSED(args)
-}
-
-QString ProtonDriveSyncPlugin::fileName() const
-{
-    return QStringLiteral("protondrivesync");
-}
-
-bool ProtonDriveSyncPlugin::beginRetrieval(const QString &directory)
-{
-    m_versions.clear();
     if (!QDBusConnection::sessionBus().isConnected()) {
-        return true;
+        return QDBusMessage();
     }
-
     QDBusInterface bus(QStringLiteral("org.protondrivesync.CloudProviders"),
                        QStringLiteral("/org/protondrivesync/CloudProviders"),
                        QStringLiteral("org.protondrivesync.FileStatus"),
                        QDBusConnection::sessionBus());
     if (!bus.isValid()) {
-        return true;
+        return QDBusMessage();
     }
+    bus.setTimeout(kTimeoutMs);
+    return bus.call(method, argument);
+}
 
-    const QDBusMessage reply = bus.call(QStringLiteral("GetDirectoryStatus"), directory);
-    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
-        return true;
+}
+
+ProtonDriveSyncPlugin::ProtonDriveSyncPlugin(QObject *parent, const QList<QVariant> &args)
+    : KOverlayIconPlugin(parent)
+{
+    Q_UNUSED(args)
+}
+
+QStringList ProtonDriveSyncPlugin::getOverlays(const QUrl &item)
+{
+    if (!item.isLocalFile()) {
+        return {};
     }
+    return iconForEmblem(emblemFor(QDir::cleanPath(item.toLocalFile())));
+}
 
-    QMap<QString, QString> emblems;
-    const QVariant value = reply.arguments().at(0);
-    if (value.canConvert<QDBusArgument>()) {
-        QDBusArgument argument = value.value<QDBusArgument>();
-        argument >> emblems;
-    } else {
-        const QVariantMap variantMap = value.toMap();
-        for (auto it = variantMap.cbegin(); it != variantMap.cend(); ++it) {
-            emblems.insert(it.key(), it.value().toString());
+QString ProtonDriveSyncPlugin::emblemFor(const QString &path)
+{
+    const QString directory = QFileInfo(path).path();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!m_fetchedAt.contains(directory) || now - m_fetchedAt.value(directory) > kCacheMs) {
+        fetchDirectory(directory);
+        m_fetchedAt.insert(directory, now);
+    }
+    if (m_byDirectory.contains(path)) {
+        return m_byDirectory.value(path);
+    }
+    if (m_pathFetchedAt.contains(path) && now - m_pathFetchedAt.value(path) <= kCacheMs) {
+        return m_byPath.value(path);
+    }
+    const QString emblem = fetchPath(path);
+    m_byPath.insert(path, emblem);
+    m_pathFetchedAt.insert(path, now);
+    return emblem;
+}
+
+void ProtonDriveSyncPlugin::fetchDirectory(const QString &directory)
+{
+    QHash<QString, QString> fresh;
+    {
+            const QDBusMessage reply = callStatus(QStringLiteral("GetDirectoryStatus"), directory);
+            if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+                QMap<QString, QString> emblems;
+                const QVariant value = reply.arguments().at(0);
+                if (value.canConvert<QDBusArgument>()) {
+                    QDBusArgument argument = value.value<QDBusArgument>();
+                    argument >> emblems;
+                } else {
+                    const QVariantMap variantMap = value.toMap();
+                    for (auto it = variantMap.cbegin(); it != variantMap.cend(); ++it) {
+                        emblems.insert(it.key(), it.value().toString());
+                    }
+                }
+                for (auto it = emblems.cbegin(); it != emblems.cend(); ++it) {
+                    fresh.insert(QDir::cleanPath(it.key()), it.value());
+                }
+            }
+    }
+    const QString prefix = directory.endsWith(QLatin1Char('/')) ? directory : directory + QLatin1Char('/');
+    QStringList stale;
+    for (auto it = m_byDirectory.cbegin(); it != m_byDirectory.cend(); ++it) {
+        if (it.key().startsWith(prefix)) {
+            stale.append(it.key());
         }
     }
-
-    for (auto it = emblems.cbegin(); it != emblems.cend(); ++it) {
-        m_versions.insert(QDir::cleanPath(it.key()), versionForEmblem(it.value()));
+    for (const QString &key : stale) {
+        m_byDirectory.remove(key);
     }
-    return true;
-}
-
-void ProtonDriveSyncPlugin::endRetrieval()
-{
-}
-
-KVersionControlPlugin::ItemVersion ProtonDriveSyncPlugin::itemVersion(const KFileItem &item) const
-{
-    const auto it = m_versions.constFind(QDir::cleanPath(item.mostLocalUrl().toLocalFile()));
-    if (it == m_versions.cend()) {
-        return UnversionedVersion;
+    for (auto it = fresh.cbegin(); it != fresh.cend(); ++it) {
+        m_byDirectory.insert(it.key(), it.value());
     }
-    return it.value();
 }
 
-QList<QAction *> ProtonDriveSyncPlugin::versionControlActions(const KFileItemList &items) const
+QString ProtonDriveSyncPlugin::fetchPath(const QString &path)
 {
-    Q_UNUSED(items)
-    return {};
-}
-
-QList<QAction *> ProtonDriveSyncPlugin::outOfVersionControlActions(const KFileItemList &items) const
-{
-    Q_UNUSED(items)
-    return {};
+    const QDBusMessage reply = callStatus(QStringLiteral("GetPathEmblem"), path);
+    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
+        return {};
+    }
+    return reply.arguments().at(0).toString();
 }
 
 #include "proton_drive_sync_plugin.moc"

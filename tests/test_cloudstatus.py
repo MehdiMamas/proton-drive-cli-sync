@@ -68,6 +68,21 @@ def test_emblem_map_marks_sync_transfer_and_problem():
     }
 
 
+def test_path_emblem_marks_a_folder_from_the_files_inside(tmp_path):
+    mappings = tmp_path / "mappings.json"
+    mappings.write_text("{}", encoding="utf-8")
+    with syncdb.SyncDB(syncdb.database_path(str(mappings), str(tmp_path))) as db:
+        db.upsert(_row("/data/Ok/a.txt", "synced"))
+        db.upsert(_row("/data/Wait/b.txt", "pending-up"))
+        db.upsert(_row("/data/Bad/c.txt", "synced"))
+        db.upsert(_row("/data/Bad/d.txt", "conflict"))
+        assert cloudstatus.path_emblem(db, "/data/Ok/a.txt") == cloudstatus.EMBLEM_SYNCED
+        assert cloudstatus.path_emblem(db, "/data/Ok") == cloudstatus.EMBLEM_SYNCED
+        assert cloudstatus.path_emblem(db, "/data/Wait") == cloudstatus.EMBLEM_TRANSFERRING
+        assert cloudstatus.path_emblem(db, "/data/Bad") == cloudstatus.EMBLEM_PROBLEM
+        assert cloudstatus.path_emblem(db, "/data/Other") == ""
+
+
 def test_directory_status_is_one_folder_of_emblems(tmp_path):
     mappings = tmp_path / "mappings.json"
     mappings.write_text("{}", encoding="utf-8")
@@ -95,8 +110,13 @@ def test_dolphin_plugin_uses_the_emblem_names():
     cpp = open(os.path.join(
         root, "packaging", "dolphin", "proton_drive_sync_plugin.cpp"),
         encoding="utf-8").read()
+    cmake = open(os.path.join(
+        root, "packaging", "dolphin", "CMakeLists.txt"),
+        encoding="utf-8").read()
     for name in set(cloudstatus.EMBLEMS.values()):
         assert 'QLatin1String("%s")' % name in cpp
+    assert "KOverlayIconPlugin" in cpp
+    assert 'kf6/overlayicon' in cmake
 
 
 def test_rows_under_keeps_one_mapping_folder():
@@ -132,6 +152,7 @@ print(files.GetFileStatus(sys.argv[3]))
 directory = files.GetDirectoryStatus("/data/Bad")
 items = sorted("%s=%s" % (key, directory[key]) for key in directory)
 print(",".join(items))
+print(files.GetPathEmblem("/data/Bad"))
 props = dbus.Interface(
     bus.get_object("org.protondrivesync.CloudProviders", sys.argv[4]),
     "org.freedesktop.DBus.Properties")
@@ -205,9 +226,10 @@ def test_running_service_distinguishes_conflict_from_synced(tmp_path):
             "/data/Bad/b.txt=" + cloudstatus.EMBLEM_PROBLEM,
             "/data/Bad/c.txt=" + cloudstatus.EMBLEM_SYNCED,
         ]))
-        assert lines[3] == str(cloudstatus.STATUS_ERROR)
-        assert lines[4] == str(cloudstatus.STATUS_IDLE)
-        assert lines[5] == "True"
+        assert lines[3] == cloudstatus.EMBLEM_PROBLEM
+        assert lines[4] == str(cloudstatus.STATUS_ERROR)
+        assert lines[5] == str(cloudstatus.STATUS_IDLE)
+        assert lines[6] == "True"
     finally:
         if service is not None and service.poll() is None:
             service.terminate()

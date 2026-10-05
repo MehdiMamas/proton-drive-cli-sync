@@ -97,6 +97,40 @@ def _is_immediate(normalized, root, prefix):
     return os.sep not in normalized[len(prefix):]
 
 
+def path_emblem(db, local_path):
+    """Emblem for one path.
+
+    A file uses its own row. A directory with no row uses the strongest
+    mark among the rows inside it, so the mapped folder itself can show a
+    status. No row and no child row means no mark.
+    """
+    state = file_status(db, local_path)
+    own = emblem_for(state)
+    if own:
+        return own
+    if not isinstance(local_path, str) or not local_path:
+        return ""
+    root = os.path.normpath(local_path)
+    prefix = root + os.sep
+    rank = {
+        EMBLEM_SYNCED: 1,
+        EMBLEM_TRANSFERRING: 2,
+        EMBLEM_PROBLEM: 3,
+    }
+    best = ""
+    for row in db.rows():
+        path = row.get("local_path") if isinstance(row, dict) else None
+        if not isinstance(path, str) or not path:
+            continue
+        normalized = os.path.normpath(path)
+        if normalized != root and not normalized.startswith(prefix):
+            continue
+        mark = emblem_for(row.get("state"))
+        if rank.get(mark, 0) > rank.get(best, 0):
+            best = mark
+    return best
+
+
 def directory_status(db, directory):
     """Emblem name for each immediate child row of ``directory``.
 
