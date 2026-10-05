@@ -51,6 +51,7 @@ Every invocation appends its argv to `calls` (tests assert on it) and records `c
 | `filesystem create-folder <parent> <name>` | create; if exists → exit 1 stderr "already exists" |
 | `filesystem upload -f <replace\|create-new-revision> -d merge [--skip-thumbnails] <names…> <remote_parent>` | names are relative to the process **cwd** (the engine passes names + `cwd=`); un-escape glob escapes `[x]`→`x`. Read each local file, store content/mtime/sha1 under the remote parent; replace bumps `revisions`. A per-file fault makes that file fail: print `- <name>: <error>` on stdout, `N item(s) failed to upload` on stderr, exit 1, other files still succeed (models the real partial batch). |
 | `filesystem trash <path>` | mark node and descendants `trashed: true` |
+| `filesystem download [-c\|-f STRATEGY] [-d STRATEGY] <remote…> <localFolder>` | write each remote file into the directory under its basename. File strategies: `skip`, `replace` (alias `remove`), `keep-both` (alias `rename`). No strategy and the name already exists → exit 1, local bytes unchanged. Missing path → exit 1 `not found`. A node typed `document`, `spreadsheet`, or `proton-doc` prints `skipped: <path>` and writes nothing. Faults use `cmd: download`. |
 | anything else | exit 2, stderr "fake: unsupported command" (so unexpected calls are loud) |
 
 Fault option `remove_size_meta: true` / `remove_digest: true` on a node omits `claimedSize` / `claimedDigests` in listings (to test missing-metadata paths).

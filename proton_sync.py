@@ -1516,7 +1516,30 @@ def get_remote_listing(remote_path, verbose=False):
         size, mtime, sha1 = _extract_remote_meta(item)
         # Le type peut être enveloppé {ok, value} comme les autres champs.
         rtype = _unwrap(item.get("type"))
-        listing[name] = {"size": size, "mtime": mtime, "sha1": sha1, "type": rtype}
+        # claimed_size reste None si le CLI n'a pas envoyé claimedSize.
+        # `size` peut alors être totalStorageSize (taille chiffrée) : la
+        # décision de téléchargement ne doit pas s'en servir. L'envoi, lui,
+        # continue de lire `size` comme avant.
+        claimed_size = None
+        active_rev = _unwrap(item.get("activeRevision"))
+        if isinstance(active_rev, dict):
+            raw_claimed = active_rev.get("claimedSize")
+            if raw_claimed is not None and not isinstance(raw_claimed, bool):
+                try:
+                    claimed_size = int(raw_claimed)
+                except (TypeError, ValueError):
+                    claimed_size = None
+        node_id = _unwrap(item.get("uid"))
+        if not isinstance(node_id, str) or not node_id:
+            node_id = None
+        listing[name] = {
+            "size": size,
+            "mtime": mtime,
+            "sha1": sha1,
+            "type": rtype,
+            "claimed_size": claimed_size,
+            "node_id": node_id,
+        }
         if rtype == "folder":
             _remember_remote(remote_path.rstrip("/") + "/" + name)
     _remember_remote(remote_path)
@@ -1619,6 +1642,151 @@ def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
         local_path, remote_info, baseline=None, verify_hash=verify_hash)
     _report_decision(local_path, reason, verbose)
     return upload
+
+
+def _optional_sha1(value):
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _claimed_size_of(remote_info):
+    """Taille claimedSize uniquement. Ignore `size` (peut être chiffrée)."""
+    if not isinstance(remote_info, dict):
+        return None
+    raw = remote_info.get("claimed_size")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_differs_from_row(local_path, sync_row):
+    """True si le fichier local n'est plus celui de la ligne synchronisée.
+
+    None si on ne peut pas le savoir. Le SHA-1 tranche. Sans SHA-1 : taille
+    claimed et mtime local exact (même règle que le baseline d'envoi).
+    L'inode n'est pas un signal de contenu.
+    """
+    row_sha = _optional_sha1(sync_row.get("sha1"))
+    if row_sha:
+        try:
+            return _local_sha1(local_path) != row_sha
+        except OSError:
+            return None
+    raw_size = sync_row.get("claimed_size")
+    raw_mtime = sync_row.get("local_mtime")
+    if raw_size is None or isinstance(raw_size, bool) or raw_mtime is None:
+        return None
+    try:
+        row_size = int(raw_size)
+        row_mtime = float(raw_mtime)
+        st = os.stat(local_path)
+    except (TypeError, ValueError, OSError):
+        return None
+    if row_mtime != row_mtime:
+        return None
+    if st.st_size != row_size:
+        return True
+    return float(st.st_mtime) != row_mtime
+
+
+def _remote_differs_from_row(claimed_size, remote_sha, remote_mtime, sync_row):
+    """True si le distant n'est plus la ligne. None si métadonnées insuffisantes.
+
+    SHA-1 claimed s'il est des deux côtés. Sinon claimedSize et
+    claimedModificationTime (tolérance _MTIME_MATCH_SECONDS). Jamais la
+    taille chiffrée.
+    """
+    row_sha = _optional_sha1(sync_row.get("sha1"))
+    if row_sha and remote_sha:
+        return remote_sha != row_sha
+    raw_size = sync_row.get("claimed_size")
+    raw_mtime = sync_row.get("claimed_mtime")
+    if raw_size is None or isinstance(raw_size, bool) or claimed_size is None:
+        return None
+    try:
+        row_size = int(raw_size)
+    except (TypeError, ValueError):
+        return None
+    if claimed_size != row_size:
+        return True
+    if remote_mtime is None or raw_mtime is None or isinstance(raw_mtime, bool):
+        return None
+    try:
+        row_mtime = float(raw_mtime)
+    except (TypeError, ValueError):
+        return None
+    if row_mtime != row_mtime:
+        return None
+    return abs(remote_mtime - row_mtime) > _MTIME_MATCH_SECONDS
+
+
+def download_decision(local_path, remote_info, sync_row=None):
+    """Décide si un fichier distant doit être téléchargé.
+
+    Retourne (action, raison). action est ``download``, ``skip`` ou
+    ``conflict``. La comparaison utilise claimedSize, claimedDigests.sha1
+    et claimedModificationTime. Elle ne lit pas ``size`` : ce champ peut
+    être la taille chiffrée (totalStorageSize) quand claimedSize manque.
+
+    Sans ligne de synchro, un fichier local déjà présent n'est pas écrasé :
+    contenus identiques → skip, sinon conflict. Un fichier local absent
+    est téléchargé.
+    """
+    if remote_info is not None and not isinstance(remote_info, dict):
+        return "conflict", "remote-unverifiable"
+    if sync_row is not None and not isinstance(sync_row, dict):
+        sync_row = None
+    if remote_info is None:
+        return "skip", "remote-missing"
+
+    rtype = remote_info.get("type")
+    if rtype not in (None, "file"):
+        return "skip", "not-a-file"
+
+    claimed_size = _claimed_size_of(remote_info)
+    remote_sha = _optional_sha1(remote_info.get("sha1"))
+    remote_mtime = _remote_mtime_seconds(remote_info.get("mtime"))
+
+    if not os.path.lexists(local_path):
+        if claimed_size is None and not remote_sha:
+            return "conflict", "remote-unverifiable"
+        return "download", "local-missing"
+    if not os.path.isfile(local_path):
+        return "conflict", "local-not-file"
+
+    if sync_row is None:
+        if not remote_sha:
+            return "conflict", "no-baseline"
+        try:
+            same = _local_sha1(local_path) == remote_sha
+        except OSError:
+            return "conflict", "local-unreadable"
+        if same:
+            return "skip", "hash-equal"
+        return "conflict", "no-baseline"
+
+    local_changed = _local_differs_from_row(local_path, sync_row)
+    remote_changed = _remote_differs_from_row(
+        claimed_size, remote_sha, remote_mtime, sync_row)
+    if local_changed is None or remote_changed is None:
+        return "conflict", "unverifiable"
+    if not local_changed and not remote_changed:
+        return "skip", "unchanged"
+    if local_changed and not remote_changed:
+        return "skip", "local-only"
+    if remote_changed and not local_changed:
+        return "download", "remote-only"
+    if remote_sha:
+        try:
+            if _local_sha1(local_path) == remote_sha:
+                return "skip", "hash-equal"
+        except OSError:
+            return "conflict", "local-unreadable"
+    return "conflict", "both-changed"
 
 
 def _glob_escape_local_path(path):

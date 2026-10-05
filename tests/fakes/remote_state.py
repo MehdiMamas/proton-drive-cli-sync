@@ -137,6 +137,9 @@ def list_item(name, node, account):
         "type": {"ok": True, "value": node.get("type", "file")},
         "keyAuthor": {"ok": True, "value": account},
     }
+    uid = node.get("uid")
+    if isinstance(uid, str) and uid:
+        item["uid"] = uid
     if node.get("type") != "file":
         return item
     raw = base64.b64decode(node.get("content_b64") or "")
