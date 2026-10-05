@@ -39,6 +39,9 @@ except ImportError:
 
 _DOC_TYPES = ("document", "spreadsheet", "proton-doc")
 _CONFLICT_MARK = " (proton conflict)"
+WEB_DOCUMENT_LINE = (
+    "Proton web document. Open it on the web. This copy is not uploaded."
+)
 
 
 def is_twoway(mapping):
@@ -288,6 +291,8 @@ def _remember(local_path, remote_path, state, ctx):
 
 
 def _upload(local_path, remote_folder, remote_info, ctx):
+    if _is_web_marker(local_path):
+        return True
     remote_path = remote_folder.rstrip("/") + "/" + os.path.basename(local_path)
     _remember(local_path, remote_path, "pending-up", ctx)
     ok = _ps.upload_batch(
@@ -477,31 +482,74 @@ def _mark_conflict(local_path, remote_path, remote_info, row, ctx):
     ctx.db.upsert(stored)
 
 
+def _is_web_marker(local_path):
+    """True when this file is the stand-in for a Proton document."""
+    try:
+        if os.path.getsize(local_path) > 4096:
+            return False
+        with open(local_path, "r", encoding="utf-8", errors="replace") as handle:
+            line = handle.readline(200)
+    except OSError:
+        return False
+    return line.startswith("Proton web document")
+
+
+def _write_web_marker(local_path):
+    """Write the stand-in, or leave a real file that already uses this name."""
+    if os.path.isdir(local_path):
+        return False
+    if os.path.isfile(local_path):
+        return _is_web_marker(local_path)
+    parent = os.path.dirname(local_path) or "."
+    os.makedirs(parent, exist_ok=True)
+    temporary = os.path.join(parent, ".proton-sync-marker-tmp")
+    text = (
+        WEB_DOCUMENT_LINE + "\n"
+        "The Proton CLI has no file body for a document or a spreadsheet.\n"
+    )
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temporary, local_path)
+    except OSError:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        return False
+    return True
+
+
 def _mark_document(local_path, remote_path, remote_info, ctx):
     print("[download-skipped] " + _(
         "Proton document or spreadsheet left unchanged: {p}").format(p=remote_path))
     if ctx.dry_run:
         return
-    claimed_size = None
-    sha = None
-    claimed_mtime = None
-    node_id = None
-    if isinstance(remote_info, dict):
-        claimed_size = remote_info.get("claimed_size")
-        sha = remote_info.get("sha1")
-        claimed_mtime = _ps._remote_mtime_seconds(remote_info.get("mtime"))
-        node_id = remote_info.get("node_id")
-    ctx.db.upsert({
-        "local_path": local_path,
-        "remote_path": remote_path,
-        "remote_node_id": node_id,
-        "sha1": sha,
-        "claimed_size": claimed_size,
-        "claimed_mtime": claimed_mtime,
-        "local_inode": None,
-        "local_mtime": None,
-        "state": "error",
-    })
+    if os.path.isfile(local_path) and not _is_web_marker(local_path):
+        return
+    if not _write_web_marker(local_path):
+        claimed_size = None
+        sha = None
+        claimed_mtime = None
+        node_id = None
+        if isinstance(remote_info, dict):
+            claimed_size = remote_info.get("claimed_size")
+            sha = remote_info.get("sha1")
+            claimed_mtime = _ps._remote_mtime_seconds(remote_info.get("mtime"))
+            node_id = remote_info.get("node_id")
+        ctx.db.upsert({
+            "local_path": local_path,
+            "remote_path": remote_path,
+            "remote_node_id": node_id,
+            "sha1": sha,
+            "claimed_size": claimed_size,
+            "claimed_mtime": claimed_mtime,
+            "local_inode": None,
+            "local_mtime": None,
+            "state": "error",
+        })
+        return
+    _save_synced(local_path, remote_path, remote_info, ctx)
 
 
 def _set_state(row, state, ctx):

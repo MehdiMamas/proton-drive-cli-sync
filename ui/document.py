@@ -522,6 +522,8 @@ class Document:
         atomic_write_json(target, self.payload())
         self.path = target
         self.dirty = False
+        if appconfig is not None:
+            appconfig.set_last_mappings_path(os.path.abspath(target))
         return target
 
     def cache_data(self):

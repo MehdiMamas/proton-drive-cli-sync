@@ -131,6 +131,8 @@ def test_choose_mapping_points_proton_drive_at_that_folder(tmp_path, monkeypatch
     chosen = volume.mark_live(rows, str(docs))
     assert chosen["live"] is True
     assert chosen["direction"] == "twoway"
+    assert chosen["allow_delete"] is True
+    assert chosen["delete_mode"] == "trash"
     assert "volume" not in chosen
     assert "live" not in rows[1]
     cfg = tmp_path / "mappings.json"
@@ -160,16 +162,73 @@ def test_a_folder_mapping_becomes_the_proton_drive_place():
     assert changed is True
     assert chosen["source"] == "/data/Other"
     assert chosen["live"] is True
+    assert chosen["allow_delete"] is True
+    assert chosen["delete_mode"] == "trash"
+    assert "allow_delete" not in rows[0]
     again, changed = volume.ensure_chosen(rows)
     assert changed is False
     assert again is chosen
 
 
 def test_a_change_is_due_after_the_quiet_period():
-    from ui.live_sync import due
+    import time
+    from ui.live_sync import LiveSync, PassFollow, due, ignored_edit_name, status_line
     assert due(None, 10) is False
     assert due(8, 9) is False
     assert due(8, 10) is True
+    assert ignored_edit_name(".swp") is True
+    assert ignored_edit_name("notes.txt~") is True
+    assert ignored_edit_name("notes.txt") is False
+    fired = []
+    sync = LiveSync()
+    sync._on_change = lambda: fired.append("go")
+    sync._dirty_at = time.monotonic()
+    sync._pump_once()
+    assert fired == []
+    sync._dirty_at = time.monotonic() - 3
+    sync._pump_once()
+    assert fired == ["go"]
+    follow = PassFollow()
+    assert follow.request(True) is False
+    assert follow.request(True) is False
+    assert follow.finished() is True
+    assert follow.finished() is False
+    line = status_line("/data/Docs", 1_700_000_000, 1_700_000_030)
+    assert line.startswith("Docs — last pass ")
+    assert "next remote check" in line
+
+
+def test_home_link_follows_the_folder_and_leaves_a_full_directory(tmp_path):
+    real = tmp_path / "Docs"
+    other = tmp_path / "Other"
+    real.mkdir()
+    other.mkdir()
+    link = tmp_path / "Proton Drive"
+    assert volume.ensure_home_link(str(real), str(link)) == "linked"
+    assert link.is_symlink()
+    assert os.path.realpath(link) == os.path.realpath(real)
+    assert volume.ensure_home_link(str(other), str(link)) == "linked"
+    assert os.path.realpath(link) == os.path.realpath(other)
+    full = tmp_path / "Full"
+    full.mkdir()
+    (full / "a.txt").write_text("x", encoding="utf-8")
+    assert volume.ensure_home_link(str(real), str(full)) == "kept"
+    assert not full.is_symlink()
+    assert (full / "a.txt").read_text(encoding="utf-8") == "x"
+
+
+def test_new_places_file_is_the_shape_dolphin_reads(tmp_path):
+    places = tmp_path / "user-places.xbel"
+    local = tmp_path / "Docs"
+    local.mkdir()
+    assert volume.ensure_dolphin_place(str(local), str(places))
+    text = places.read_text(encoding="utf-8")
+    assert "<!DOCTYPE xbel>" in text
+    assert "bookmark:icon" in text
+    assert "<ID>" + volume.PLACE_ID + "</ID>" in text
+    assert "<IsHidden>false</IsHidden>" in text
+    assert volume.PLACE_TITLE in text
+    assert "file:///home/keep" not in text
 
 
 def test_close_action_hides_until_quit():

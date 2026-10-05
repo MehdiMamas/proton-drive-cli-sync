@@ -51,6 +51,18 @@ def engine_env():
     return env
 
 
+def live_pass_args(config_path, source):
+    """Passe automatique du dossier Proton Drive.
+
+    ``--delete`` est posé. Le mapping décide encore : ``allow_delete``,
+    la corbeille, et la confirmation d'un dossier partagé.
+    """
+    sources = [source] if source else None
+    return sync_args(
+        config_path, dry_run=False, verify_hash=False, verbose=False,
+        delete=True, only_sources=sources)
+
+
 def sync_args(config_path, dry_run=False, verify_hash=False, verbose=False,
               delete=False, only_sources=None):
     """Arguments du moteur pour une synchro manuelle. Sans sélection : tout le fichier."""

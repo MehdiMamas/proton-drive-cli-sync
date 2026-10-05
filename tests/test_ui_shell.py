@@ -37,3 +37,31 @@ def test_window_builds(monkeypatch):
     assert window.stack.widget(1).findChild(QScrollArea) is window.settings.scroll
     assert os.environ.get("QT_QPA_PLATFORM") == "offscreen"
     window.close()
+
+
+def test_window_reloads_the_last_mappings_file(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    import json
+    import config
+    from PySide6.QtWidgets import QApplication
+    from ui.shell import MainWindow
+
+    folder = tmp_path / "Docs"
+    folder.mkdir()
+    cfg = tmp_path / "mappings.json"
+    cfg.write_text(json.dumps([{
+        "type": "folder",
+        "source": str(folder),
+        "dest_parent": "/my-files/Docs",
+    }]), encoding="utf-8")
+    assert config.set_last_mappings_path(str(cfg))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    assert os.path.normpath(window.doc.path) == os.path.normpath(str(cfg))
+    from ui.live_sync import short_commit
+    commit = short_commit(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if commit:
+        assert commit in window._qt.windowTitle()
+    window.close()
+    app.processEvents()

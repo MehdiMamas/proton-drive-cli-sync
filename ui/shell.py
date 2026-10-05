@@ -19,6 +19,20 @@ from ui import widgets
 _SINGLETON = "\0proton_mapping_editor_%d" % os.getuid() if os.name != "nt" else None
 
 
+def startup_mappings_path(config_path=None):
+    """Fichier ouvert au lancement : argument, puis le dernier enregistré, puis systemd."""
+    if config_path and os.path.isfile(config_path):
+        return config_path
+    try:
+        import config as appconfig
+        remembered = appconfig.last_mappings_path()
+    except Exception:
+        remembered = ""
+    if remembered and os.path.isfile(remembered):
+        return remembered
+    return _mappings_from_units()
+
+
 def _mappings_from_units():
     """The mappings file the watcher was already started with, if it is still there."""
     try:
@@ -64,6 +78,7 @@ class MainWindow:
         self.watchers = LiveSync()
         self.cli_flags = {"revisions": None, "shared": None}
         self._qt.setWindowTitle(_("Mappings editor — Proton Drive sync"))
+        self._commit = None
         self._qt.resize(1060, 700)
         self._qt.setMinimumSize(880, 580)
         self._fit_screen()
@@ -146,8 +161,7 @@ class MainWindow:
         self._qt.authed_sig.connect(self._on_auth)
         self._qt.disk_sig.connect(self.mappings._on_disk)
 
-        if not (config_path and os.path.exists(config_path)):
-            config_path = _mappings_from_units()
+        config_path = startup_mappings_path(config_path)
         if config_path and os.path.exists(config_path):
             try:
                 self.doc.load(config_path)
@@ -242,7 +256,19 @@ class MainWindow:
             name += " *"
         self.file_chip.setText(name)
         title = _("Mappings editor — Proton Drive sync")
-        self._qt.setWindowTitle(f"{title} — {name}")
+        commit = self._short_commit()
+        if commit:
+            self._qt.setWindowTitle(f"{title} — {name} — {commit}")
+        else:
+            self._qt.setWindowTitle(f"{title} — {name}")
+
+    def _short_commit(self):
+        cached = getattr(self, "_commit", None)
+        if cached is not None:
+            return cached
+        from ui.live_sync import short_commit
+        self._commit = short_commit(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return self._commit
 
     def refresh_direction_line(self):
         label = getattr(self, "_mode_label", None)

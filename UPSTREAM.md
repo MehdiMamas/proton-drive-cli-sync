@@ -35,6 +35,7 @@ separate pull requests. New files added by the fork are not listed.
 | `schedule_manager.py`, `realtime_manager.py` | 6 | Unit text quotes and escapes paths (`unitexec.py`), packaged installs use `/usr/bin/proton-drive-sync`, readers accept quoted and legacy lines |
 | `proton_mapping_editor.py` | 6 | GUI run logs and file dialogs no longer use a read-only packaged `APP_DIR` |
 | `config.py` | 6 | `RUN_LOG_DIR` is `~/.proton-drive-sync/logs` |
+| `config.py` | UI | `last_mappings_path` so `python -m ui` reopens the mappings file that was saved or chosen |
 | `README.md`, `README_fr.md` | 6 | File list names `unitexec.py` and `doctor.py`; run logs are under the data directory |
 | `README.md`, `LICENSE`, `CHANGELOG.md` | 6 | Fork notice and disclaimer on top, fork contributors line, 2.0.0 section |
 | `tray_indicator.py` | UI | The status icon opens `python -m ui` instead of the Tk editor |

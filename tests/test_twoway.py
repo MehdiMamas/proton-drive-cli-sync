@@ -285,8 +285,63 @@ def test_proton_document_is_logged_and_not_deleted(
     result = engine(cfg)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[download-skipped] " in result.stdout
-    assert not (src / "Docs" / "notes.doc").exists()
+    marker = src / "Docs" / "notes.doc"
+    assert marker.read_text(encoding="utf-8").startswith("Proton web document")
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"AAAA"
     with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
-        row = database.get(str(src / "Docs" / "notes.doc"))
-    assert row["state"] == "error"
+        row = database.get(str(marker))
+    assert row["state"] == "synced"
+    again = engine(cfg)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "/my-files/Backups/Docs/notes.doc" not in fake_drive.uploads()
+    assert marker.read_text(encoding="utf-8").startswith("Proton web document")
+
+
+def test_remote_file_downloads_and_a_document_is_not_uploaded(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/keep.txt": (b"KEEP", 1_000_000_000)})
+    fake_drive.seed_file("/my-files/Backups/Docs/new.txt", b"NEW", 1_000_000_000)
+    def mutate(state):
+        path = "/my-files/Backups/Docs/notes"
+        remote_state.ensure_folders(state, path)
+        state["nodes"][path] = {"type": "document"}
+    fake_drive._update(mutate)
+    cfg = write_mappings([
+        _mapping(src / "Docs", "/my-files/Backups", direction="twoway"),
+    ])
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (src / "Docs" / "new.txt").read_bytes() == b"NEW"
+    assert (src / "Docs" / "keep.txt").read_bytes() == b"KEEP"
+    assert (src / "Docs" / "notes").read_text(encoding="utf-8").startswith(
+        "Proton web document")
+    assert "[download-skipped] " in result.stdout
+    again = engine(cfg)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert (src / "Docs" / "keep.txt").read_bytes() == b"KEEP"
+    assert "/my-files/Backups/Docs/notes" not in fake_drive.uploads()
+
+
+def test_one_mapping_trashes_and_the_other_does_not(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({
+        "Docs/a.txt": (b"AAAA", 1_000_000_000),
+        "Other/b.txt": (b"BBBB", 1_000_000_000),
+    })
+    remote_a = "/my-files/Backups/Docs/a.txt"
+    remote_b = "/my-files/Other/Other/b.txt"
+    cfg = write_mappings([
+        _mapping(src / "Docs", "/my-files/Backups", direction="twoway",
+                 allow_delete=True, delete_mode="trash", source_kind="local",
+                 live=True),
+        _mapping(src / "Other", "/my-files/Other", direction="twoway",
+                 allow_delete=False),
+    ])
+    assert engine(cfg, "--delete").returncode == 0
+    (src / "Docs" / "a.txt").unlink()
+    (src / "Other" / "b.txt").unlink()
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.trashed(remote_a)
+    assert not fake_drive.trashed(remote_b)
+    assert fake_drive.content(remote_b) == b"BBBB"

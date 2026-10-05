@@ -4,6 +4,7 @@ import datetime
 import os
 import shlex
 import threading
+import time
 
 try:
     from i18n import _
@@ -11,7 +12,7 @@ except ImportError:
     def _(s):
         return s
 
-from ui import document, run, widgets
+from ui import document, live_sync, run, widgets
 from ui.pages.mapping_dialogs import ExclusionsDialog, MappingDialog
 
 
@@ -31,6 +32,7 @@ class MappingsPage:
         self.window = window
         self.doc = window.doc
         self._control = run.PassControl()
+        self._follow = live_sync.PassFollow()
         self._worker = None
         self._log_path = None
         self._Qt = Qt
@@ -368,7 +370,9 @@ class MappingsPage:
         except Exception as exc:
             widgets.error(self.window, str(exc), _("Load error"))
             return
-        self._refresh()
+            self._refresh()
+        import config as appconfig
+        appconfig.set_last_mappings_path(os.path.abspath(path))
         self.window.set_status(_("Loaded: {p} ({n} entries)").format(
             p=path, n=len(self.doc.mappings)))
 
@@ -563,7 +567,12 @@ class MappingsPage:
 
     def _prepare_live(self, source):
         import volume as volume_mod
+        try:
+            volume_mod.ensure_home_link(source)
+        except OSError:
+            pass
         volume_mod.ensure_dolphin_place(source)
+        self._arm_remote_poll()
         try:
             import realtime_manager
             realtime_manager.write_config(2, 2)
@@ -578,9 +587,36 @@ class MappingsPage:
         watchers = getattr(self.window, "watchers", None)
         if watchers is not None:
             watchers.follow(source, self._disk_changed)
-        self.window.set_status(
-            _("Proton Drive in Dolphin opens this folder. A change syncs on its own."))
+        self._show_live_status()
         self._queue_pass(source, False)
+
+    def _arm_remote_poll(self):
+        """Même passe que Run Sync, toutes les 30 s, tant que la fenêtre ou le tray vit."""
+        from PySide6.QtCore import QTimer
+        timer = getattr(self, "_remote_timer", None)
+        if timer is None:
+            timer = QTimer(self.window._qt)
+            timer.timeout.connect(self._remote_tick)
+            self._remote_timer = timer
+        timer.setInterval(int(live_sync.REMOTE_SECONDS * 1000))
+        timer.start()
+        self._next_remote_at = time.time() + live_sync.REMOTE_SECONDS
+
+    def _remote_tick(self):
+        self._next_remote_at = time.time() + live_sync.REMOTE_SECONDS
+        source = getattr(self, "_live_source", "")
+        if source:
+            self._queue_pass(source, False)
+        self._show_live_status()
+
+    def _show_live_status(self):
+        source = getattr(self, "_live_source", "")
+        if not source:
+            return
+        self.window.set_status(live_sync.status_line(
+            source,
+            getattr(self, "_last_pass_at", None),
+            getattr(self, "_next_remote_at", None)))
 
     def _disk_changed(self):
         """Called from the watch thread. The signal hops back to the window."""
@@ -599,12 +635,13 @@ class MappingsPage:
 
     def _after_sync(self):
         self._busy(False)
-        if not getattr(self, "_again", False):
-            return
-        self._again = False
-        source = getattr(self, "_live_source", "")
-        if source:
-            self._queue_pass(source, False)
+        self._last_pass_at = time.time()
+        if self._follow.finished():
+            source = getattr(self, "_live_source", "")
+            if source:
+                self._queue_pass(source, False)
+                return
+        self._show_live_status()
 
     def _queue_pass(self, source, announce_cli):
         if not source:
@@ -658,13 +695,10 @@ class MappingsPage:
             return
         if not self._need_engine():
             return
-        if self._running():
-            self._again = True
+        if not self._follow.request(self._running()):
             return
         log_path = self._log_file()
-        args = run.sync_args(
-            self.doc.path, dry_run=False, verify_hash=False, verbose=False,
-            delete=False, only_sources=[source])
+        args = run.live_pass_args(self.doc.path, source)
         cmd = run.engine_cmd(args)
         self._append(_("=== Launch: {c} ===").format(
             c=" ".join(shlex.quote(part) for part in cmd)) + "\n")

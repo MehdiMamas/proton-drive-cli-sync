@@ -158,6 +158,8 @@ def test_ready_and_clear_primed(tmp_path):
 def test_engine_args_progress_and_exit_code():
     args = run.sync_args("/m.json", dry_run=True, delete=True, only_sources=["/a"])
     assert args == ["/m.json", "--dry-run", "--delete", "--only-source", "/a"]
+    live = run.live_pass_args("/m.json", "/data/Docs")
+    assert live == ["/m.json", "--delete", "--only-source", "/data/Docs"]
     prime = run.prime_args("/m.json", ["/a"])
     assert "--delete" in prime and "--accept-account-change" in prime
     assert prime.count("--only-source") == 1

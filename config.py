@@ -403,6 +403,24 @@ def set_tray_enabled(value):
     return _put("tray_enabled", bool(value))
 
 
+def last_mappings_path():
+    """Fichier de mappings rouvert par ``python -m ui`` sans argument.
+
+    Chaîne vide si le réglage est absent : un fichier systemd reste le repli.
+    """
+    value = get("last_mappings_path")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def set_last_mappings_path(path):
+    path = (path or "").strip()
+    if not path:
+        return False
+    return _put("last_mappings_path", path)
+
+
 def rename_ext_collision_suffix():
     v = get("rename_ext_collision_suffix")
     if isinstance(v, str) and v.strip() and not (_SUFFIX_FORBIDDEN & set(v)):

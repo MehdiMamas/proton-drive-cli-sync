@@ -1,13 +1,22 @@
 """Watch the chosen folder and ask for a sync after a short quiet period.
 
 The window owns this. A systemd unit is not required for a new file to sync.
+A remote listing repeats on its own while that window, or its tray, is alive.
 """
 
 import os
+import subprocess
 import threading
 import time
 
+try:
+    from i18n import _
+except ImportError:
+    def _(s):
+        return s
+
 QUIET_SECONDS = 2.0
+REMOTE_SECONDS = 30.0
 
 
 def due(last_event, now, quiet=QUIET_SECONDS):
@@ -15,6 +24,63 @@ def due(last_event, now, quiet=QUIET_SECONDS):
     if last_event is None:
         return False
     return (now - last_event) >= quiet
+
+
+def ignored_edit_name(name):
+    """Editor scratch files. A real name still starts a pass."""
+    if not name:
+        return True
+    return name.startswith(".") or name.endswith("~")
+
+
+class PassFollow:
+    """One change during a running pass schedules one pass after it, not a pile."""
+
+    def __init__(self):
+        self.again = False
+
+    def request(self, running):
+        if running:
+            self.again = True
+            return False
+        return True
+
+    def finished(self):
+        if not self.again:
+            return False
+        self.again = False
+        return True
+
+
+def status_line(folder, last_pass, next_check):
+    """Folder, last pass, and the next remote listing. A quiet minute is visible."""
+    name = os.path.basename(os.path.normpath(folder or "")) or (folder or "")
+    if last_pass:
+        last = time.strftime("%H:%M", time.localtime(last_pass))
+    else:
+        last = _("not yet")
+    if next_check:
+        nxt = time.strftime("%H:%M", time.localtime(next_check))
+    else:
+        nxt = _("not scheduled")
+    return _("{folder} — last pass {last} — next remote check {next}").format(
+        folder=name, last=last, next=nxt)
+
+
+def short_commit(root):
+    """Short git commit for the window title. Empty when git cannot answer."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    text = (result.stdout or "").strip()
+    if text and all(char in "0123456789abcdef" for char in text):
+        return text
+    return ""
 
 
 class LiveSync:
@@ -41,6 +107,12 @@ class LiveSync:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2)
 
+    def _consider(self, event):
+        name = os.path.basename(getattr(event, "pathname", "") or "")
+        if ignored_edit_name(name):
+            return
+        self._note()
+
     def _note(self):
         self._dirty_at = time.monotonic()
 
@@ -59,11 +131,20 @@ class LiveSync:
         )
 
         class _Handler(pyinotify.ProcessEvent):
-            def process_default(self_inner, event):
-                name = os.path.basename(getattr(event, "pathname", "") or "")
-                if name.startswith("."):
-                    return
-                self._note()
+            def process_IN_CLOSE_WRITE(self_inner, event):
+                self._consider(event)
+
+            def process_IN_CREATE(self_inner, event):
+                self._consider(event)
+
+            def process_IN_DELETE(self_inner, event):
+                self._consider(event)
+
+            def process_IN_MOVED_TO(self_inner, event):
+                self._consider(event)
+
+            def process_IN_MOVED_FROM(self_inner, event):
+                self._consider(event)
 
         try:
             manager.add_watch(source, mask, rec=True, auto_add=True)
@@ -108,7 +189,7 @@ def _signature(root):
         return (0, 0)
     for dirpath, _dirs, names in os.walk(root):
         for name in names:
-            if name.startswith("."):
+            if ignored_edit_name(name):
                 continue
             count += 1
             try:

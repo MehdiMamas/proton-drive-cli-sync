@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- A file created on the web stayed invisible until a manual pass, and a local delete in the Proton Drive folder never reached Proton. While the window or its tray is open, that folder is listed every 30 seconds through the official CLI, and the automatic pass sends local removals to the Proton trash. Other mappings keep their own deletion setting. A shared folder is still not trashed until its confirmation is set. Migration: none. The next time the window opens, that one folder records `allow_delete` and `delete_mode` `trash`.
+- A Proton document or spreadsheet was listed and then skipped, so the folder looked empty. The pass now writes a small text file at that name, marked on the first line as a Proton web document, and does not upload that file. A normal file is unchanged. The log line stays `[download-skipped]`. Migration: none.
+- Opening the window with no mappings argument forgot the file unless a systemd unit named it. The last file you save or open is stored in settings and loaded next time. Migration: none until you open or save a mappings file.
 - A new file was not synced until Run Sync. The background service only noticed a change after a full pass, and that pass was the button. The open window now watches the Proton Drive folder itself and syncs a couple of seconds after a change. Migration: none.
 - Proton Drive is added to Dolphin's places when the window opens, on the folder already chosen, or on the only two-way folder, or else the first folder mapping. That folder becomes two-way. Restart Dolphin once if the place is missing. Migration: none until a folder mapping exists.
 - Closing the window left the process running with no tray icon, because the icon was tied to the window and a hidden window does not quit the application. The icon now stays up after the window hides. If the desktop has no tray, closing quits the process. Migration: none.
@@ -22,6 +25,8 @@
 
 ### Changed
 
+- `~/Proton Drive` is a symlink to the folder Proton Drive opens, when that path is missing or is already a symlink. A real directory that already has files is left in place. The Dolphin place points at the real folder, in the XBEL shape Dolphin reads. Restart Dolphin once if the sidebar keeps the old place. Migration: none.
+- The window title includes the short commit. The status line names the Proton Drive folder, the last pass, and the next remote check. Migration: none.
 - **Choose mapping…** points the existing Dolphin place named Proton Drive at that folder, starts the local watcher, and starts a pass of that folder after the Proton session check. Opening the window again does the same for the mapping already chosen. The Real-time and Sync schedule pages are no longer in the window. The place is not a second bookmark of the folder. Choosing a mapping does not download the rest of the account. Migration: none. The earlier whole-account volume button is no longer in the window.
 - The mapping dialog explains each deletion choice under the control: whether a local delete is sent to Proton, that removed files go to the Proton trash, and whether the folder is on a network drive or an internal disk. The trash choice and the disk choice are separate. Picking the disk no longer clears the trash selection on screen. Migration: none.
 - The project is presented as two-way sync maintained in this repository. It was forked from lafontaj/proton-drive-cli-sync and is not sent upstream as a pull request. A new mapping defaults to two-way. A mapping that was already saved without `"direction": "twoway"` stays upload-only until you change it. Migration: none for existing mappings.

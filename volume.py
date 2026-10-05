@@ -123,6 +123,10 @@ def mark_live(mappings, source):
             row["live"] = True
             if row.get("direction") != "twoway":
                 row["direction"] = "twoway"
+            # This one folder sends local removals to the Proton trash.
+            # Other rows keep whatever deletion policy they already had.
+            row["allow_delete"] = True
+            row["delete_mode"] = "trash"
             chosen = row
         else:
             row.pop("live", None)
@@ -194,6 +198,28 @@ def _bookmark(local_dir):
     ).format(href=href, title=PLACE_TITLE, ident=PLACE_ID)
 
 
+def ensure_home_link(real_dir, link_path=None):
+    """Point ``~/Proton Drive`` at the chosen folder.
+
+    A missing path, or a path that is already a symlink, becomes that link.
+    A real directory that already has files is left alone. Returns
+    ``linked``, ``same``, or ``kept``.
+    """
+    link = os.path.abspath(link_path or default_local_dir())
+    real = os.path.abspath(real_dir)
+    if os.path.normcase(link) == os.path.normcase(real):
+        return "same"
+    if os.path.islink(link) or not os.path.lexists(link):
+        parent = os.path.dirname(link)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(real, link)
+        return "linked"
+    return "kept"
+
+
 def places_path():
     return os.path.expanduser("~/.local/share/user-places.xbel")
 
@@ -208,7 +234,10 @@ def ensure_dolphin_place(local_dir, path=None):
     if not os.path.exists(target):
         text = (
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-            "<xbel version=\"1.0\">\n"
+            "<!DOCTYPE xbel>\n"
+            "<xbel xmlns:bookmark=\"http://www.freedesktop.org/standards/desktop-bookmarks\""
+            " xmlns:mime=\"http://www.freedesktop.org/standards/shared-mime-info\""
+            " xmlns:kdepriv=\"http://www.kde.org/kdepriv\" version=\"1.0\">\n"
             + bookmark
             + "</xbel>\n"
         )
