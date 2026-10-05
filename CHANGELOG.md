@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- A chosen folder waited for Run Sync. The real-time pass refused to touch it until a full pass had already indexed it, and that full pass was the button. The chosen folder now syncs on a change without that button, and opening the window starts a pass of it. Migration: none.
+- A new file was not synced until Run Sync. The background service only noticed a change after a full pass, and that pass was the button. The open window now watches the Proton Drive folder itself and syncs a couple of seconds after a change. Migration: none.
+- Proton Drive is added to Dolphin's places when the window opens, on the folder already chosen, or on the only two-way folder, or else the first folder mapping. That folder becomes two-way. Restart Dolphin once if the place is missing. Migration: none until a folder mapping exists.
 - Closing the window left the process running with no tray icon, because the icon was tied to the window and a hidden window does not quit the application. The icon now stays up after the window hides. If the desktop has no tray, closing quits the process. Migration: none.
 - The account line shows the Proton CLI's own message when the session check fails, instead of only "Session unavailable". A pass of the chosen folder starts after that check succeeds. Migration: none.
 - A missing `PROTON_DRIVE_CLI` path, including the one a systemd unit embeds next to the scripts, no longer hides `proton-drive` on PATH or the path in Configuration. A path that does not exist is not written into a new unit. Migration: open the window again (or choose the mapping again) so the units are rewritten, then the chosen folder syncs on its own.

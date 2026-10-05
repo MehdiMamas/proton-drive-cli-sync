@@ -11,7 +11,7 @@ except ImportError:
         return s
 
 from ui.document import Document, backup_blurb
-from ui.live_sync import FolderWatchers
+from ui.live_sync import LiveSync
 from ui.pages.mappings import MappingsPage
 from ui.pages.settings import SettingsPage
 from ui import widgets
@@ -46,6 +46,7 @@ class MainWindow:
             auth_sig = Signal(bool)
             account_sig = Signal(str)
             authed_sig = Signal(bool, str)
+            disk_sig = Signal()
 
             def closeEvent(self_inner, event):
                 tray = getattr(self, "_tray", None)
@@ -60,7 +61,7 @@ class MainWindow:
         self._qt = _Window()
         self._quitting = False
         self.doc = Document()
-        self.watchers = FolderWatchers()
+        self.watchers = LiveSync()
         self.cli_flags = {"revisions": None, "shared": None}
         self._qt.setWindowTitle(_("Mappings editor — Proton Drive sync"))
         self._qt.resize(1060, 700)
@@ -143,6 +144,7 @@ class MainWindow:
         self._qt.auth_sig.connect(self._paint_auth)
         self._qt.account_sig.connect(self._paint_account)
         self._qt.authed_sig.connect(self._on_auth)
+        self._qt.disk_sig.connect(self.mappings._on_disk)
 
         if not (config_path and os.path.exists(config_path)):
             config_path = _mappings_from_units()

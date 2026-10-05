@@ -19,16 +19,6 @@ def _selected_rows(table):
     return sorted({item.row() for item in table.selectedItems()})
 
 
-def _consumer_active():
-    try:
-        import realtime_manager
-        _rc, out, _err = realtime_manager._run(
-            ["systemctl", "--user", "is-active", realtime_manager.CONSUME_NAME])
-    except Exception:
-        return False
-    return (out or "").strip() == "active"
-
-
 class MappingsPage:
     """La page vit dans ``host``. Le document est celui de la fenêtre."""
 
@@ -233,7 +223,7 @@ class MappingsPage:
         bridge.status.connect(self.window.set_status)
         bridge.progress.connect(self.progress.setText)
         bridge.auth.connect(self.window.set_auth)
-        bridge.done.connect(lambda: self._busy(False))
+        bridge.done.connect(self._after_sync)
         bridge.done.connect(self._refresh)
         bridge.done.connect(self._warn_unreadable)
         self._bridge = bridge
@@ -541,11 +531,24 @@ class MappingsPage:
         self._arm_live(mapping["source"], announce_cli=True)
 
     def resume_live(self):
-        """Reopen the chosen folder's watcher. A pass starts after the session check."""
-        live = self._live_mapping() if self.doc.path else None
-        if live is not None:
-            self._prepare_live(live["source"])
-        self._auth_then(live["source"] if live is not None else "", announce_cli=False)
+        """Open Proton Drive on a folder and watch it. A pass starts on its own."""
+        if not self.doc.path:
+            self._auth_then("", announce_cli=False)
+            return
+        import volume as volume_mod
+        chosen, changed = volume_mod.ensure_chosen(self.doc.mappings)
+        if chosen is None:
+            self._auth_then("", announce_cli=False)
+            return
+        if changed:
+            self.doc.dirty = True
+            try:
+                self.doc.save(self.doc.path)
+            except Exception as exc:
+                self.window.set_status(str(exc))
+                return
+        self._prepare_live(chosen["source"])
+        self._auth_then(chosen["source"], announce_cli=False)
 
     def _live_mapping(self):
         for row in self.doc.mappings:
@@ -566,19 +569,42 @@ class MappingsPage:
             realtime_manager.write_config(2, 2)
         except Exception:
             pass
-        started, message = volume_mod.start_watcher(self.doc.path)
-        if not started or not _consumer_active():
-            watchers = getattr(self.window, "watchers", None)
-            if watchers is not None:
-                watchers.ensure(self.doc.path)
-                started = True
+        volume_mod.start_watcher(self.doc.path)
         self._refresh()
         tray = getattr(self.window, "_tray", None)
         if tray is not None:
             tray.refresh()
-        if not started:
-            self.window.set_status(message or _("The real-time watcher was not started."))
+        self._live_source = source
+        watchers = getattr(self.window, "watchers", None)
+        if watchers is not None:
+            watchers.follow(source, self._disk_changed)
+        self.window.set_status(
+            _("Proton Drive in Dolphin opens this folder. A change syncs on its own."))
         self._queue_pass(source, False)
+
+    def _disk_changed(self):
+        """Called from the watch thread. The signal hops back to the window."""
+        emit = getattr(getattr(self.window, "_qt", None), "disk_sig", None)
+        if emit is not None:
+            emit.emit()
+            return
+        source = getattr(self, "_live_source", "")
+        if source:
+            self._queue_pass(source, False)
+
+    def _on_disk(self):
+        source = getattr(self, "_live_source", "")
+        if source:
+            self._queue_pass(source, False)
+
+    def _after_sync(self):
+        self._busy(False)
+        if not getattr(self, "_again", False):
+            return
+        self._again = False
+        source = getattr(self, "_live_source", "")
+        if source:
+            self._queue_pass(source, False)
 
     def _queue_pass(self, source, announce_cli):
         if not source:
@@ -630,7 +656,10 @@ class MappingsPage:
             else:
                 self.window.set_status(lines[0] if lines else _("Proton CLI binary unusable."))
             return
-        if not self._need_engine() or self._running():
+        if not self._need_engine():
+            return
+        if self._running():
+            self._again = True
             return
         log_path = self._log_file()
         args = run.sync_args(

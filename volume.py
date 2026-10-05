@@ -83,6 +83,30 @@ def _remote_for(mapping, root, local_path):
     return dest + "/" + rel.replace(os.sep, "/")
 
 
+def ensure_chosen(mappings):
+    """The folder Proton Drive opens.
+
+    Returns ``(mapping, changed)``. An existing ``live`` row is kept. Otherwise
+    the only two-way folder is used, or the first folder. That row becomes
+    two-way. Nothing is chosen when the file has no folder.
+    """
+    folders = []
+    for row in mappings or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("type", "folder") != "folder" or not row.get("source"):
+            continue
+        if row.get("live") is True:
+            return row, False
+        folders.append(row)
+    twoway = [row for row in folders if row.get("direction") == "twoway"]
+    pick = twoway[0] if len(twoway) == 1 else (folders[0] if folders else None)
+    if pick is None:
+        return None, False
+    mark_live(mappings, pick["source"])
+    return pick, True
+
+
 def mark_live(mappings, source):
     """The Proton Drive place opens this one folder. Other rows lose ``live``.
 
@@ -156,9 +180,13 @@ def _bookmark(local_dir):
         " <bookmark href=\"{href}\">\n"
         "  <title>{title}</title>\n"
         "  <info>\n"
+        "   <metadata owner=\"http://freedesktop.org\">\n"
+        "    <bookmark:icon name=\"drive-harddisk\"/>\n"
+        "   </metadata>\n"
         "   <metadata owner=\"http://www.kde.org\">\n"
         "    <ID>{ident}</ID>\n"
         "    <IsHidden>false</IsHidden>\n"
+        "    <isSystemItem>false</isSystemItem>\n"
         "    <icon name=\"drive-harddisk\"/>\n"
         "   </metadata>\n"
         "  </info>\n"

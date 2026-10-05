@@ -150,6 +150,28 @@ def test_choose_mapping_points_proton_drive_at_that_folder(tmp_path, monkeypatch
     assert text.count("<bookmark ") == 1
 
 
+def test_a_folder_mapping_becomes_the_proton_drive_place():
+    rows = [
+        {"type": "folder", "source": "/data/Docs", "dest_parent": "/my-files/Docs"},
+        {"type": "folder", "source": "/data/Other", "dest_parent": "/my-files/Other",
+         "direction": "twoway"},
+    ]
+    chosen, changed = volume.ensure_chosen(rows)
+    assert changed is True
+    assert chosen["source"] == "/data/Other"
+    assert chosen["live"] is True
+    again, changed = volume.ensure_chosen(rows)
+    assert changed is False
+    assert again is chosen
+
+
+def test_a_change_is_due_after_the_quiet_period():
+    from ui.live_sync import due
+    assert due(None, 10) is False
+    assert due(8, 9) is False
+    assert due(8, 10) is True
+
+
 def test_close_action_hides_until_quit():
     assert close_action(False, False, True) == "hide"
     assert close_action(False, True, False) == "stay"
