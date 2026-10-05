@@ -53,12 +53,17 @@ def mapping_for(local_dir):
     }
 
 
+def _tracked(mapping):
+    """A volume, or the one mapping chosen as the Proton Drive place."""
+    if not isinstance(mapping, dict) or mapping.get("direction") != "twoway":
+        return False
+    return mapping.get("volume") is True or mapping.get("live") is True
+
+
 def _volume_mapping(mappings, local_path):
     path = os.path.normpath(local_path)
     for mapping in mappings or []:
-        if not isinstance(mapping, dict):
-            continue
-        if mapping.get("direction") != "twoway" or mapping.get("volume") is not True:
+        if not _tracked(mapping):
             continue
         root = os.path.normpath(mapping.get("source") or "")
         if not root:
@@ -68,12 +73,36 @@ def _volume_mapping(mappings, local_path):
     return None, None
 
 
-def _remote_for(root, dest_parent, local_path):
+def _remote_for(mapping, root, local_path):
     rel = os.path.relpath(os.path.normpath(local_path), root)
-    dest = (dest_parent or MY_FILES).rstrip("/")
+    dest = (mapping.get("dest_parent") or MY_FILES).rstrip("/")
+    if mapping.get("volume") is not True:
+        dest = dest + "/" + os.path.basename(root.rstrip("/"))
     if rel in (".", ""):
         return dest
     return dest + "/" + rel.replace(os.sep, "/")
+
+
+def mark_live(mappings, source):
+    """The Proton Drive place opens this one folder. Other rows lose ``live``.
+
+    The chosen folder becomes two-way. It is not turned into a copy of the
+    whole account.
+    """
+    wanted = os.path.normpath(source)
+    chosen = None
+    for row in mappings or []:
+        if not isinstance(row, dict):
+            continue
+        src = os.path.normpath(row.get("source") or "")
+        if row.get("type", "folder") == "folder" and src == wanted:
+            row["live"] = True
+            if row.get("direction") != "twoway":
+                row["direction"] = "twoway"
+            chosen = row
+        else:
+            row.pop("live", None)
+    return chosen
 
 
 def note_local_change(config_path, mappings, local_path):
@@ -88,7 +117,7 @@ def note_local_change(config_path, mappings, local_path):
     found, root = _volume_mapping(mappings, local_path)
     if found is None:
         return False
-    remote = _remote_for(root, found.get("dest_parent"), local_path)
+    remote = _remote_for(found, root, local_path)
     database = syncdb.database_path(config_path)
     with syncdb.SyncDB(database) as db:
         row = db.get(os.path.normpath(local_path))

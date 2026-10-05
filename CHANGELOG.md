@@ -17,6 +17,7 @@
 
 ### Changed
 
+- **Choose mapping…** points the existing Dolphin place named Proton Drive at that folder and starts the local watcher for it. The place is not a second bookmark of the folder. Choosing a mapping does not download the rest of the account. A pass, if you confirm one, syncs that mapping only. Migration: none. The earlier whole-account volume button is no longer in the window.
 - The mapping dialog explains each deletion choice under the control: whether a local delete is sent to Proton, that removed files go to the Proton trash, and whether the folder is on a network drive or an internal disk. The trash choice and the disk choice are separate. Picking the disk no longer clears the trash selection on screen. Migration: none.
 - The project is presented as two-way sync maintained in this repository. It was forked from lafontaj/proton-drive-cli-sync and is not sent upstream as a pull request. A new mapping defaults to two-way. A mapping that was already saved without `"direction": "twoway"` stays upload-only until you change it. Migration: none for existing mappings.
 

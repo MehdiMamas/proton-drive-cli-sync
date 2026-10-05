@@ -117,6 +117,39 @@ def test_schema_v1_accepts_unsynced_after_open(tmp_path):
         assert db.get("/data/b.txt")["state"] == "unsynced"
 
 
+def test_choose_mapping_points_proton_drive_at_that_folder(tmp_path, monkeypatch):
+    import local_watcher
+    docs = tmp_path / "Docs"
+    other = tmp_path / "Other"
+    docs.mkdir()
+    other.mkdir()
+    (docs / "a.txt").write_bytes(b"AAAA")
+    rows = [
+        {"type": "folder", "source": str(docs), "dest_parent": "/my-files/Backups"},
+        {"type": "folder", "source": str(other), "dest_parent": "/my-files/Other"},
+    ]
+    chosen = volume.mark_live(rows, str(docs))
+    assert chosen["live"] is True
+    assert chosen["direction"] == "twoway"
+    assert "volume" not in chosen
+    assert "live" not in rows[1]
+    cfg = tmp_path / "mappings.json"
+    cfg.write_text("[]", encoding="utf-8")
+    assert volume.note_local_change(str(cfg), rows, str(docs / "a.txt"))
+    with syncdb.SyncDB(syncdb.database_path(str(cfg))) as db:
+        row = db.get(os.path.normpath(str(docs / "a.txt")))
+    assert row["state"] == "unsynced"
+    assert row["remote_path"] == "/my-files/Backups/Docs/a.txt"
+    monkeypatch.setattr(local_watcher, "source_kind_of", lambda _path: "local")
+    watched = local_watcher.select_targets(rows)
+    assert [item["watch_dir"] for item in watched] == [os.path.normpath(str(docs))]
+    places = tmp_path / "user-places.xbel"
+    volume.ensure_dolphin_place(str(docs), str(places))
+    text = places.read_text(encoding="utf-8")
+    assert volume.PLACE_TITLE in text
+    assert text.count("<bookmark ") == 1
+
+
 def test_close_action_hides_until_quit():
     assert close_action(False, False, True) == "hide"
     assert close_action(False, True, False) == "stay"

@@ -79,7 +79,7 @@ class MappingsPage:
         add_actions((
             (_("➕ Folder…"), lambda: self.on_add("folder"), None),
             (_("➕ File…"), lambda: self.on_add("file"), None),
-            (_("Proton Drive volume…"), self.on_volume, None),
+            (_("Choose mapping…"), self.on_choose_mapping, None),
         ))
         add_actions((
             (_("✏ Edit"), self.on_edit, None),
@@ -489,81 +489,68 @@ class MappingsPage:
         label = _("Added (folder): {s}") if kind == "folder" else _("Added (file): {s}")
         self.window.set_status(label.format(s=built["source"]))
 
-    def on_volume(self):
+    def on_choose_mapping(self):
         import volume as volume_mod
-        if any(row.get("volume") is True for row in self.doc.mappings):
+        from PySide6.QtWidgets import QInputDialog
+        folders = [
+            row for row in self.doc.mappings
+            if row.get("type", "folder") == "folder" and row.get("source")
+        ]
+        if not folders:
             widgets.info(
                 self.window,
-                _("A Proton Drive volume is already in this file."),
-                _("Volume"))
+                _("Add a folder mapping first. Proton Drive opens that folder."),
+                _("Choose mapping"))
             return
-        local_dir = volume_mod.default_local_dir()
-        try:
-            volume_mod.ensure_empty_directory(local_dir)
-        except ValueError:
-            widgets.error(
-                self.window,
-                _("The Proton Drive folder already has files in it, so it was "
-                  "not used. Move those files aside or pick an empty folder, "
-                  "then try again.\n\n{p}").format(p=local_dir),
-                _("Folder is not empty"))
+        if not self._need_file():
             return
-        if not self.doc.path:
-            from PySide6.QtWidgets import QFileDialog
-            path, _filt = QFileDialog.getSaveFileName(
-                widgets.qt_parent(self.window),
-                _("Save the mappings file"),
-                os.path.expanduser("~/mappings.json"),
-                "JSON (*.json)")
-            if not path:
-                return
-            if os.path.isfile(path):
-                try:
-                    self.doc.load(path)
-                except Exception as exc:
-                    widgets.error(self.window, str(exc), _("Load error"))
-                    return
-            else:
-                self.doc.path = path
-        if any(row.get("volume") is True for row in self.doc.mappings):
-            widgets.info(
-                self.window,
-                _("A Proton Drive volume is already in this file."),
-                _("Volume"))
+        if not self._offer_save(_(
+                "The mappings file has unsaved changes. Save them before choosing?")):
             return
-        built = volume_mod.mapping_for(local_dir)
-        self.doc.mappings.append(built)
-        self.doc.dirty = False
+        labels = [
+            "{s}  →  {d}".format(s=row.get("source"), d=row.get("dest_parent") or "")
+            for row in folders
+        ]
+        label, accepted = QInputDialog.getItem(
+            widgets.qt_parent(self.window),
+            _("Choose mapping"),
+            _("Proton Drive in Dolphin opens this folder, so you can see how "
+              "syncing is going. The rest of the account is not downloaded."),
+            labels, 0, False)
+        if not accepted:
+            return
+        mapping = folders[labels.index(label)]
+        if volume_mod.mark_live(self.doc.mappings, mapping["source"]) is None:
+            return
+        self.doc.dirty = True
         try:
             self.doc.save(self.doc.path)
         except Exception as exc:
-            self.doc.mappings.pop()
-            self.doc.dirty = True
             widgets.error(self.window, str(exc), _("Save error"))
             return
-        volume_mod.ensure_dolphin_place(local_dir)
-        ok, message = volume_mod.start_watcher(self.doc.path)
+        volume_mod.ensure_dolphin_place(mapping["source"])
+        started, message = volume_mod.start_watcher(self.doc.path)
         self._refresh()
         tray = getattr(self.window, "_tray", None)
         if tray is not None:
             tray.refresh()
-        if not ok:
+        if not started:
             self.window.set_status(message or _("The real-time watcher was not started."))
         if not widgets.confirm(
                 self.window,
-                _("Proton Drive will download your whole account into {p}. "
-                  "This can be large. Deletion stays off. After this first "
-                  "pass, local changes sync on their own.").format(p=local_dir),
-                _("Download the account?"),
-                _("Download"), _("Not now")):
-            self.window.set_status(_("Volume added. The first download was not started."))
+                _("Local changes in this folder sync on their own. A pass now "
+                  "syncs this mapping only. It does not download the rest of "
+                  "your account."),
+                _("Sync this folder?"),
+                _("Sync"), _("Not now")):
+            self.window.set_status(_("Proton Drive opens this folder. A pass was not started."))
             return
         if not self._need_engine() or self._running():
             return
         log_path = self._log_file()
         args = run.sync_args(
             self.doc.path, dry_run=False, verify_hash=False, verbose=False,
-            delete=False, only_sources=[built["source"]])
+            delete=False, only_sources=[mapping["source"]])
         cmd = run.engine_cmd(args)
         self._append(_("=== Launch: {c} ===").format(
             c=" ".join(shlex.quote(part) for part in cmd)) + "\n")

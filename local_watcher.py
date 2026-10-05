@@ -123,11 +123,16 @@ def select_targets(mappings):
     Les mappings de type 'file' restent EXCLUS du temps réel (balayage).
     """
     nas_on = (appconfig.nas_enabled() if _HAS_CONFIG else True)
+    # Un mapping marqué live est le dossier ouvert par « Proton Drive ».
+    # S'il y en a un, les autres dossiers du fichier ne sont pas surveillés.
+    live_only = any(isinstance(m, dict) and m.get("live") is True for m in mappings)
     targets = []
     for m in mappings:
         source = m.get("source", "")
         mtype = m.get("type", "folder")
         if mtype != "folder":
+            continue
+        if live_only and m.get("live") is not True:
             continue
         kind = source_kind_of(source)
         if kind == "missing":
