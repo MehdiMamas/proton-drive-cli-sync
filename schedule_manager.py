@@ -69,7 +69,11 @@ def _run(args):
 
 def build_service_text(mappings_path, delete=False):
     """Génère le contenu du fichier .service pointant vers le fichier de mappings
-    donné. Si delete=True, ajoute --delete à l'ExecStart (Option B)."""
+    donné. Si delete=True, ajoute --delete à l'ExecStart (Option B).
+
+    Le même ExecStart est le passage nocturne des mappings twoway : le moteur
+    lit ``direction`` dans le JSON. Le texte d'unité n'est généré qu'ici.
+    """
     # unitexec : chemins entre guillemets si besoin, lanceur stable si paquet.
     exec_line = unitexec.exec_line(DEFAULT_ENGINE, [mappings_path]
                                    + (["--delete"] if delete else []),
