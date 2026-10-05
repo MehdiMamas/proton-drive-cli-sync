@@ -1,8 +1,8 @@
-# Proton Drive Sync - community fork (Linux, one-way backup)
+# Proton Drive Sync — two-way for Linux
 
-This is a community fork of [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync). The original idea, the engine and the GUI are the work of its author (CapitaineFlamQuebec / lafontaj); this fork adds change-detection fixes, honest exit codes, deletion safety, tests and Arch packaging. Please credit and support the upstream project.
+This project is maintained here. It started as a fork of [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync) (CapitaineFlamQuebec); that original engine, GUI and license remain part of this tree. It is not an official Proton product, and changes are not sent back as pull requests.
 
-**One-way model.** Files go from your machine **to** Proton Drive and never the other way. Nothing is downloaded or reconciled. The tool drives Proton's official `proton-drive` command-line client; it does not implement the Drive protocol and never handles your Proton password. Deletion is off unless you turn it on, and the Proton side only ever receives a move to the trash.
+**Two-way, per mapping.** A new mapping syncs both ways: a local edit is uploaded, a remote edit is downloaded, and if both sides changed both copies are kept. A mapping saved before this still uploads only, until you set Direction to two-way. The tool drives Proton's official `proton-drive` command-line client. It does not implement the Drive protocol and never handles your Proton password. Deletion is off unless you turn it on, and the Proton side only ever receives a move to the trash.
 
 > **Disclaimer.** Community software, not affiliated with or endorsed by Proton AG. Use at your own risk. Test with a throwaway folder first. Keep independent backups.
 
@@ -31,12 +31,11 @@ More: [CHANGELOG.md](CHANGELOG.md), [docs/change-detection.md](docs/change-detec
 
 # Proton Drive sync via the official CLI (Linux)
 
-**One-way backup**: this software pushes your local folders **to** Proton Drive,
-and nothing else. It never downloads from Proton, does not reconcile the two
-sides, and is not a replacement for a two-way sync client. Anything changed
-directly on Proton Drive is not brought back to your machine — and will be
-overwritten on the next run if the local file has changed. If you are looking
-for sync in both directions, this is not the right tool.
+**Two-way sync**: a mapping with `"direction": "twoway"` uploads local edits and
+downloads remote edits. If both sides changed, a ` (proton conflict)` copy is
+kept and nothing is deleted. Remote changes are noticed about every 5 minutes
+by the existing consumer, not every second. A mapping with no `direction` key
+stays upload-only, so an older file is not switched over by itself.
 
 Reference document for this project.
 

@@ -2,8 +2,10 @@
 
 # Installation — Temps réel (couche 5)
 
-> **Sauvegarde à sens unique** : les watchers détectent les changements **locaux**
-> pour les envoyer vers Proton Drive. Rien n'est jamais téléchargé depuis Proton.
+> **Watchers locaux, et un relevé distant.** Les watchers voient toujours les
+> modifications locales. Un mapping à deux sens interroge aussi Proton environ
+> toutes les 5 minutes, par le même consommateur. Un mapping en envoi seul
+> n'est pas interrogé.
 
 Complément à `INSTALLATION-systemd.fr.md`. Le temps réel ajoute **trois démons** au
 timer nocturne déjà en place : deux sur la **machine locale** (pilotés depuis le GUI) et

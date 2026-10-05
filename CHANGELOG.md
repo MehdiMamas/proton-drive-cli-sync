@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The project is presented as two-way sync maintained in this repository. It was forked from lafontaj/proton-drive-cli-sync and is not sent upstream as a pull request. A new mapping defaults to two-way. A mapping that was already saved without `"direction": "twoway"` stays upload-only until you change it. Migration: none for existing mappings.
+
 ## [2.2.0] - 2026-10-05
 
 Trial build for a real Proton account. Existing mappings stay upload-only until `"direction": "twoway"` is set. Checked with the fake CLI (`165 passed`), not against Proton.

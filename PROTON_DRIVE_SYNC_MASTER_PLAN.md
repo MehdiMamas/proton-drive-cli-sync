@@ -1,5 +1,7 @@
 # Proton Drive on Linux Engineering Briefing
 
+The product maintained in this repository now syncs both ways when a mapping sets `"direction": "twoway"`. The briefing below is the October 2026 snapshot, from when the tool only uploaded.
+
 **Prepared for the maintainers of this fork (written for Nizar, its first user)**  
 **Research snapshot 3 October 2026**  
 **Purpose** Explain the current Arch Linux workaround, identify what it actually guarantees, and choose a useful path into Proton Drive development.

@@ -1,8 +1,9 @@
 # AGENTS.md
 
-This is a community fork of [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync):
-a **one-way local → Proton Drive** backup tool for Linux built around Proton's official `proton-drive` CLI.
-The fork's goal is a version we control and can publish for anyone to use at their own risk:
+This repository is the maintained project. It was forked from [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync) and is not developed by sending pull requests upstream.
+It is a Proton Drive sync for Linux built around Proton's official `proton-drive` CLI.
+A mapping with `"direction": "twoway"` uploads and downloads. Every other mapping stays upload-only.
+The goal is a version we control and can publish for anyone to use at their own risk:
 correct change detection, honest success/failure reporting, safe deletion semantics, tests, and Arch packaging.
 
 Start with `PROGRESS.md` (active phase), then `.cursor/rules/00-core.mdc` and the active plan in `.cursor/plans/`.

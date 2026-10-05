@@ -1,14 +1,15 @@
 🇬🇧 [English](README.md) | 🇫🇷 Français
 
-# Synchro Proton Drive via CLI officiel (Linux)
+# Synchro Proton Drive — deux sens (Linux)
 
-**Sauvegarde à sens unique** : ce logiciel envoie vos dossiers locaux **vers**
-Proton Drive, et rien d'autre. Il ne télécharge jamais depuis Proton, ne
-réconcilie pas les deux côtés, et ne remplace pas un client de synchronisation
-bidirectionnelle. Ce qui est modifié directement sur Proton Drive n'est pas
-redescendu sur votre machine — et sera écrasé au passage suivant si le fichier
-local a changé. Si vous cherchez une synchro dans les deux sens, ce n'est pas
-le bon outil.
+Ce dépôt est maintenu ici. Il est parti d'un fork de [lafontaj/proton-drive-cli-sync](https://github.com/lafontaj/proton-drive-cli-sync). Ce n'est pas un produit Proton, et les changements ne sont pas renvoyés en pull request.
+
+**Synchro dans les deux sens** : un mapping avec `"direction": "twoway"` envoie
+les modifications locales et télécharge les modifications distantes. Si les
+deux côtés ont changé, une copie ` (proton conflict)` est gardée et rien n'est
+supprimé. Les changements distants sont vus environ toutes les 5 minutes par
+le consommateur déjà en place, pas à chaque seconde. Un mapping sans clé
+`direction` reste en envoi seul, donc un ancien fichier ne bascule pas tout seul.
 
 Document de référence pour ce projet.
 

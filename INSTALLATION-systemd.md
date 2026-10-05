@@ -2,8 +2,8 @@
 
 # Automating the Proton Drive sync with systemd (--user timer)
 
-> **One-way backup**: this software pushes your local folders **to** Proton
-> Drive and never downloads from Proton.
+> **Two-way when the mapping says so.** A mapping with `"direction": "twoway"`
+> downloads remote edits. A mapping without that key still only uploads.
 
 Schedules the sync once a day at 3:00 am, in the user's session context (hence
 with access to the unlocked GNOME keyring).

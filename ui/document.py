@@ -173,11 +173,13 @@ def confirm_kind(dest, allow_delete, delete_mode):
 
 
 def backup_blurb(mappings):
-    """Sidebar line. Two-way is named only when a mapping opted in."""
-    if any(isinstance(row, dict) and row.get("direction") == "twoway"
-           for row in mappings or []):
+    """Sidebar line. Saved mappings without the key stay upload-only."""
+    rows = [row for row in mappings or [] if isinstance(row, dict)]
+    if any(row.get("direction") == "twoway" for row in rows):
         return _("Two-way is on for those mappings only")
-    return _("Unofficial one-way backup")
+    if rows:
+        return _("Two-way sync. These mappings are still upload-only.")
+    return _("Two-way sync for Proton Drive")
 
 
 def build_mapping(old, m_type, source, dest, conflict_mode, allow_delete,

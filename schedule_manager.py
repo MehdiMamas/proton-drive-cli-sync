@@ -84,7 +84,7 @@ def build_service_text(mappings_path, delete=False):
     else:
         env_line = "Environment=" + unitexec.quote_environment(
             "PROTON_DRIVE_CLI", cli_value) + "\n"
-    desc_service = _("Proton Drive sync (NAS -> Proton, one-way)")
+    desc_service = _("Proton Drive sync")
     return f"""[Unit]
 Description={desc_service}
 After=network-online.target

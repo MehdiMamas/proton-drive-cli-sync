@@ -71,7 +71,9 @@ def test_twoway_direction_is_opt_in_and_unknown_keys_stay():
         old, "folder", "/s", "/shared-with-me/box", "replace", True, "trash",
         "local", direction="twoway", shared_delete_confirmed=True)
     assert confirmed["shared_delete_confirmed"] is True
-    assert document.backup_blurb([upload]) == "Unofficial one-way backup"
+    assert document.backup_blurb([]) == "Two-way sync for Proton Drive"
+    assert document.backup_blurb([upload]) == (
+        "Two-way sync. These mappings are still upload-only.")
     assert document.backup_blurb([kept]) == "Two-way is on for those mappings only"
     carried = {"type": "folder", "source": "/s", "dest_parent": "/my-files"}
     carry_unknown_keys(old, carried)

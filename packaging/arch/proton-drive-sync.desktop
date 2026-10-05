@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Proton Drive Sync (community fork)
-Comment=One-way local to Proton Drive backup. Not affiliated with Proton AG.
+Name=Proton Drive Sync
+Comment=Two-way sync for Proton Drive. Not affiliated with Proton AG.
 Exec=proton-drive-sync-gui
 Icon=proton-drive-sync
 Terminal=false

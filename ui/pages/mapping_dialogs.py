@@ -67,7 +67,7 @@ class MappingDialog:
         content.addWidget(place)
 
         direction, direction_l = widgets.section(body, _("Direction"))
-        twoway_init = bool(is_edit and mapping.get("direction") == "twoway")
+        twoway_init = (not is_edit) or mapping.get("direction") == "twoway"
         self.upload = QRadioButton(_(
             "Upload only — local files are backed up. Remote changes are not downloaded"))
         self.twoway = QRadioButton(_("Two-way — for this mapping only"))

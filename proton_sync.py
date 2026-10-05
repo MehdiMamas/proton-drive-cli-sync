@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Moteur de synchro Proton Drive (NAS -> Proton, à sens unique).
+Moteur de synchro Proton Drive. Un mapping sans ``direction: twoway`` reste en envoi seul.
 
 Lit un fichier JSON de mappings (voir proton_mapping_editor.py) et, pour
 chaque entrée, n'envoie que les fichiers nouveaux ou modifiés. À taille
@@ -3176,7 +3176,7 @@ def main():
     except (AttributeError, ValueError):
         pass  # vieux Python ou flux non reconfigurable : sans gravité
 
-    parser = argparse.ArgumentParser(description="Moteur de synchro Proton Drive (NAS -> Proton, sens unique)")
+    parser = argparse.ArgumentParser(description="Moteur de synchro Proton Drive (deux sens si le mapping l'indique)")
     parser.add_argument("config", nargs="?", default=None,
                         help="Fichier JSON de mappings (optionnel pour les sondes "
                              "--check-auth / --check-lock qui ne lisent pas les mappings)")

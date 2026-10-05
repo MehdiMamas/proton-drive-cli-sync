@@ -30,7 +30,7 @@ PROVIDER_INTERFACE = "org.freedesktop.CloudProviders.Provider"
 FILE_STATUS_INTERFACE = "org.protondrivesync.FileStatus"
 def provider_name():
     """Name Nautilus shows for this unofficial account."""
-    return _("Unofficial Proton Drive sync")
+    return _("Proton Drive Sync")
 
 
 def file_status(db, local_path):

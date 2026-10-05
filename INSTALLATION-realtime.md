@@ -2,8 +2,9 @@
 
 # Installation — Real-time layer
 
-> **One-way backup**: the watchers detect **local** changes in order to push them
-> to Proton Drive. Nothing is ever downloaded from Proton.
+> **Local watchers, and a remote poll.** The watchers still notice local edits.
+> A two-way mapping also lists Proton about every 5 minutes from the same
+> consumer. An upload-only mapping is not polled.
 
 Companion to `INSTALLATION-systemd.md`. The real-time layer adds **three daemons**
 on top of the nightly timer already in place: two on the **desktop** (driven from

@@ -9,7 +9,7 @@ alwaysApply: true
 The build is split into one plan per phase: `.cursor/plans/phase-NN-*.plan.md`. `.cursor/plans/00-roadmap.plan.md` is the index, and `PROGRESS.md` names the active phase. Phase discipline is defined in `05-phase-discipline.mdc`. The long-form spec is `PROTON_DRIVE_SYNC_MASTER_PLAN.md`, and plan items cite it as §N. Read the cited sections before implementing a phase.
 
 ## Product contract
-- A **one-way local → Proton Drive** backup tool for Linux, forked from `lafontaj/proton-drive-cli-sync` at `5a852e2`. It never downloads remote changes and never claims two-way sync.
+- A **two-way** Proton Drive sync for Linux, maintained in this repository. It was forked from `lafontaj/proton-drive-cli-sync` at `5a852e2` and is not sent back as a pull request. A mapping downloads only when `"direction": "twoway"` is set. Any other mapping stays upload-only.
 - All Drive access goes through Proton's official `proton-drive` CLI (tested 0.8.0). We own the mapping policy, change detection, scheduling and reporting. We never reimplement the Drive protocol or handle Proton credentials.
 - **Data safety first.** The worst bugs are: skipping changed content, reporting success when files did not reach Drive, trashing remote data the user expected to keep, renaming local files. When unsure, pick the conservative behavior (upload again, keep markers, refuse deletion) and record it in `PROGRESS.md` under Notes / decisions.
 - **Backward compatibility.** Existing `mappings*.json`, `settings.json`, caches under `~/.proton-drive-sync/` and installed systemd units keep working. Unknown keys are preserved. Every intentional behavior change gets a `CHANGELOG.md` entry with a migration note.

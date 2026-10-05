@@ -29,9 +29,9 @@ todos:
 
 # Proton Drive Sync roadmap
 
-This repo is a community fork of `lafontaj/proton-drive-cli-sync` (forked at `5a852e2`): a **one-way local → Proton Drive**
-backup tool for Linux around Proton's official `proton-drive` CLI. The goal is a version we control and can publish for
-anyone to use at their own risk. The spec is `PROTON_DRIVE_SYNC_MASTER_PLAN.md` (the engineering briefing). Plans cite it as §N.
+This repo was forked from `lafontaj/proton-drive-cli-sync` at `5a852e2` and is maintained here, not as an upstream pull request.
+A mapping with `"direction": "twoway"` syncs both ways; every other mapping stays upload-only. The tool uses Proton's official `proton-drive` CLI.
+The spec is `PROTON_DRIVE_SYNC_MASTER_PLAN.md` (the engineering briefing, written when the tool was upload-only). Plans cite it as §N.
 
 ## Architecture
 
