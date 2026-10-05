@@ -12,7 +12,7 @@ contente de LIRE l'état du linger et de rappeler la commande à l'utilisateur.
 Tout est centré sur l'utilisateur courant : chaque GUI gère la planification
 de son propre utilisateur (sessions et homes séparés).
 """
-__version__ = "1.1.2"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
@@ -65,11 +65,29 @@ def _run(args):
 
 # ---------- Génération des fichiers ----------
 
-def build_service_text(mappings_path, delete=False):
+def build_service_text(mappings_path, delete=False, engine_exec=None,
+                       cli_line=None, omit_cli=False):
     """Génère le contenu du fichier .service pointant vers le fichier de mappings
-    donné. Si delete=True, ajoute --delete à l'ExecStart (Option B)."""
-    exec_line = (f"ExecStart=/usr/bin/python3 {DEFAULT_ENGINE} {mappings_path}"
-                 + (" --delete" if delete else ""))
+    donné. Si delete=True, ajoute --delete à l'ExecStart (Option B).
+
+    engine_exec / cli_line / omit_cli ne servent qu'à la réécriture automatique :
+    le bouton Installer / Mettre à jour les laisse vides, et les chemins viennent
+    alors du dossier qui tourne. Une réécriture qui les fournit recopie
+    l'interpréteur, proton_sync.py et PROTON_DRIVE_CLI déjà installés."""
+    if engine_exec:
+        exec_line = (f"ExecStart={engine_exec} {mappings_path}"
+                     + (" --delete" if delete else ""))
+    else:
+        exec_line = (f"ExecStart=/usr/bin/python3 {DEFAULT_ENGINE} {mappings_path}"
+                     + (" --delete" if delete else ""))
+    if omit_cli:
+        env_block = ""
+    elif cli_line:
+        env_block = cli_line + "\n"
+    else:
+        cli_value = (appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG
+                     else DEFAULT_CLI)
+        env_block = f"Environment=PROTON_DRIVE_CLI={cli_value}\n"
     desc_service = _("Proton Drive sync (NAS -> Proton, one-way)")
     return f"""[Unit]
 Description={desc_service}
@@ -84,8 +102,7 @@ StartLimitBurst=6
 [Service]
 # Type=exec (et non oneshot) : nécessaire pour que Restart= fonctionne.
 Type=exec
-Environment=PROTON_DRIVE_CLI={appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI}
-{exec_line}
+{env_block}{exec_line}
 
 # Deux codes de sortie du moteur sont des NON-échecs du point de vue systemd,
 # déclarés ici pour éviter à la fois le marquage "failed" ET une relance inutile :
@@ -159,14 +176,56 @@ def timer_exists():
     return os.path.exists(TIMER_PATH)
 
 
-def read_service_mappings_path():
-    """Extrait le chemin du fichier de mappings de l'ExecStart, ou None."""
+def _read_service_content():
+    """Texte du service installé, ou None s'il est absent ou illisible."""
     if not service_exists():
         return None
     try:
         with open(SERVICE_PATH, "r", encoding="utf-8") as f:
-            content = f.read()
+            return f.read()
     except OSError:
+        return None
+
+
+def read_service_engine_exec():
+    """Préfixe ExecStart jusqu'à proton_sync.py inclus (interpréteur + moteur).
+
+    None si la ligne n'a pas ce script. La réécriture automatique recopie ce
+    préfixe tel quel : elle ne le remplace pas par le dossier d'où l'éditeur
+    a été lancé."""
+    content = _read_service_content()
+    if not content:
+        return None
+    m = re.search(r"^ExecStart=(.*)$", content, re.MULTILINE)
+    if not m:
+        return None
+    body = m.group(1).strip()
+    marker = "proton_sync.py"
+    idx = body.find(marker)
+    if idx < 0:
+        return None
+    return body[:idx + len(marker)].rstrip()
+
+
+def read_service_cli_line():
+    """Ligne Environment= qui fixe PROTON_DRIVE_CLI, ou None si elle est absente.
+
+    La valeur est rendue telle qu'écrite, guillemets compris. None veut dire
+    « ne pas en ajouter une » lors d'une réécriture automatique."""
+    content = _read_service_content()
+    if not content:
+        return None
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Environment=") and "PROTON_DRIVE_CLI=" in stripped:
+            return stripped
+    return None
+
+
+def read_service_mappings_path():
+    """Extrait le chemin du fichier de mappings de l'ExecStart, ou None."""
+    content = _read_service_content()
+    if not content:
         return None
     m = re.search(r"^ExecStart=.*proton_sync\.py\s+(\S+)", content, re.MULTILINE)
     if m:
@@ -176,12 +235,8 @@ def read_service_mappings_path():
 
 def read_service_delete():
     """Retourne True si l'ExecStart contient --delete (Option B)."""
-    if not service_exists():
-        return False
-    try:
-        with open(SERVICE_PATH, "r", encoding="utf-8") as f:
-            content = f.read()
-    except OSError:
+    content = _read_service_content()
+    if not content:
         return False
     m = re.search(r"^ExecStart=.*$", content, re.MULTILINE)
     return bool(m and "--delete" in m.group(0))
@@ -478,11 +533,18 @@ def daemon_reload():
 
 
 def install_or_update(mappings_path, on_calendar="*-*-* 03:00:00", delete=False,
-                      enable=True):
+                      enable=True, engine_exec=None, cli_line=None,
+                      omit_cli=False):
     """Crée ou met à jour service + timer, recharge systemd, et active le timer
-    si enable=True. Retourne (ok, message)."""
+    si enable=True. Retourne (ok, message).
+
+    Sans engine_exec, le chemin du moteur et PROTON_DRIVE_CLI viennent du
+    dossier qui exécute ce module (bouton Installer / Mettre à jour).
+    refresh_units passe les valeurs déjà installées pour ne pas les déplacer."""
     try:
-        _write(SERVICE_PATH, build_service_text(mappings_path, delete=delete))
+        _write(SERVICE_PATH, build_service_text(
+            mappings_path, delete=delete, engine_exec=engine_exec,
+            cli_line=cli_line, omit_cli=omit_cli))
         _write(TIMER_PATH, build_timer_text(on_calendar))
     except OSError as e:
         return False, _("Failed to write the systemd files: {e}").format(e=e)
@@ -502,16 +564,20 @@ def install_or_update(mappings_path, on_calendar="*-*-* 03:00:00", delete=False,
 def refresh_units():
     """Réécrit service + timer à partir de leurs valeurs actuelles.
 
-    Les installations déjà en place gardent l'ancien texte d'unité. Cette
-    fonction y remet RestartPreventExitStatus=5 sans changer le fichier de
-    mappings, l'heure du timer, ni l'option --delete."""
+    Remet RestartPreventExitStatus=5 sans changer le fichier de mappings,
+    l'heure du timer, l'option --delete, le chemin du moteur sur ExecStart,
+    ni PROTON_DRIVE_CLI. Une ligne CLI absente n'est pas ajoutée. Seul le
+    bouton Installer / Mettre à jour réécrit ces deux chemins."""
     mappings_path = read_service_mappings_path()
-    if mappings_path is None:
+    engine_exec = read_service_engine_exec()
+    if mappings_path is None or engine_exec is None:
         return False, _("Service not found — install the schedule first.")
+    cli_line = read_service_cli_line()
     calendar = read_timer_calendar() or "*-*-* 03:00:00"
     delete = read_service_delete()
     return install_or_update(mappings_path, on_calendar=calendar, delete=delete,
-                             enable=timer_is_active())
+                             enable=timer_is_active(), engine_exec=engine_exec,
+                             cli_line=cli_line, omit_cli=(cli_line is None))
 
 
 def set_delete(delete):

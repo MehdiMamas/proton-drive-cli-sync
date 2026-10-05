@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (par défaut : ~/Logiciels/Proton-drive/proton-drive)
 """
-__version__ = "1.11.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.12.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -1367,6 +1367,38 @@ def remote_exists(path):
     return data is not None
 
 
+def _missing_node_error(stderr):
+    """True si le CLI dit que le chemin n'existe pas.
+
+    Même idée que _already_exists_error : on matche les formulations connues,
+    pas une seule chaîne. « not found » couvre le harnais et « Node not found »."""
+    s = (stderr or "").lower()
+    return any(h in s for h in (
+        "not found",
+        "introuvable",
+        "n'existe pas",
+        "does not exist",
+    ))
+
+
+def _dry_run_folder_is_absent(remote_items, remote_hint, remote_folder):
+    """Un dossier qui n'est pas encore sur Drive n'est pas un échec de dry-run.
+
+    Rien n'est créé en dry-run, donc lister un dossier neuf échoue. Ce n'est
+    pas un listage raté : on le traite comme vide pour que les fichiers qui
+    seraient envoyés soient quand même annoncés.
+
+    remote_hint False : le listing du parent vient de dire que le nom est
+    absent, sans appel de plus. Sinon on ne conclut « absent » que si l'erreur
+    est un chemin manquant ET que filesystem info le confirme. Une autre
+    erreur, ou un dossier qui existe, reste un échec de listage."""
+    if remote_hint is False:
+        return True
+    if not _missing_node_error(getattr(remote_items, "error", "")):
+        return False
+    return not remote_exists(remote_folder)
+
+
 def _already_exists_error(stderr):
     """True si l'erreur du CLI signale que la cible existe déjà — quelle que soit
     la langue. Un `create-folder` sur un dossier déjà présent n'est PAS une vraie
@@ -2386,6 +2418,12 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
 
     if remote_items is None:
         remote_items = get_remote_listing(remote_folder, verbose=verbose)
+    if not remote_items.ok and dry_run and _dry_run_folder_is_absent(
+            remote_items, remote_hint, remote_folder):
+        # Pas encore sur Drive : le dry-run ne crée rien, le listage échoue
+        # forcément. Ce n'est pas un échec. Un listing vide laisse le parcours
+        # annoncer ce qui serait envoyé.
+        remote_items = RemoteListing(ok=True)
     if not remote_items.ok:
         # Listing en échec : le dossier n'est PAS vide, on ne sait simplement pas
         # ce qu'il contient. Envoyer reviendrait à renvoyer tout le dossier ;
@@ -2575,6 +2613,9 @@ def sync_file(local_file, remote_parent, dry_run=False, verbose=False, verify_ha
         if not ensure_remote_path(remote_parent):
             return False   # destination non inscriptible : rien envoyé (message déjà émis)
         remote_items = get_remote_listing(remote_parent, verbose=verbose)
+    if not remote_items.ok and dry_run and _dry_run_folder_is_absent(
+            remote_items, None, remote_parent):
+        remote_items = RemoteListing(ok=True)
     if not remote_items.ok:
         # Sans listing fiable, le fichier paraîtrait absent et serait renvoyé à
         # chaque passage. On passe notre tour ; le prochain passage tranchera.
