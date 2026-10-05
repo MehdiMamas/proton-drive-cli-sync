@@ -183,6 +183,15 @@ class MainWindow:
             self.account_chip.setObjectName("AccountBad")
         self.account_chip.style().unpolish(self.account_chip)
         self.account_chip.style().polish(self.account_chip)
+        if ok:
+            current = self.settings.account.text()
+            if current in ("", _("Checking…"), _("Session unavailable")):
+                self.settings.apply_account(_("Signed in."))
+            else:
+                self.settings.sign_in.hide()
+                self.settings.signed_badge.show()
+        else:
+            self.settings.apply_account(_("Session unavailable"))
 
     def _paint_account(self, text):
         self.account_chip.setText(text)
@@ -190,7 +199,7 @@ class MainWindow:
         self.account_chip.setObjectName("AccountBad" if bad else "AccountOk")
         self.account_chip.style().unpolish(self.account_chip)
         self.account_chip.style().polish(self.account_chip)
-        self.settings.account.setText(text)
+        self.settings.apply_account(text)
 
     def refresh_file_chip(self):
         if not self.doc.path:

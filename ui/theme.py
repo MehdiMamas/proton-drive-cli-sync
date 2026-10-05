@@ -41,6 +41,10 @@ QLabel#Title {
 QLabel#AccountOk {
     color: %(success)s;
 }
+QLabel#SignedIn {
+    color: %(success)s;
+    font-weight: 600;
+}
 QLabel#AccountBad {
     color: %(danger)s;
 }

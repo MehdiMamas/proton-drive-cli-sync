@@ -21,15 +21,21 @@ class SettingsPage:
         self.scroll, inner, root = widgets.scroll_page(host)
 
         account, account_l = widgets.section(inner, _("Proton account"))
+        email_row = QHBoxLayout()
         self.account = QLabel(_("Checking…"))
-        self.account.setWordWrap(True)
-        account_l.addWidget(self.account)
+        self.signed_badge = QLabel(_("SIGNED IN"))
+        self.signed_badge.setObjectName("SignedIn")
+        self.signed_badge.hide()
+        email_row.addWidget(self.account)
+        email_row.addWidget(self.signed_badge)
+        email_row.addStretch(1)
+        account_l.addLayout(email_row)
         acct = QHBoxLayout()
-        sign_in = QPushButton(_("Sign in to Proton"))
+        self.sign_in = QPushButton(_("Sign in to Proton"))
         sign_out = QPushButton(_("Sign out"))
-        sign_in.clicked.connect(lambda: LoginDialog(self.window))
+        self.sign_in.clicked.connect(self.on_sign_in)
         sign_out.clicked.connect(self.on_sign_out)
-        acct.addWidget(sign_in)
+        acct.addWidget(self.sign_in)
         acct.addWidget(sign_out)
         acct.addStretch(1)
         account_l.addLayout(acct)
@@ -189,6 +195,22 @@ class SettingsPage:
             self.window.set_account_line(text)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def apply_account(self, text):
+        """Met à jour l'e-mail, le badge et le bouton selon l'état de session."""
+        signed = text not in ("", _("Checking…"), _("Session unavailable"))
+        if signed and text != _("Signed in."):
+            self.account.setText(text)
+        elif signed:
+            self.account.setText("")
+        else:
+            self.account.setText(text)
+        self.sign_in.setVisible(not signed)
+        self.signed_badge.setVisible(signed)
+
+    def on_sign_in(self):
+        LoginDialog(self.window)
+        self._refresh_account()
 
     def on_sign_out(self):
         try:
