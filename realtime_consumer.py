@@ -24,7 +24,7 @@ Principes (décidés en conception) :
 
 Un démon par utilisateur (sa session, son trousseau, ses mappings).
 """
-__version__ = "1.6.2"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.7.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -125,6 +125,11 @@ DEFAULT_DEBOUNCE_SECONDS = 30   # délai de calme avant de traiter un dossier
 # toutes les COLD_RECHECK_SECONDS, au cas où une planification l'aurait consolidé
 # entre-temps. Évite des centaines de sondes d'auth pendant l'attente.
 COLD_RECHECK_SECONDS = 1800     # 30 min
+# Reprise après un échec qui n'est ni « froid » ni « compte changé » :
+# 60 s, 120 s, 240 s, … plafonné à 30 min. Le code 2 (auth) n'utilise pas
+# cette rampe : keyring_ready bloque déjà le cycle avant le lancement.
+FAILURE_BACKOFF_BASE = 60
+FAILURE_BACKOFF_CAP = 1800
 
 # Ancienneté au-delà de laquelle une RACINE de mapping restée froide devient un
 # avertissement visible (barre des tâches). Une racine froide veut dire qu'aucun
@@ -464,6 +469,10 @@ class DebounceState:
         # de suite — sans attendre le prochain passage complet, qui peut être à
         # une semaine si la planification est hebdomadaire.
         self.unreadable = set()
+        # Échec persistant -> horodatage monotone avant lequel on ne relance pas,
+        # et le délai du prochain essai (doublé à chaque échec, plafonné).
+        self.fail_wait = {}
+        self.fail_step = {}
 
     def observe(self, target_dir, marker_path, now, want_delete=False):
         """Enregistre un marqueur. IMPORTANT : ne met à jour last_seen que si le
@@ -678,6 +687,58 @@ class DebounceState:
             self.cold_since.pop(d, None)
             self.cold_roots.discard(d)
 
+    def failure_waiting(self, target_dir, now):
+        """True tant que le délai de reprise après échec n'est pas écoulé.
+
+        Distinct du mécanisme « froid » : un dossier froid n'a pas été traité,
+        un dossier en échec l'a été et a laissé du travail incomplet."""
+        until = self.fail_wait.get(target_dir)
+        return until is not None and now < until
+
+    def note_failure(self, target_dir, now):
+        """Arme la prochaine relance : 60 s, puis 120, 240, … plafonné à 1800."""
+        delay = self.fail_step.get(target_dir, FAILURE_BACKOFF_BASE)
+        self.fail_wait[target_dir] = now + delay
+        self.fail_step[target_dir] = min(delay * 2, FAILURE_BACKOFF_CAP)
+
+    def clear_failure(self, target_dir):
+        """Un succès annule la rampe : le prochain échec repart à 60 s."""
+        self.fail_wait.pop(target_dir, None)
+        self.fail_step.pop(target_dir, None)
+
+
+def _partial_failure_detail(output):
+    """Compteurs non nuls lus sur la ligne [run-result], ou chaîne vide."""
+    payload = None
+    for line in (output or "").splitlines():
+        idx = line.find("[run-result] ")
+        if idx < 0:
+            continue
+        try:
+            payload = json.loads(line[idx + len("[run-result] "):])
+        except ValueError:
+            payload = None
+        break
+    if not isinstance(payload, dict):
+        return ""
+    parts = []
+    for key in (
+        "files_failed",
+        "folders_listing_failed",
+        "folders_unreadable",
+        "folders_permission_denied",
+        "folders_stall_skipped",
+        "trash_failed",
+        "deletions_refused",
+        "sources_missing",
+    ):
+        value = payload.get(key)
+        if isinstance(value, int) and value > 0:
+            parts.append("{k}={v}".format(k=key, v=value))
+    if not parts:
+        return ""
+    return " (" + ", ".join(parts) + ")"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 #  Lancement du moteur sur un sous-chemin
@@ -846,10 +907,16 @@ def recover_inflight(queue_dirs, log=None):
     return total
 
 
-def process_ready(state, target_dir, mappings, config_path, log, runner=None):
+def process_ready(state, target_dir, mappings, config_path, log, runner=None,
+                  now=None):
     """Traite UN dossier mûr : trouve son mapping, lance le moteur, nettoie les
     marqueurs. Robuste : dossier disparu / hors mapping -> marqueurs nettoyés et
-    on passe. Retourne True si une synchro a été lancée, False sinon."""
+    on passe. Retourne True si une synchro a été lancée, False sinon.
+
+    `now` est l'horloge monotone du cycle (injectable dans les tests). Elle
+    sert à la rampe d'échec. Le mécanisme froid garde time.monotonic()."""
+    if now is None:
+        now = time.monotonic()
     markers = state.markers_for(target_dir)
     want_delete = state.want_delete_for(target_dir)
 
@@ -885,6 +952,7 @@ def process_ready(state, target_dir, mappings, config_path, log, runner=None):
         _cleanup(markers)
         state.clear(target_dir)
         state.clear_cold(target_dir)   # au cas où il était froid : il est chaud maintenant
+        state.clear_failure(target_dir)
         # Le passage a réussi : ce qu'on croyait illisible sous cette cible ne
         # l'est plus. On oublie d'abord (ne jamais figer un échec résolu), puis
         # on reprend ce que CE passage vient de constater — un passage peut très
@@ -971,24 +1039,47 @@ def process_ready(state, target_dir, mappings, config_path, log, runner=None):
         log(_("    ⛔ account changed — engine refused (cache belongs to the "
               "previous account); markers kept"))
         return False
-    else:
-        # Échec : on NE nettoie PAS les marqueurs (ils seront retentés au
-        # prochain cycle) — mais il faut les RAMENER dans la file, sinon
-        # `read_markers` ne les verrait plus et le ré-essai n'aurait jamais lieu.
+    elif code == 5:
+        # Passage terminé AVEC des échecs. On ne confirme pas les marqueurs :
+        # le travail n'est pas sur Drive. On ne lève pas non plus l'état froid
+        # (clear_cold) : un échec partiel ne prouve pas que l'arbre est indexé.
+        # La rampe espace les relances ; le code 0 seul la remet à zéro.
+        _restore_markers(markers, log=log)
+        state.clear(target_dir)
+        # Un code 5 n'est pas un succès, mais le passage a quand même nommé les
+        # dossiers illisibles. On oublie d'abord l'ancienne liste sous cette
+        # cible, puis on reprend ce que CE passage a imprimé : sinon l'alerte
+        # du plateau reste vide jusqu'au prochain passage complet.
+        state.clear_unreadable(target_dir)
+        state.note_unreadable(parse_unreadable(output))
+        state.note_failure(target_dir, now)
+        log(_("    ⚠ partial failure, markers kept")
+            + _partial_failure_detail(output))
+        return False
+    elif code == 2:
+        # L'auth a déjà son propre filtre (keyring_ready, avant le lancement).
+        # Un code 2 qui arrive quand même (sonde OK, échec pendant le passage)
+        # reste sur ce chemin : marqueurs gardés, pas de rampe exponentielle.
         _restore_markers(markers, log=log)
         state.clear(target_dir)
         log(_("    ✗ failure (code {c}) — markers kept for retry").format(c=code))
         if output:
-            # Combien de lignes de la sortie moteur on recopie au journal.
-            # Le message d'échec d'authentification (code 2) en fait SEPT, dont
-            # la ligne « CLI detail : … » — la SEULE qui dise ce que le CLI a
-            # réellement répondu, donc la seule qui permette de distinguer un
-            # trousseau verrouillé d'une panne de service Proton. L'ancienne
-            # limite de 3 la coupait systématiquement : on ne voyait que la
-            # cause SUPPOSÉE, jamais la cause réelle (constaté en production le
-            # 30 juillet pendant une panne Proton).
-            limit = ENGINE_OUTPUT_LINES_AUTH if code == 2 else ENGINE_OUTPUT_LINES
+            limit = ENGINE_OUTPUT_LINES_AUTH
             for line in output.strip().splitlines()[:limit]:
+                log(f"      {line}")
+        return False
+    else:
+        # Échec : on NE nettoie PAS les marqueurs (ils seront retentés au
+        # prochain cycle) — mais il faut les RAMENER dans la file, sinon
+        # `read_markers` ne les verrait plus et le ré-essai n'aurait jamais lieu.
+        # La rampe (60 s, 120 s, …) empêche de relancer le moteur à chaque cycle.
+        _restore_markers(markers, log=log)
+        state.clear(target_dir)
+        state.note_failure(target_dir, now)
+        log(_("    ✗ failure (code {c}) — markers kept for retry").format(c=code))
+        if output:
+            # Combien de lignes de la sortie moteur on recopie au journal.
+            for line in output.strip().splitlines()[:ENGINE_OUTPUT_LINES]:
                 log(f"      {line}")
         return False
 
@@ -1069,8 +1160,12 @@ def run_once(state, queue_dirs, mappings, config_path, debounce_seconds, now,
                 log(_("  ⏳ {p} is still being written — sync postponed "
                       "({n} time(s) so far)").format(p=target_dir, n=n))
             continue
+        # Échec récent (code 1, 5, autre) : on attend la rampe. Le froid et le
+        # compte changé ont leur propre délai et ne passent pas par ici.
+        if state.failure_waiting(target_dir, now):
+            continue
         if process_ready(state, target_dir, mappings, config_path, log,
-                         runner=runner):
+                         runner=runner, now=now):
             processed_any = True
     # « account » ne l'emporte que si RIEN n'a abouti ce cycle (si le moteur a
     # refusé pour changement de compte, c'est de toute façon le cas pour tous).

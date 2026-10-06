@@ -136,7 +136,7 @@ ouverte (trousseau verrouillé) :
 1. Le moteur fait son test d'authentification (`filesystem list /`) au démarrage
 2. Ça échoue (trousseau verrouillé)
 3. Le moteur affiche un message clair et sort avec le **code 2**
-4. systemd considère ça comme un succès (grâce à `SuccessExitStatus=0 2`), donc
+4. systemd considère ça comme un succès (grâce à `SuccessExitStatus=0 2 4`), donc
    PAS de notification d'échec, PAS de service en "failed"
 5. Le cache n'est pas touché, le verrou est libéré
 6. Le lendemain à 3h00 (ou dès réouverture de session), nouvelle tentative
@@ -162,7 +162,7 @@ Pour que ça ne saute pas tout le passage nocturne, le service est en
 **relance automatiquement ~2 min plus tard**, le temps que le consommateur ait
 fini et libéré le verrou. `StartLimitBurst=6` (sur `StartLimitIntervalSec=1h`)
 borne les tentatives pour éviter toute boucle si le problème persiste. Le code 2
-(trousseau verrouillé) reste un succès (`SuccessExitStatus=0 2`) et ne provoque
+(trousseau verrouillé) reste un succès (`SuccessExitStatus=0 2 4`) et ne provoque
 donc **pas** de relance inutile.
 
 > Ces réglages sont générés automatiquement par la fenêtre « ⏰ Planification… »
@@ -184,6 +184,33 @@ journalctl --user -u proton-sync.service --since today --no-pager
 
 Tu verras un échec (« Une autre instance… est déjà en cours », `status=1`) suivi,
 ~2 min plus tard, d'un nouveau « Starting… » puis « Finished… » qui réussit.
+
+---
+
+## Codes de sortie
+
+Le service planifié lance un passage complet. Voici les codes du moteur qui comptent pour cette unité :
+
+| Code | Signification | systemd |
+| --- | --- | --- |
+| 0 | Passage terminé, rien n'a échoué | succès |
+| 1 | Verrou tenu par un autre passage, ou le CLI ne peut pas démarrer | `Restart=on-failure` (borné) |
+| 2 | Authentification échouée (trousseau verrouillé ou panne Proton/réseau) | `SuccessExitStatus`, pas de relance |
+| 4 | Compte Proton changé ; rien n'a été synchronisé | `SuccessExitStatus`, pas de relance |
+| 5 | Passage terminé, mais au moins un envoi, un listage, un dossier illisible, un refus de permission, un dossier sauté après blocage, une corbeille ou une source manquante a échoué | unité **failed**, `RestartPreventExitStatus=5` pour que systemd ne la relance pas. Le timer suivant, ou le cycle temps réel, réessaie |
+
+Le code 3 ne concerne que `--subpath` quand le dossier n'a pas encore été indexé. L'unité planifiée n'utilise pas `--subpath`.
+
+La dernière ligne d'un passage est un objet JSON `[run-result]` (code de sortie, mode, compteurs). `~/.proton-drive-sync/last-run.json` garde le dernier passage complet et le dernier passage `--subpath` séparément.
+
+Les unités installées avant ce changement ne contiennent pas `RestartPreventExitStatus=5`. Ouvrir l'éditeur de mappings les réécrit à partir du fichier de mappings, de l'heure et de `--delete` déjà installés. Le chemin du moteur sur `ExecStart` et `PROTON_DRIVE_CLI` restent tels quels ; seul Installer / Mettre à jour change ces deux chemins. Si tu n'ouvres jamais l'éditeur, réécris-les une fois toi-même :
+
+```bash
+python3 schedule_manager.py --refresh-units
+systemctl --user cat proton-sync.service | grep RestartPreventExitStatus
+```
+
+Tu dois voir `RestartPreventExitStatus=5` et `SuccessExitStatus=0 2 4`.
 
 ---
 

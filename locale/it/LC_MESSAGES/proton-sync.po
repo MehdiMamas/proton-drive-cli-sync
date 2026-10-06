@@ -4159,3 +4159,43 @@ msgstr ""
 "Eseguilo una volta dopo l'aggiornamento da una versione precedente, poi "
 "riservalo a un controllo occasionale (es. una volta al mese), non all'uso "
 "quotidiano."
+
+#, python-brace-format
+msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."
+msgstr "Riepilogo: caricati {files_uploaded}, da caricare {files_would_upload}, non riusciti {files_failed}, scomparsi {files_vanished}, elenco non riuscito {folders_listing_failed}, illeggibili {folders_unreadable}, permesso negato {folders_permission_denied}, saltati dopo blocco {folders_stall_skipped}, nel cestino {items_trashed}, cestino non riuscito {trash_failed}, eliminazioni rifiutate {deletions_refused}, origini mancanti {sources_missing}, mapping {mappings_complete}/{mappings_total}."
+
+#, python-brace-format
+msgid "  ⚠  Could not write the last-run file: {e}"
+msgstr "  ⚠  Impossibile scrivere il file dell'ultima esecuzione: {e}"
+
+msgid "    ⚠ partial failure, markers kept"
+msgstr "    ⚠ fallimento parziale, marcatori conservati"
+
+msgid "⚠ completed with failures (code 5)"
+msgstr "⚠ completato con errori (codice 5)"
+
+#, python-brace-format
+msgid "=== Finished with failures (code 5) — log: {p} ==="
+msgstr "=== Terminato con errori (codice 5) — registro: {p} ==="
+
+msgid "Sync finished with failures (code 5)."
+msgstr "Sincronizzazione terminata con errori (codice 5)."
+
+msgid "Reset finished with failures (code 5)"
+msgstr "Reimpostazione terminata con errori (codice 5)"
+
+msgid "Priming finished with failures (code 5)"
+msgstr "Preparazione terminata con errori (codice 5)"
+
+msgid "Finished with failures (code 5)."
+msgstr "Terminato con errori (codice 5)."
+
+msgid "Scheduled service updated so a failed pass is not restarted."
+msgstr "Servizio pianificato aggiornato così un passaggio non riuscito non viene riavviato."
+
+#, python-brace-format
+msgid "Scheduled service update failed: {e}"
+msgstr "Aggiornamento del servizio pianificato non riuscito: {e}"
+
+msgid "Scheduled service update failed."
+msgstr "Aggiornamento del servizio pianificato non riuscito."

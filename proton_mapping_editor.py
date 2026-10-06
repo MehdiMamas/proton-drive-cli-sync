@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.25.5"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.26.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -1035,6 +1035,146 @@ def mapping_remote_path(dest_parent, source):
     return dest + "/" + os.path.basename(src)
 
 
+# Compteurs d'échec du JSON [run-result]. Un résumé n'est une ligne d'erreur
+# que si l'un d'eux est non nul. Même liste que RunStats._FAILURES.
+# --- editor output filter (no Tk) ---
+_EDITOR_STATUS_PREFIXES = ("===", "▶", "⏸", "✓", "✗", "❌", "⚠", "🔑", "🌱", "⟳",
+                           "♻", "🗑", "⛔", "📂", "==", "Terminé", "Done", "Erreur",
+                           "Error", "Cache", "Global", "▶ Mapping", "  ↪")
+
+_EDITOR_FAILURE_COUNTERS = (
+    "files_failed",
+    "folders_listing_failed",
+    "folders_unreadable",
+    "folders_permission_denied",
+    "folders_stall_skipped",
+    "trash_failed",
+    "deletions_refused",
+    "sources_missing",
+)
+
+
+def line_is_status(stripped):
+    """Ligne d'orchestration affichée dans la vue par défaut.
+
+    Les mots « error » / « erreur » ne sont pas « failed » : le résumé du
+    moteur contient « failed » et ne doit pas passer pour une ligne de statut."""
+    if stripped.startswith(_EDITOR_STATUS_PREFIXES):
+        return True
+    low = stripped.lower()
+    return ("mapping " in low and "/" in stripped and "=>" in stripped) \
+        or "error" in low or "erreur" in low or "❌" in stripped
+
+
+def line_is_error(stripped):
+    """Ligne d'erreur pour « ❗ Erreurs seules ».
+
+    Les glyphes ❌ ⛔ ⚠ marquent toujours une erreur, où qu'ils soient (ils ne
+    figurent jamais dans un nom de fichier légitime). Les mots-clés (error /
+    erreur / échec / failed) ne sont cherchés que dans le préfixe — avant le
+    premier « / » — pour ne pas attraper un fichier dont le nom les contient."""
+    if not stripped:
+        return False
+    if any(g in stripped for g in ("❌", "⛔", "⚠")):
+        return True
+    head = stripped.split("/", 1)[0].lower()
+    return ("erreur" in head or "error" in head
+            or "échec" in head or "echec" in head or "failed" in head)
+
+
+def _run_result_has_failures(line):
+    """True si le JSON [run-result] a au moins un compteur d'échec non nul."""
+    raw = line.strip()
+    prefix = "[run-result] "
+    if not raw.startswith(prefix):
+        return False
+    try:
+        payload = json.loads(raw[len(prefix):])
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    for name in _EDITOR_FAILURE_COUNTERS:
+        try:
+            if int(payload.get(name) or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _hold_for_summary(line, verbose, errors_only):
+    """True si la ligne doit attendre la suivante avant d'être affichée.
+
+    Le résumé est la ligne juste avant [run-result]. On ne retient pas une
+    ligne de statut ni une erreur à glyphe : le balayage reste immédiat.
+    « Erreurs seules » prime sur « Détaillé » : les deux cochées ensemble
+    retiennent le résumé comme « Erreurs seules » seul."""
+    if verbose and not errors_only:
+        return False
+    stripped = line.strip()
+    if not stripped or stripped.startswith("[run-result]"):
+        return False
+    if any(g in stripped for g in ("❌", "⛔", "⚠")):
+        return False
+    if not errors_only and line_is_status(stripped):
+        return False
+    return True
+
+
+def _ordinary_visible(line, verbose, errors_only):
+    """Filtre historique, sans le cas particulier du résumé.
+
+    « Erreurs seules » prime sur « Détaillé ». « Détaillé » seul est le flux
+    brut, lignes vides comprises, moins [run-result]."""
+    stripped = line.strip()
+    if stripped.startswith("[run-result]"):
+        return False
+    if errors_only:
+        return line_is_error(stripped)
+    if verbose:
+        return True
+    if not stripped:
+        return False
+    return line_is_status(stripped)
+
+
+def editor_output_step(pending, line, verbose, errors_only):
+    """Une ligne du moteur. Retourne (ligne retenue, lignes à afficher).
+
+    [run-result] n'est jamais affiché. La ligne retenue d'avant (le résumé)
+    l'est dans la vue par défaut et en erreurs seules seulement si un compteur
+    d'échec est non nul."""
+    if line.strip().startswith("[run-result]"):
+        shown = []
+        if pending is not None and _run_result_has_failures(line):
+            shown.append(pending)
+        elif pending is not None and verbose and not errors_only:
+            shown.append(pending)
+        return None, shown
+    shown = []
+    if pending is not None and _ordinary_visible(pending, verbose, errors_only):
+        shown.append(pending)
+    if _hold_for_summary(line, verbose, errors_only):
+        return line, shown
+    if _ordinary_visible(line, verbose, errors_only):
+        shown.append(line)
+    return None, shown
+
+
+def visible_editor_lines(lines, verbose=False, errors_only=False):
+    """Lignes que l'éditeur affiche pour ce flux. [run-result] en est absent."""
+    pending = None
+    shown = []
+    for line in lines:
+        pending, step = editor_output_step(pending, line, verbose, errors_only)
+        shown.extend(step)
+    if pending is not None and _ordinary_visible(pending, verbose, errors_only):
+        shown.append(pending)
+    return shown
+# --- end editor output filter ---
+
+
 class MappingEditor(tk.Tk):
     def __init__(self, config_path=None):
         super().__init__()
@@ -1128,6 +1268,10 @@ class MappingEditor(tk.Tk):
         # (ni synchro, ni connexion, ni amorçage) — mais l'édition des mappings
         # reste possible, donc on informe sans jamais fermer l'application.
         self.after(400, self._check_cli_present_at_startup)
+        # Ancienne unité sans RestartPreventExitStatus=5 : le contrôle est
+        # différé comme la sonde CLI. Pas de lecture du fichier ni de
+        # systemctl dans __init__.
+        self.after(400, self._refresh_legacy_service_unit)
         self._start_cli_version_probe()
 
         # Détection automatique de l'état d'authentification Proton, en arrière-plan
@@ -1255,6 +1399,45 @@ class MappingEditor(tk.Tk):
         except Exception:
             # Un avis ne doit jamais empêcher l'application de démarrer.
             pass
+
+    def _refresh_legacy_service_unit(self):
+        """Réécrit l'unité planifiée si un passage en échec serait encore
+        relancé. Lecture et systemctl dans un fil démon ; le statut revient
+        par _ui. Silence s'il n'y a pas d'unité, ou si la ligne est déjà là."""
+        if not _HAS_SCHEDULE:
+            return
+
+        def work():
+            try:
+                needs = schedule_manager.service_missing_restart_prevent_5()
+            except Exception:
+                return
+            if not needs:
+                return
+            try:
+                ok, message = schedule_manager.refresh_units()
+            except Exception as exc:
+                ok, message = False, str(exc)
+
+            def apply():
+                self._report_legacy_unit_refresh(ok, message)
+
+            self._ui(apply)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _report_legacy_unit_refresh(self, ok, message):
+        """Annonce, sur le fil principal, le résultat de la réécriture."""
+        if ok:
+            self.status.set(_(
+                "Scheduled service updated so a failed pass is not restarted."))
+            return
+        detail = (message or "").strip().replace("\n", " ")
+        if detail and len(detail) <= 160:
+            self.status.set(
+                _("Scheduled service update failed: {e}").format(e=detail))
+        else:
+            self.status.set(_("Scheduled service update failed."))
 
     def _start_cli_version_probe(self):
         """Lance la sonde de version du CLI dans un FIL SÉPARÉ, puis scrute le
@@ -4520,33 +4703,44 @@ class MappingEditor(tk.Tk):
         self.after(80, self._pump_output)
 
     # ---------- Affichage épuré (un chemin par dossier) vs brut (« Détaillé ») ----------
-    _STATUS_PREFIXES = ("===", "▶", "⏸", "✓", "✗", "❌", "⚠", "🔑", "🌱", "⟳",
-                        "♻", "🗑", "⛔", "📂", "==", "Terminé", "Done", "Erreur",
-                        "Error", "Cache", "Global", "▶ Mapping", "  ↪")
+    _STATUS_PREFIXES = _EDITOR_STATUS_PREFIXES
 
     def _is_status_line(self, stripped):
         """Ligne d'orchestration / de résumé / d'erreur : toujours affichée, même en
         mode épuré (pour ne jamais perdre le fil ni masquer une erreur)."""
-        if stripped.startswith(self._STATUS_PREFIXES):
-            return True
-        low = stripped.lower()
-        return ("mapping " in low and "/" in stripped and "=>" in stripped) \
-            or "error" in low or "erreur" in low or "❌" in stripped
+        return line_is_status(stripped)
 
     def _is_error_line(self, stripped):
-        """Ligne d'erreur ou d'avertissement (pour le filtre « ❗ Erreurs seules »).
-        Les glyphes ❌ ⛔ ⚠ marquent toujours une erreur, où qu'ils soient (ils ne
-        figurent jamais dans un nom de fichier légitime). Les MOTS-CLÉS (error /
-        erreur / échec / failed), eux, ne sont cherchés que dans le PRÉFIXE de la
-        ligne — avant le premier « / » — pour NE PAS attraper un fichier ou dossier
-        légitime dont le NOM contient ces mots (ex. « 📂 …/Rapport_erreur »)."""
-        if not stripped:
-            return False
-        if any(g in stripped for g in ("❌", "⛔", "⚠")):
-            return True
-        head = stripped.split("/", 1)[0].lower()   # préfixe/label, avant le chemin
-        return ("erreur" in head or "error" in head
-                or "échec" in head or "echec" in head or "failed" in head)
+        """Ligne d'erreur ou d'avertissement (pour le filtre « ❗ Erreurs seules »)."""
+        return line_is_error(stripped)
+
+    def _render_line(self, line):
+        """Décide de l'affichage d'UNE ligne selon les filtres courants.
+
+        [run-result] n'est jamais affiché (il reste dans le journal). Le résumé,
+        ligne juste avant, est retenu jusqu'à ce JSON : la vue par défaut et
+        « erreurs seules » ne le montrent que si un compteur d'échec est non nul.
+        Le compteur de dossiers est mis à jour avant tout filtre."""
+        if line.lstrip().startswith("📂"):
+            self._folders_shown = getattr(self, "_folders_shown", 0) + 1
+        pending, shown = editor_output_step(
+            getattr(self, "_output_pending", None), line,
+            self._verbose_flag, self._errors_only_flag)
+        self._output_pending = pending
+        for item in shown:
+            self._append_output(item if item.endswith("\n") else item + "\n")
+
+    def _flush_pending_output(self):
+        """Affiche la ligne retenue en fin de flux, avec le filtre ordinaire.
+
+        Le résumé suivi de [run-result] a déjà été tranché. Ce qui reste est une
+        ligne ordinaire (le flux s'est arrêté dessus)."""
+        pending = getattr(self, "_output_pending", None)
+        self._output_pending = None
+        if pending is None:
+            return
+        if _ordinary_visible(pending, self._verbose_flag, self._errors_only_flag):
+            self._append_output(pending if pending.endswith("\n") else pending + "\n")
 
     def _feed_output(self, line):
         """Affiche une ligne du moteur selon le filtre courant, et la bufferise via
@@ -4608,36 +4802,6 @@ class MappingEditor(tk.Tk):
         except Exception:
             pass
 
-    def _render_line(self, line):
-        """Décide de l'affichage d'UNE ligne selon les filtres courants :
-          1) « ❗ Erreurs seules » (prioritaire) -> uniquement les lignes d'erreur ;
-          2) « Détaillé » -> brut ;
-          3) sinon -> épuré : lignes de statut/progression (dont « 📂 <dossier> »
-             émises par le moteur, un dossier par ligne dans l'ordre du balayage) +
-             lignes d'erreur. Le détail (fichiers, JSON, uploads…) est masqué. Le
-             GUI ne DEVINE plus le dossier — le moteur l'annonce."""
-        # Compteur de dossiers balayés (alimente « Rien à mettre à jour » si zéro
-        # dossier n'a été vu). Compté EN PREMIER, avant tout return anticipé —
-        # sinon le mode « Erreurs seules » (qui sort tout de suite) laissait le
-        # compteur à 0 et affichait « Rien à mettre à jour » alors que des dossiers
-        # avaient bel et bien été envoyés.
-        if line.lstrip().startswith("📂"):
-            self._folders_shown = getattr(self, "_folders_shown", 0) + 1
-        if self._errors_only_flag:
-            stripped = line.strip()
-            if self._is_error_line(stripped):
-                self._append_output(line if line.endswith("\n") else line + "\n")
-            return
-        if self._verbose_flag:
-            self._append_output(line)
-            return
-        stripped = line.strip()
-        if not stripped:
-            return
-        if self._is_status_line(stripped):
-            self._append_output(line if line.endswith("\n") else line + "\n")
-        # sinon : ligne de détail -> masquée en mode épuré
-
     def _reapply_output_filter(self):
         """Re-filtre l'affichage quand on (dé)coche « Erreurs seules » : on efface
         la zone et on rejoue le log disque du passage courant (source complète) à
@@ -4649,6 +4813,7 @@ class MappingEditor(tk.Tk):
         self.output.delete("1.0", "end")
         self.output.configure(state="disabled")
         self._last_shown_folder = None
+        self._output_pending = None
         if not path or not os.path.exists(path):
             return
         try:
@@ -4657,6 +4822,7 @@ class MappingEditor(tk.Tk):
                     self._render_line(line)
         except OSError:
             pass
+        self._flush_pending_output()
 
     def on_run_sync(self):
         if not self.config_path:
@@ -4769,6 +4935,7 @@ class MappingEditor(tk.Tk):
                 )
                 self._last_shown_folder = None
                 self._folders_shown = 0
+                self._output_pending = None
                 self._auth_failed_seen = False
                 self._prime_failures_seen = False
                 for line in self.sync_process.stdout:
@@ -4786,15 +4953,22 @@ class MappingEditor(tk.Tk):
                     if not line.startswith("@@PROGRESS"):
                         logf.write(line)         # log disque : sortie complète
                         logf.flush()
+                self._flush_pending_output()
                 self.sync_process.wait()
             code = self.sync_process.returncode
             # Mode épuré : si aucun dossier n'a été affiché, l'écran serait vide ->
             # message explicite pour ne pas laisser croire à un plantage.
             if not self._verbose_flag and getattr(self, "_folders_shown", 0) == 0 and code == 0:
                 self._append_output(_("  ✓ Nothing to update — everything is already in sync.") + "\n")
-            self._append_output("\n" + _("=== Finished (code {c}) — log: {p} ===").format(c=code, p=log_path) + "\n\n")
+            if code == 5:
+                # Terminé, mais des envois, listings ou dossiers ont échoué.
+                # Avertissement : ni un plantage, ni une réussite.
+                self._append_output("\n" + _("=== Finished with failures (code 5) — log: {p} ===").format(p=log_path) + "\n\n")
+                self._ui(lambda: self.status.set(_("Sync finished with failures (code 5).")))
+            else:
+                self._append_output("\n" + _("=== Finished (code {c}) — log: {p} ===").format(c=code, p=log_path) + "\n\n")
+                self._ui(lambda: self.status.set(_("Sync finished (code {c}).").format(c=code)))
             self._ui(self._hide_progress)   # filet : masquer la barre si un « done » a été manqué
-            self._ui(lambda: self.status.set(_("Sync finished (code {c}).").format(c=code)))
             # Un vrai passage fait autorité sur l'état d'auth : s'il a rapporté un
             # échec d'authentification, l'indicateur doit le refléter (plus fiable
             # que la sonde de démarrage, qui peut donner un faux positif si le CLI
@@ -5243,6 +5417,7 @@ class MappingEditor(tk.Tk):
             self._append_output(started_txt + "\n\n")
             self._last_shown_folder = None
             self._folders_shown = 0
+            self._output_pending = None
             self._auth_failed_seen = False
             self._prime_failures_seen = False
             # Dossiers locaux illisibles rencontrés pendant CE passage. Leur
@@ -5263,7 +5438,7 @@ class MappingEditor(tk.Tk):
                               "account.")))
                     if "[auth-failed]" in line:
                         self._auth_failed_seen = True
-                    # Le moteur sort en code 0 même quand des fichiers ont échoué :
+                    # Le moteur sort en code 5 quand le passage se termine avec des échecs :
                     # c'est VOULU (il journalise et poursuit, jamais d'interruption
                     # d'un passage sans écran). Mais annoncer « code 0 » au GUI se
                     # lit comme une réussite — constaté le 1er septembre : 4 archives
@@ -5289,10 +5464,15 @@ class MappingEditor(tk.Tk):
                         logf.write(line); logf.flush()   # log disque : sortie complète
                     # Extraire un chemin pour la barre de progression (dossier courant).
                     self._prime_current = self._extract_path(line) or self._prime_current
+                self._flush_pending_output()
                 self.sync_process.wait()
             code = self.sync_process.returncode
-            _echecs = getattr(self, "_prime_failures_seen", False)
-            if is_reset:
+            _echecs = getattr(self, "_prime_failures_seen", False) or code == 5
+            if code == 5:
+                _banner = (_("Reset finished with failures (code 5)") if is_reset
+                           else _("Priming finished with failures (code 5)"))
+                self._append_output("\n=== " + _banner + " ===\n")
+            elif is_reset:
                 self._append_output("\n=== " + (
                     _("Reset finished (code {c}) — but some files failed; those "
                       "folders will be retried").format(c=code) if _echecs
@@ -5333,6 +5513,9 @@ class MappingEditor(tk.Tk):
                     self._ui(lambda: self.status.set(_("Reset finished (code {c}).").format(c=code)))
                 else:
                     self._ui(lambda: self.status.set(_("Priming finished (code {c}).").format(c=code)))
+            if code == 5:
+                # Écrase le statut « prêt » : un code 5 n'est pas une réussite.
+                self._ui(lambda: self.status.set(_("Finished with failures (code 5).")))
         except Exception as e:
             if is_reset:
                 self._append_output("\n=== " + _("Reset error: {e}").format(e=e) + " ===\n")

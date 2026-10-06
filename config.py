@@ -33,7 +33,7 @@ from a deployment):
     except ImportError:
         appconfig = None   # callers fall back to their own built-in defaults
 """
-__version__ = "1.6.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.7.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -642,6 +642,10 @@ STATUS_FILE = os.path.join(DATA_DIR, "status.json")
 # RÉÉCRIT À CHAQUE PASSAGE COMPLET, y compris vide quand tout va bien : c'est ce
 # qui empêche l'état de rester figé sur une panne résolue depuis.
 HEALTH_FILE = os.path.join(DATA_DIR, "health.json")
+# Dernier passage réel (complet ou --subpath), écrit par le moteur pour les
+# codes 0, 2, 4 et 5. Jamais en dry-run, jamais pour le code 1 (un autre
+# passage possède l'état). Les deux clés last_full / last_subpath coexistent.
+LAST_RUN_FILE = os.path.join(DATA_DIR, "last-run.json")
 
 _LEGACY_CACHE_DIR = os.path.expanduser("~/.proton_sync_cache")
 _LEGACY_BASE_DIR = os.path.expanduser("~/.proton_sync")

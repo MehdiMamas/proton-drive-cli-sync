@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (par défaut : ~/Logiciels/Proton-drive/proton-drive)
 """
-__version__ = "1.11.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.12.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -77,6 +77,7 @@ if _HAS_CONFIG:
     FAILURES_LOG = appconfig.FAILURES_LOG
     RENAMED_LOG = appconfig.RENAMED_LOG
     HEALTH_FILE = appconfig.HEALTH_FILE
+    LAST_RUN_FILE = appconfig.LAST_RUN_FILE
 else:
     # Verrou pour empêcher deux exécutions simultanées sous le même compte
     # Linux. Placé sous le home plutôt que /tmp/ pour que chaque utilisateur
@@ -94,6 +95,61 @@ else:
     RENAMED_LOG = os.path.expanduser("~/.proton_sync/renamed-extensions.log")
     # État de santé publié en fin de passage complet (cf. config.py).
     HEALTH_FILE = os.path.expanduser("~/.proton_sync/health.json")
+    LAST_RUN_FILE = os.path.expanduser("~/.proton_sync/last-run.json")
+
+
+# Compteurs du passage en cours. Même durée de vie que _UNREADABLE : un
+# processus neuf à chaque lancement. main() rappelle reset() au début, au cas
+# où le module serait importé et relancé. files_uploaded ne compte que les
+# envois réellement partis ; le dry-run alimente files_would_upload.
+class RunStats:
+    COUNTERS = (
+        "files_uploaded",
+        "files_would_upload",
+        "files_failed",
+        "files_vanished",
+        "folders_listing_failed",
+        "folders_unreadable",
+        "folders_permission_denied",
+        "folders_stall_skipped",
+        "items_trashed",
+        "trash_failed",
+        "deletions_refused",
+        "sources_missing",
+        "mappings_total",
+        "mappings_complete",
+    )
+    # Un de ces compteurs > 0 => le passage est allé au bout, mais incomplet.
+    _FAILURES = (
+        "files_failed",
+        "folders_listing_failed",
+        "folders_unreadable",
+        "folders_permission_denied",
+        "folders_stall_skipped",
+        "trash_failed",
+        "deletions_refused",
+        "sources_missing",
+    )
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        for name in self.COUNTERS:
+            setattr(self, name, 0)
+        self.started_at = None
+
+    def add(self, name, n=1):
+        setattr(self, name, getattr(self, name) + int(n))
+
+    def to_dict(self):
+        return {name: int(getattr(self, name)) for name in self.COUNTERS}
+
+    def has_failures(self):
+        return any(getattr(self, name) > 0 for name in self._FAILURES)
+
+
+_RUN = RunStats()
 
 
 def log_rename(src_path, dst_path):
@@ -1311,6 +1367,38 @@ def remote_exists(path):
     return data is not None
 
 
+def _missing_node_error(stderr):
+    """True si le CLI dit que le chemin n'existe pas.
+
+    Même idée que _already_exists_error : on matche les formulations connues,
+    pas une seule chaîne. « not found » couvre le harnais et « Node not found »."""
+    s = (stderr or "").lower()
+    return any(h in s for h in (
+        "not found",
+        "introuvable",
+        "n'existe pas",
+        "does not exist",
+    ))
+
+
+def _dry_run_folder_is_absent(remote_items, remote_hint, remote_folder):
+    """Un dossier qui n'est pas encore sur Drive n'est pas un échec de dry-run.
+
+    Rien n'est créé en dry-run, donc lister un dossier neuf échoue. Ce n'est
+    pas un listage raté : on le traite comme vide pour que les fichiers qui
+    seraient envoyés soient quand même annoncés.
+
+    remote_hint False : le listing du parent vient de dire que le nom est
+    absent, sans appel de plus. Sinon on ne conclut « absent » que si l'erreur
+    est un chemin manquant ET que filesystem info le confirme. Une autre
+    erreur, ou un dossier qui existe, reste un échec de listage."""
+    if remote_hint is False:
+        return True
+    if not _missing_node_error(getattr(remote_items, "error", "")):
+        return False
+    return not remote_exists(remote_folder)
+
+
 def _already_exists_error(stderr):
     """True si l'erreur du CLI signale que la cible existe déjà — quelle que soit
     la langue. Un `create-folder` sur un dossier déjà présent n'est PAS une vraie
@@ -1406,6 +1494,9 @@ def ensure_remote_path(path, known_absent=False):
                 # ICI (un seul message) — inutile de tenter les uploads ni de
                 # descendre : le sous-arbre entier est non inscriptible.
                 if _is_permission_error(res.stderr):
+                    # Un refus ici abandonne tout le sous-arbre : c'est un échec
+                    # du passage, pas un dossier vide.
+                    _RUN.add("folders_permission_denied")
                     print(_("    ⛔ No write permission on {p} — ask the owner "
                             "for access; skipping. ({e})").format(
                                 p=current, e=res.stderr.strip()))
@@ -1734,6 +1825,8 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
     if dry_run:
         for p in local_paths:
             print(_("    [DRY-RUN] would upload: {p}").format(p=p))
+        # Pas un envoi : files_uploaded reste réservé aux transferts réels.
+        _RUN.add("files_would_upload", len(local_paths))
         return True
     # Chemins locaux : NOMS seuls + répertoire de travail (cf. _cli_local_args).
     # Les métacaractères du nom restent échappés ; c'est le fait de ne plus
@@ -1758,6 +1851,7 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
                 "It will be tried again next pass.").format(
                     p=remote_parent, n=max_kills))
         _stall_reset(remote_parent)
+        _RUN.add("folders_stall_skipped")
         return False
     _emit_progress(state="start", files=len(local_paths), bytes=_sum_sizes(local_paths))
     try:
@@ -1766,9 +1860,13 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
         _emit_progress(state="done")
     if getattr(res, "stalled", False):
         _stall_record(remote_parent)
+        # Le lot a été coupé : on ne sait pas ce qui est monté. On compte les
+        # fichiers comme non aboutis pour que le passage ne sorte pas en 0.
+        _RUN.add("files_failed", len(local_paths))
         return False
     if res.returncode == 0:
         _stall_reset(remote_parent)
+        _RUN.add("files_uploaded", len(local_paths))
         print(_("    ✅ {n} file(s) sent to {p}").format(n=len(local_paths), p=remote_parent))
         if verbose and res.stdout.strip():
             print("      " + res.stdout.strip().replace("\n", "\n      "))
@@ -1793,6 +1891,7 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
         # suivant ; en planifié, au prochain passage.
         print(_("    ⚠  Could not re-read {p} after the batch — nothing re-sent, "
                 "this folder will be retried later.").format(p=remote_parent))
+        _RUN.add("folders_listing_failed")
         return False
     failures = []
     recovered = 0
@@ -1804,17 +1903,20 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
         # rien au journal, le dossier pourra se mettre en cache).
         if not os.path.exists(p):
             vanished += 1
+            _RUN.add("files_vanished")
             if verbose:
                 print(_("      – vanished before upload (deleted meanwhile), skipped: {p}").format(p=p))
             continue
         info = remote_after.get(os.path.basename(p))
         if not needs_upload(p, info, verbose=False):
+            _RUN.add("files_uploaded")
             continue   # déjà monté correctement par le lot
         ok, why = _upload_one(p, remote_parent, conflict_mode=conflict_mode)
         if not ok and _is_vanished_error(why):
             # Disparu PENDANT l'upload (course avec une suppression concurrente) :
             # bénin aussi. À NE PAS confondre avec un fichier présent mais corrompu.
             vanished += 1
+            _RUN.add("files_vanished")
             if verbose:
                 print(_("      – vanished during upload (deleted meanwhile), skipped: {p}").format(p=p))
             continue
@@ -1828,6 +1930,7 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
                                     conflict_mode=conflict_mode)
             if ok2:
                 no_thumb += 1
+                _RUN.add("files_uploaded")
                 print(_("      ✓ uploaded WITHOUT thumbnail (no Proton preview): {p}").format(p=p))
                 # Trace persistante de la raison (le journal doit la garder).
                 log_failure(p, remote_parent, why, kind="NO-THUMB")
@@ -1836,10 +1939,12 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
             ok = False
         if ok:
             recovered += 1
+            _RUN.add("files_uploaded")
             if verbose:
                 print(_("      ✓ recovered on individual retry: {p}").format(p=p))
         else:
             failures.append(p)
+            _RUN.add("files_failed")
             print(_("    ❌ upload failed: {p}").format(p=p))
             print(_("    ❌   reason: {e}").format(e=why or _("(no message from the CLI)")))
             log_failure(p, remote_parent, why)
@@ -1852,10 +1957,9 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
     if vanished:
         print(_("    – {n} file(s) vanished (deleted meanwhile) — skipped, not a failure.").format(n=vanished))
     if failures:
-        # Tag STABLE, hors traduction : le GUI le détecte pour dire, à la fin
-        # d'un amorçage, que des fichiers ont échoué — le moteur sortant en
-        # code 0 par conception, « terminé (code 0) » se lisait comme une
-        # réussite alors que le dossier n'avait pas été mis en cache.
+        # Tag STABLE, hors traduction : le GUI le détecte pendant le passage.
+        # Le code de sortie 5 dit la même chose à la fin du processus ; le tag
+        # reste, pour qu'un amorçage encore à l'écran nomme les fichiers.
         print("[upload-failed] " + _(
             "    ❌ {n} file(s) still failing (see the failures log: {log}).").format(
             n=len(failures), log=FAILURES_LOG))
@@ -1897,8 +2001,10 @@ def remote_trash(remote_path, permanent=False, dry_run=False):
     res = run_cli(["filesystem", "trash", remote_path])
     if res.returncode != 0:
         print(_("    ❌ trash of {p} failed: {e}").format(p=remote_path, e=res.stderr.strip()))
+        _RUN.add("trash_failed")
         return False
     print(f"    🗑  " + _("sent to trash") + f" : {remote_path}")
+    _RUN.add("items_trashed")
     return True
 
 
@@ -2048,6 +2154,7 @@ def _note_unreadable(local_dir, err):
     print("     " + _("Could not read this folder: {e}").format(e=err))
     if local_dir not in _UNREADABLE:
         _UNREADABLE.append(local_dir)
+        _RUN.add("folders_unreadable")
 
 
 def _forget_completeness(cache, local_dir, dry_run):
@@ -2311,6 +2418,12 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
 
     if remote_items is None:
         remote_items = get_remote_listing(remote_folder, verbose=verbose)
+    if not remote_items.ok and dry_run and _dry_run_folder_is_absent(
+            remote_items, remote_hint, remote_folder):
+        # Pas encore sur Drive : le dry-run ne crée rien, le listage échoue
+        # forcément. Ce n'est pas un échec. Un listing vide laisse le parcours
+        # annoncer ce qui serait envoyé.
+        remote_items = RemoteListing(ok=True)
     if not remote_items.ok:
         # Listing en échec : le dossier n'est PAS vide, on ne sait simplement pas
         # ce qu'il contient. Envoyer reviendrait à renvoyer tout le dossier ;
@@ -2319,6 +2432,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
         # s'arrête jamais : il journalise et poursuit avec les autres dossiers.
         print(_("    ⚠  Could not list {p} — folder skipped this pass "
                 "(nothing sent, nothing deleted).").format(p=remote_folder))
+        _RUN.add("folders_listing_failed")
         return False
 
     to_upload = []
@@ -2490,26 +2604,31 @@ def sync_file(local_file, remote_parent, dry_run=False, verbose=False, verify_ha
     if exclusions and exclusions.is_excluded(os.path.basename(local_file)):
         if verbose:
             print(_("    🚫 excluded (file): {p}").format(p=local_file))
-        return
+        return True
     # Listing d'abord : le dossier de destination existe presque toujours, et
     # le vérifier niveau par niveau à chaque passage coûtait un appel par niveau.
     # S'il manque, le listing échoue, et c'est alors seulement qu'on le crée.
     remote_items = get_remote_listing(remote_parent, verbose=verbose)
     if not remote_items.ok and not dry_run:
         if not ensure_remote_path(remote_parent):
-            return   # destination non inscriptible : rien envoyé (message déjà émis)
+            return False   # destination non inscriptible : rien envoyé (message déjà émis)
         remote_items = get_remote_listing(remote_parent, verbose=verbose)
+    if not remote_items.ok and dry_run and _dry_run_folder_is_absent(
+            remote_items, None, remote_parent):
+        remote_items = RemoteListing(ok=True)
     if not remote_items.ok:
         # Sans listing fiable, le fichier paraîtrait absent et serait renvoyé à
         # chaque passage. On passe notre tour ; le prochain passage tranchera.
+        _RUN.add("folders_listing_failed")
         print(_("    ⚠  Could not list {p} — file skipped this pass.").format(p=remote_parent))
-        return
+        return False
     info = remote_items.get(os.path.basename(local_file))
     if needs_upload(local_file, info, verbose=verbose, verify_hash=verify_hash):
-        upload_batch([local_file], remote_parent, dry_run=dry_run, verbose=verbose,
-                     conflict_mode=conflict_mode)
-    elif verbose:
+        return upload_batch([local_file], remote_parent, dry_run=dry_run, verbose=verbose,
+                            conflict_mode=conflict_mode)
+    if verbose:
         print(_("    ⏭  unchanged: {p}").format(p=local_file))
+    return True
 
 
 def _remote_parent_for_subpath(mapping, subpath):
@@ -2612,7 +2731,7 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
     """
     if not os.path.isdir(subpath):
         print(_("  ❌ Subpath not found or not a folder: {p}").format(p=subpath))
-        return
+        return None
 
     # Garde-fou d'exclusion sur le SOUS-CHEMIN. sync_folder ne teste les
     # exclusions que sur les ENFANTS d'un dossier parcouru ; un sous-chemin ciblé
@@ -2625,7 +2744,7 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
     seg = _first_excluded_segment(mapping, subpath, exclusions)
     if seg is not None:
         print("  🚫 [subpath-excluded] " + _("subpath excluded (“{s}” filtered), skipped: {p}").format(s=seg, p=subpath))
-        return
+        return None
 
     # Garde-fou temps réel : le temps réel synchronise le QUOTIDIEN (changements
     # ciblés) mais ne BÂTIT jamais l'index d'un gros sous-arbre encore inconnu —
@@ -2685,8 +2804,12 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
 
     remote_parent, raison = _remote_parent_for_subpath(mapping, subpath)
     if remote_parent is None:
+        # Le sous-chemin ne se traduit pas en destination : rien n'a été tenté,
+        # mais ce n'est pas un « introuvable » bénin. On le compte comme un
+        # dossier qu'on n'a pas pu lire, pour que le passage sorte en code 5.
         print(f"  ❌ {raison}")
-        return
+        _RUN.add("folders_listing_failed")
+        return "failed"
 
     # Double interrupteur : delete (du passage) ET allow_delete (du mapping).
     mapping_delete = delete and bool(mapping.get("allow_delete"))
@@ -2707,13 +2830,101 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
             print(_("  🗑  Deletion propagation ACTIVE ({l}) for this subpath").format(l=label))
 
     print(_("  ↪ subpath: {s}  =>  {d}").format(s=subpath, d=remote_parent))
-    sync_folder(subpath, remote_parent, dry_run=dry_run, verbose=verbose,
-                verify_hash=verify_hash,
-                conflict_mode=mapping.get("conflict_mode", "replace"),
-                cache=cache, ignore_cache=ignore_cache,
-                exclusions=exclusions, delete=mapping_delete, delete_mode=mode,
-                realtime=True, rename_ext=rename_ext,
-                collision_suffix=collision_suffix)
+    complete = sync_folder(subpath, remote_parent, dry_run=dry_run, verbose=verbose,
+                           verify_hash=verify_hash,
+                           conflict_mode=mapping.get("conflict_mode", "replace"),
+                           cache=cache, ignore_cache=ignore_cache,
+                           exclusions=exclusions, delete=mapping_delete, delete_mode=mode,
+                           realtime=True, rename_ext=rename_ext,
+                           collision_suffix=collision_suffix)
+    return "ok" if complete else "failed"
+
+
+def _iso_offset_now():
+    """Horodatage ISO 8601 avec décalage (ex. 2026-10-03T05:01:00-05:00)."""
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _pass_mode(args):
+    """Libellé stable du type de passage, pour [run-result] et last-run.json."""
+    if getattr(args, "subpath", None):
+        return "subpath"
+    if getattr(args, "reset_source", None):
+        return "reset"
+    if getattr(args, "only_source", None):
+        return "only-source"
+    return "full"
+
+
+def _summary_line():
+    """Une ligne traduite, juste avant le JSON machine [run-result]."""
+    return _("Summary: uploaded {files_uploaded}, would upload {files_would_upload}, "
+             "failed {files_failed}, vanished {files_vanished}, "
+             "listing failed {folders_listing_failed}, unreadable {folders_unreadable}, "
+             "permission denied {folders_permission_denied}, "
+             "stall-skipped {folders_stall_skipped}, trashed {items_trashed}, "
+             "trash failed {trash_failed}, deletions refused {deletions_refused}, "
+             "sources missing {sources_missing}, "
+             "mappings {mappings_complete}/{mappings_total}.").format(**_RUN.to_dict())
+
+
+def _emit_run_result(exit_code, mode):
+    """Dernière ligne du passage. Non traduite : le consommateur la parse."""
+    payload = {"exit": exit_code, "mode": mode}
+    payload.update(_RUN.to_dict())
+    print("[run-result] " + json.dumps(payload, ensure_ascii=False))
+
+
+def _write_last_run(exit_code, mode):
+    """Écrit last-run.json sans effacer l'autre clé (last_full / last_subpath).
+
+    Pas appelé pour le code 1 (un autre passage possède l'état) ni en dry-run.
+    Best-effort : un échec d'écriture ne change pas le code de sortie."""
+    record = {
+        "started_at": _RUN.started_at,
+        "finished_at": _iso_offset_now(),
+        "exit": exit_code,
+        "mode": mode,
+        "counters": _RUN.to_dict(),
+        "engine_version": __version__,
+        "cli_version": cli_version(),
+    }
+    key = "last_subpath" if mode == "subpath" else "last_full"
+    data = {}
+    try:
+        with open(LAST_RUN_FILE, "r", encoding="utf-8") as f:
+            previous = json.load(f)
+        if isinstance(previous, dict):
+            data = previous
+    except (OSError, ValueError):
+        data = {}
+    data[key] = record
+    try:
+        os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
+        tmp = LAST_RUN_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, LAST_RUN_FILE)
+    except OSError as e:
+        print(_("  ⚠  Could not write the last-run file: {e}").format(e=e))
+
+
+def _finish_pass(exit_code, mode, dry_run, completed):
+    """Termine un vrai passage.
+
+    « Done. » seulement si la boucle est allée au bout (codes 0 et 5) : le
+    parseur de journal de schedule_manager.py s'appuie sur ce mot.
+    last-run.json pour 0, 2, 4 et 5, jamais en dry-run. L'écriture a lieu
+    AVANT les lignes de fin : un échec d'écriture ne doit pas passer après
+    [run-result], qui reste toujours la dernière ligne."""
+    if not dry_run and exit_code in (0, 2, 4, 5):
+        _write_last_run(exit_code, mode)
+    if completed and exit_code in (0, 5):
+        print("\n" + _("Done."))
+    print(_summary_line())
+    _emit_run_result(exit_code, mode)
+    sys.exit(exit_code)
 
 
 def main():
@@ -2911,6 +3122,11 @@ def main():
         print(_("   (If you are sure no other instance is running, delete this file.)"))
         sys.exit(1)
 
+    # Horloge du passage : sert à last-run.json, y compris si l'auth échoue
+    # juste après. Pas avant le verrou : un code 1 ne publie rien.
+    _RUN.reset()
+    _RUN.started_at = _iso_offset_now()
+
     _cli = cli_path()
     if not (appconfig.cli_is_usable(_cli) if _HAS_CONFIG else os.path.isfile(_cli)):
         # Explication PARTAGÉE avec le GUI (config.cli_unusable_explanation) :
@@ -2955,7 +3171,7 @@ def main():
         print(_("    If the session is already open, look at the CLI detail"))
         print(_("    above before reconnecting: a temporary outage resolves"))
         print(_("    itself.)"))
-        sys.exit(2)
+        _finish_pass(2, _pass_mode(args), args.dry_run, completed=False)
 
     mappings, global_ex = load_config(args.config)
 
@@ -2999,7 +3215,7 @@ def main():
             print(_("   To proceed on the NEW account: run “Prime the cache” "
                     "(or reset the mappings). The destinations will be "
                     "(re)created on the new Drive."))
-            sys.exit(4)
+            _finish_pass(4, _pass_mode(args), args.dry_run, completed=False)
     elif current_account and not stamped_account:
         cache.set_account(current_account)
 
@@ -3165,6 +3381,7 @@ def main():
         if args.delete:
             print(_("   ⚠  Deletion propagation requested (--delete)"))
         eff_ex = mapping_exclusions(target, global_ex)
+        _RUN.mappings_total = 1
         result = sync_subpath(target, args.subpath, dry_run=args.dry_run,
                      verbose=args.verbose, verify_hash=args.verify_hash,
                      cache=cache, ignore_cache=args.ignore_cache, exclusions=eff_ex,
@@ -3174,10 +3391,15 @@ def main():
         if result == "cold":
             # Sous-dossier froid : rien n'a été traité, la planification prendra
             # le relais. Code 3 = signal dédié pour le consommateur (conserver le
-            # marqueur, journaliser, ne pas compter comme un échec).
-            sys.exit(3)
-        print("\n" + _("Done."))
-        return
+            # marqueur, journaliser, ne pas compter comme un échec). Il gagne
+            # sur le code 5 : rien n'a été tenté.
+            _finish_pass(3, "subpath", args.dry_run, completed=False)
+        if result == "ok" and not _RUN.has_failures():
+            _RUN.mappings_complete = 1
+        # « failed » sort en 5 même si aucun compteur n'a bougé. Introuvable
+        # et exclu renvoient None : ce n'est pas un échec.
+        exit_code = 5 if (result == "failed" or _RUN.has_failures()) else 0
+        _finish_pass(exit_code, "subpath", args.dry_run, completed=True)
     # ── Fin du mode temps réel ─────────────────────────────────────────────
 
     # ── Réinitialisation ciblée (--reset-source [+ --wipe-remote]) ──────────
@@ -3222,6 +3444,7 @@ def main():
     # réellement traité, publiée en une seule écriture à la fin.
     health = []
     _take_unreadable()   # repart d'une ardoise propre pour le 1er mapping
+    _RUN.mappings_total = len(mappings)
 
     for i, m in enumerate(mappings, 1):
         # En-tête par mapping : indique l'entrée en cours (source => destination).
@@ -3231,6 +3454,7 @@ def main():
         print(_("\n▶ Mapping {i}/{n} : {s}  =>  {d}").format(i=i, n=len(mappings), s=m["source"], d=m["dest_parent"]))
         if not os.path.exists(m["source"]):
             print(_("  ❌ Source not found, skipped: {s}").format(s=m["source"]))
+            _RUN.add("sources_missing")
             continue
         # Exclusions effectives pour ce mapping = globales + propres au mapping.
         eff_ex = mapping_exclusions(m, global_ex)
@@ -3244,13 +3468,17 @@ def main():
                                 ignore_cache=args.ignore_cache, exclusions=eff_ex,
                                 delete=args.delete, rename_ext=effective_rename_ext,
                                 collision_suffix=effective_collision_suffix)
+            if complete:
+                _RUN.add("mappings_complete")
             health.append((m["source"], bool(complete), _take_unreadable()))
         else:
-            sync_file(m["source"], m["dest_parent"], dry_run=args.dry_run, verbose=args.verbose,
+            file_ok = sync_file(m["source"], m["dest_parent"], dry_run=args.dry_run, verbose=args.verbose,
                       verify_hash=args.verify_hash,
                       conflict_mode=m.get("conflict_mode", "replace"),
                       cache=cache, ignore_cache=args.ignore_cache,
                       exclusions=eff_ex)
+            if file_ok:
+                _RUN.add("mappings_complete")
         # Checkpoint après chaque entrée du mapping : si la machine plante ou
         # qu'on reçoit un kill -9 plus tard, on garde au moins le travail des
         # mappings déjà entièrement traités. L'écriture atomique (tmp+rename)
@@ -3275,7 +3503,8 @@ def main():
                 for chemin in unreadable:
                     print("   • " + chemin)
 
-    print("\n" + _("Done."))
+    exit_code = 5 if _RUN.has_failures() else 0
+    _finish_pass(exit_code, _pass_mode(args), args.dry_run, completed=True)
 
 
 if __name__ == "__main__":
