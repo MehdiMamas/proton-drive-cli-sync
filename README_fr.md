@@ -28,16 +28,29 @@ le consommateur déjà en place, pas à chaque seconde. Un mapping sans clé
 - **Synchro en direct dans la fenêtre.** Ouvrir la fenêtre ne change rien :
   aucun dossier n'est choisi, aucun suivi ne démarre, le lancement à la
   connexion n'est pas activé. La synchro en direct démarre seulement quand
-  vous choisissez un dossier avec **Choose mapping…** et confirmez. Cette
+  vous choisissez un dossier avec **🔄 Live sync…** et confirmez. Cette
   boîte demande à part si les suppressions locales vont à la corbeille
-  Proton. **Choose mapping…** propose aussi de l'arrêter. « Ouvrir cette
+  Proton. **🔄 Live sync…** propose aussi de l'arrêter. Une ligne au-dessus
+  des mappings dit si quelque chose se synchronise tout seul. « Ouvrir cette
   fenêtre à la connexion » est dans Configuration.
+- **Planification.** La page **⏰ Sync schedule** synchronise le fichier de
+  mappings ouvert chaque heure, jour ou semaine par le timer systemd
+  utilisateur, fenêtre fermée. Afficher la page lit seulement le timer ;
+  Save schedule l'écrit.
+- **Où regarder sur Proton.** Le tableau montre le dossier lui-même
+  (« Folder on Proton Drive »), et la colonne Type dit « Two-way » ou
+  « Upload only ». Un dossier créé sur le site Proton ne descend que dans un
+  mapping deux sens, et seulement à l'intérieur de ce dossier.
+- **Quand une synchro finit avec des problèmes (code 5).** La sortie dit ce
+  qui a manqué en clair, sous « Not everything was synced », et la barre
+  d'état nomme la première raison. Les téléchargements ratés, les dossiers
+  sautés et les suppressions retenues s'affichent sans Détaillé.
 
 Document de référence pour ce projet.
 
 > **Pour lancer l'application :** `python3 -m ui`
 >
-> Cela ouvre la fenêtre Qt (mappings, planification, temps réel, configuration).
+> Cela ouvre la fenêtre Qt (mappings, planification, configuration).
 > `python3 proton_mapping_editor.py` ouvre encore l'éditeur Tk précédent.
 
 ---

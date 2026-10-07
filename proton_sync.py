@@ -3147,6 +3147,54 @@ def _summary_line():
              "mappings {mappings_complete}/{mappings_total}.").format(**_RUN.to_dict())
 
 
+def failure_reasons(counters):
+    """Une phrase par compteur d'échec non nul, dans l'ordre de _FAILURES.
+
+    Le code 5 seul ne dit pas ce qui a manqué. Ces phrases le disent, dans le
+    terminal, le journal systemd et les deux fenêtres."""
+    texts = {
+        "files_failed": _(
+            "{n} file(s) could not be sent or downloaded. The lines marked ❌, "
+            "[upload-failed] or [download-failed] name them. They are tried "
+            "again on the next pass."),
+        "folders_listing_failed": _(
+            "{n} folder(s) on Proton Drive could not be read (network or "
+            "Proton problem). Nothing was sent or deleted there this pass. "
+            "See the [list-skipped] or “Could not list” lines."),
+        "folders_unreadable": _(
+            "{n} folder(s) on this computer could not be read, often a "
+            "permission problem. See the [unreadable] lines."),
+        "folders_permission_denied": _(
+            "{n} shared folder(s) on Proton Drive do not let you write. Ask "
+            "the owner for write access."),
+        "folders_stall_skipped": _(
+            "{n} folder(s) were skipped because earlier attempts froze."),
+        "trash_failed": _(
+            "{n} item(s) could not be moved to the Proton Drive trash."),
+        "deletions_refused": _(
+            "{n} deletion(s) were held back for safety. Nothing was deleted. "
+            "The [delete-guard] lines say why."),
+        "sources_missing": _(
+            "{n} local folder(s) in the mappings do not exist on this "
+            "computer."),
+    }
+    reasons = []
+    for name in RunStats._FAILURES:
+        count = int(counters.get(name) or 0)
+        if count > 0:
+            reasons.append(texts[name].format(n=count))
+    return reasons
+
+
+def _print_failure_reasons():
+    reasons = failure_reasons(_RUN.to_dict()) or [
+        _("Some items were not synced. The lines marked ❌ or ⚠ above name "
+          "them.")]
+    print("⚠  " + _("Not everything was synced:"))
+    for reason in reasons:
+        print("⚠    • " + reason)
+
+
 def _emit_run_result(exit_code, mode):
     """Dernière ligne du passage. Non traduite : le consommateur la parse."""
     payload = {"exit": exit_code, "mode": mode}
@@ -3201,6 +3249,8 @@ def _finish_pass(exit_code, mode, dry_run, completed):
         _write_last_run(exit_code, mode)
     if completed and exit_code in (0, 5):
         print("\n" + _("Done."))
+    if exit_code == 5:
+        _print_failure_reasons()
     print(_summary_line())
     _emit_run_result(exit_code, mode)
     sys.exit(exit_code)

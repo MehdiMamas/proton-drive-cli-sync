@@ -81,8 +81,13 @@ class MappingsPage:
         add_actions((
             (_("➕ Folder…"), lambda: self.on_add("folder"), None),
             (_("➕ File…"), lambda: self.on_add("file"), None),
-            (_("Choose mapping…"), self.on_choose_mapping, None),
+            (_("🔄 Live sync…"), self.on_choose_mapping, None),
         ))
+        # Says whether anything syncs on its own, and where to turn it on.
+        self.live_banner = QLabel("")
+        self.live_banner.setWordWrap(True)
+        self.live_banner.setObjectName("Muted")
+        table_l.addWidget(self.live_banner)
         add_actions((
             (_("✏ Edit"), self.on_edit, None),
             (_("🚫 Mapping exclusions"), self.on_mapping_exclusions, None),
@@ -93,7 +98,7 @@ class MappingsPage:
         self.table.setHorizontalHeaderLabels([
             _("Ready"), _("Type"), _("Deletion propagation"), _("Modified files"),
             _("Source (local)"),
-            _("Destination (parent folder on Proton Drive)"),
+            _("Folder on Proton Drive"),
             _("Mapping exclusions"),
         ])
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -295,10 +300,7 @@ class MappingsPage:
         marks = {"ready": "●", "pending": "○", "na": "—"}
         for row, mapping in enumerate(self.doc.mappings):
             state = document.ready_state(mapping, cache, glob)
-            if mapping.get("direction") == "twoway":
-                kind = _("Two-way")
-            else:
-                kind = _("Folder") if mapping.get("type") == "folder" else _("File")
+            kind = document.kind_label(mapping)
             if mapping.get("allow_delete"):
                 deletion = "!" if mapping.get("delete_mode") == "permanent" else "🗑"
             else:
@@ -314,7 +316,7 @@ class MappingsPage:
                         if n_names or n_pat else "—")
             values = [
                 marks[state], kind, deletion, rev,
-                mapping.get("source", ""), mapping.get("dest_parent", ""), excl_txt,
+                mapping.get("source", ""), document.proton_location(mapping), excl_txt,
             ]
             for col, value in enumerate(values):
                 item = self.table.item(row, col)
@@ -332,8 +334,28 @@ class MappingsPage:
             parts.append(_("patterns: ") + pats)
         summary = " | ".join(parts) if parts else _("(none)")
         self.excl_summary.setText(_("🌐 Global exclusions — ") + summary)
+        self._paint_live_banner()
         self.window.refresh_file_chip()
         self.window.refresh_direction_line()
+
+    def _paint_live_banner(self):
+        try:
+            import volume as volume_mod
+            live = volume_mod.confirmed_live(self.doc.mappings)
+        except Exception:
+            live = None
+        if live is None:
+            self.live_banner.setText(_(
+                "🔄 Automatic sync is off: changes sync when you press ▶ Run "
+                "sync. To keep a folder in sync on its own, both ways, press "
+                "the 🔄 Live sync… button. To sync at set times, open ⏰ Sync "
+                "schedule."))
+            return
+        self.live_banner.setText(_(
+            "🔄 Live sync is on for {s}. Changes here go up within seconds. "
+            "Changes on Proton Drive come down about every 30 seconds while "
+            "this app is open, and about every 5 minutes in the "
+            "background.").format(s=live.get("source")))
 
     def _running(self):
         return self._worker is not None and self._worker.isRunning()
@@ -528,7 +550,7 @@ class MappingsPage:
             widgets.info(
                 self.window,
                 _("Add a folder mapping first. Proton Drive opens that folder."),
-                _("Choose mapping"))
+                _("Live sync"))
             return
         if not self._need_file():
             return
@@ -537,7 +559,7 @@ class MappingsPage:
             return
         current = volume_mod.confirmed_live(self.doc.mappings)
         labels = [
-            "{s}  →  {d}".format(s=row.get("source"), d=row.get("dest_parent") or "")
+            "{s}  ⇄  {d}".format(s=row.get("source"), d=document.proton_location(row))
             for row in folders
         ]
         stop_label = None
@@ -547,7 +569,7 @@ class MappingsPage:
         start = folders.index(current) if current in folders else 0
         label, accepted = QInputDialog.getItem(
             widgets.qt_parent(self.window),
-            _("Choose mapping"),
+            _("Live sync"),
             _("Pick the folder to keep in sync on its own. Proton Drive in "
               "Dolphin opens it. The rest of the account is not downloaded. "
               "You confirm on the next screen."),
@@ -567,7 +589,7 @@ class MappingsPage:
         """(accepted, trash). Nothing is written before the person says yes."""
         lines = [
             _("{s} will stay in sync with Proton Drive ({d}):").format(
-                s=mapping.get("source"), d=mapping.get("dest_parent") or ""),
+                s=mapping.get("source"), d=document.proton_location(mapping)),
             "",
             _("• Files you add or change here are sent to Proton Drive."),
             _("• Files added or changed on Proton Drive are downloaded here."),
@@ -578,7 +600,7 @@ class MappingsPage:
         ]
         if mapping.get("direction") != "twoway":
             lines += ["", _("This folder is upload-only now. It becomes two-way.")]
-        lines += ["", _("You can stop at any time with Choose mapping… → Stop live sync.")]
+        lines += ["", _("You can stop at any time with 🔄 Live sync… → Stop live sync.")]
         return widgets.confirm_check(
             self.window, "\n".join(lines), _("Live sync"),
             _("Start live sync"), _("Cancel"),
@@ -683,7 +705,7 @@ class MappingsPage:
                 _("Live sync and deletion are off for {s}. No file was "
                   "changed. The mapping is still two-way; use Edit to make it "
                   "upload-only. Background real-time sync was stopped too. "
-                  "Choose mapping… turns live sync back on if you change "
+                  "🔄 Live sync… turns it back on if you change "
                   "your mind.").format(s=mapping.get("source")),
                 _("Live sync"))
 
@@ -699,7 +721,7 @@ class MappingsPage:
         """Watch ``source`` from the window.
 
         ``install`` writes the Dolphin place and the systemd units. Only the
-        Choose mapping… confirmation asks for that; resuming at startup does
+        🔄 Live sync… confirmation asks for that; resuming at startup does
         not touch either.
         """
         import volume as volume_mod

@@ -64,6 +64,16 @@ class MappingDialog:
         proton.clicked.connect(self._browse_proton)
         dest_row.addWidget(proton)
         place_l.addLayout(dest_row)
+        # The field is the parent. This line names the folder itself, the one
+        # to open on the Proton website.
+        self._volume = bool(is_edit and mapping.get("volume") is True)
+        self.where = QLabel("")
+        self.where.setWordWrap(True)
+        self.where.setObjectName("Muted")
+        place_l.addWidget(self.where)
+        self.source.textChanged.connect(self._where_note)
+        self.dest.textChanged.connect(self._where_note)
+        self._where_note()
         content.addWidget(place)
 
         direction, direction_l = widgets.section(body, _("Direction"))
@@ -77,7 +87,9 @@ class MappingDialog:
         direction_l.addWidget(self.twoway)
         self.keep_both = QLabel(_(
             "If both sides change, both copies are kept and nothing is deleted. "
-            "Remote changes are checked about every 5 minutes, not every second."))
+            "Changes made on Proton Drive come down when a sync runs: ▶ Run "
+            "sync, the schedule, or 🔄 Live sync… (about every 30 seconds while "
+            "this app is open, about every 5 minutes in the background)."))
         self.keep_both.setWordWrap(True)
         self.keep_both.setObjectName("Muted")
         direction_l.addWidget(self.keep_both)
@@ -229,6 +241,25 @@ class MappingDialog:
 
     def _direction_note(self):
         self.keep_both.setVisible(self.twoway.isChecked())
+        self._where_note()
+
+    def _where_note(self):
+        if not hasattr(self, "twoway"):
+            return
+        where = document.proton_location({
+            "source": self.source.text(),
+            "dest_parent": self.dest.text(),
+            "direction": "twoway" if self.twoway.isChecked() else "upload",
+            "volume": self._volume,
+        })
+        if not where:
+            self.where.setText("")
+        elif self.twoway.isChecked():
+            self.where.setText(_(
+                "On Proton Drive: {p}\nFiles and folders you add there come "
+                "down to this computer.").format(p=where))
+        else:
+            self.where.setText(_("On Proton Drive: {p}").format(p=where))
 
     def _toggle(self):
         on = self.allow.isChecked()

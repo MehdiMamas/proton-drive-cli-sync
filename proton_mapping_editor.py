@@ -4551,7 +4551,13 @@ class MappingEditor(tk.Tk):
     # ---------- Affichage épuré (un chemin par dossier) vs brut (« Détaillé ») ----------
     _STATUS_PREFIXES = ("===", "▶", "⏸", "✓", "✗", "❌", "⚠", "🔑", "🌱", "⟳",
                         "♻", "🗑", "⛔", "📂", "==", "Terminé", "Done", "Erreur",
-                        "Error", "Cache", "Global", "▶ Mapping", "  ↪")
+                        "Error", "Cache", "Global", "▶ Mapping", "  ↪", "✅", "⏭",
+                        # Lignes deux sens : téléchargé, échoué, gardé, retenu.
+                        "[download", "[upload-failed]", "[list-skipped]",
+                        "[delete-guard]", "[held]", "[kept]", "[restore]",
+                        "[conflict")
+    # Sauté ou refusé, sans le mot « failed ».
+    _ERROR_TAGS = ("[list-skipped]", "[delete-guard]")
 
     def _is_status_line(self, stripped):
         """Ligne d'orchestration / de résumé / d'erreur : toujours affichée, même en
@@ -4572,6 +4578,8 @@ class MappingEditor(tk.Tk):
         if not stripped:
             return False
         if any(g in stripped for g in ("❌", "⛔", "⚠")):
+            return True
+        if stripped.startswith(self._ERROR_TAGS):
             return True
         head = stripped.split("/", 1)[0].lower()   # préfixe/label, avant le chemin
         return ("erreur" in head or "error" in head

@@ -19,7 +19,7 @@ def test_window_builds(monkeypatch):
     theme.apply(app)
     window = MainWindow()
     window.show()
-    assert window.stack.count() == 2
+    assert window.stack.count() == 3
     assert window.mappings.run_btn.objectName() == "Primary"
     assert window.mappings.stop_btn.objectName() == "Danger"
     mappings = window.stack.widget(0)
@@ -32,9 +32,11 @@ def test_window_builds(monkeypatch):
         button.text() for button in window._qt.findChildren(QPushButton)
         if button.objectName() == "Nav"
     ]
-    assert [text[0] for text in nav] == ["📂", "⚙"]
+    assert [text[0] for text in nav] == ["📂", "⏰", "⚙"]
+    assert any("Live sync" in text for text in labels)
+    assert "Automatic sync is off" in window.mappings.live_banner.text()
     assert isinstance(window.settings.scroll, QScrollArea)
-    assert window.stack.widget(1).findChild(QScrollArea) is window.settings.scroll
+    assert window.stack.widget(2).findChild(QScrollArea) is window.settings.scroll
     assert os.environ.get("QT_QPA_PLATFORM") == "offscreen"
     window.close()
 
@@ -139,4 +141,62 @@ def test_a_trial_pick_is_asked_about_and_not_started(tmp_path, monkeypatch):
     assert not os.path.exists(launcher.ui_autostart_path())
     assert started == []
     window.close()
+    app.processEvents()
+
+
+def test_showing_the_schedule_page_changes_nothing(tmp_path, monkeypatch):
+    # Issue #15: the page is back. Showing it only reads the timer state.
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    import time
+    import schedule_manager
+    from PySide6.QtWidgets import QApplication
+    from ui.shell import MainWindow
+
+    written = []
+    for name in ("install_or_update", "enable_timer", "disable_timer",
+                 "run_now", "refresh_units"):
+        monkeypatch.setattr(
+            schedule_manager, name,
+            lambda *a, _n=name, **k: written.append(_n) or (True, ""))
+    monkeypatch.setattr(schedule_manager, "service_missing_restart_prevent_5",
+                        lambda: False)
+    monkeypatch.setattr(schedule_manager, "status", lambda: {
+        "service_exists": True, "timer_exists": True, "timer_active": True,
+        "calendar": "*-*-* 05:00:00", "next_run": None, "linger": True,
+        "mappings_path": "/m.json", "delete": False})
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.stack.setCurrentIndex(1)
+    deadline = time.time() + 1.0
+    while time.time() < deadline and "05:00" not in window.schedule.state.text():
+        app.processEvents()
+        time.sleep(0.02)
+    assert "every day at 05:00" in window.schedule.state.text()
+    assert window.schedule.hour.currentData() == 5
+    assert not window.schedule.on_btn.isEnabled()
+    assert window.schedule.off_btn.isEnabled()
+    assert written == []
+    window.close()
+    app.processEvents()
+
+
+def test_mapping_dialog_names_the_folder_on_proton(monkeypatch):
+    # Issue #14: the field is the parent; the line under it is the folder itself.
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QDialog
+    from ui.pages.mapping_dialogs import MappingDialog
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.Rejected)
+    dlg = MappingDialog(None, "folder", {
+        "type": "folder", "source": "/home/u/Docs",
+        "dest_parent": "/my-files/Backups", "direction": "twoway"})
+    assert "On Proton Drive: /my-files/Backups/Docs" in dlg.where.text()
+    assert "come down" in dlg.where.text()
+    dlg.upload.setChecked(True)
+    assert dlg.where.text() == "On Proton Drive: /my-files/Backups/Docs"
+    dlg.dest.setText("/my-files/Other")
+    assert "/my-files/Other/Docs" in dlg.where.text()
     app.processEvents()

@@ -523,7 +523,7 @@ def _can_trash(ctx, remote_path):
             ctx.opts["live_unconfirmed_noted"] = True
             print("[delete-guard] " + _(
                 "deletion is off until you confirm this folder with "
-                "Choose mapping… in the window"))
+                "🔄 Live sync… in the window"))
             _ps._RUN.add("deletions_refused")
         return False
     if (str(remote_path).startswith("/shared-with-me")

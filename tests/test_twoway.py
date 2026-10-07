@@ -548,6 +548,48 @@ def test_a_trial_picked_folder_does_not_trash_until_confirmed(
     assert engine(cfg, "--delete").returncode == 0
     (src / "Docs" / "a.txt").unlink()
     result = engine(cfg, "--delete")
-    assert "Choose mapping" in result.stdout
+    assert "Live sync…" in result.stdout
     assert not fake_drive.trashed(remote)
     assert fake_drive.content(remote) == b"AAAA"
+
+
+def test_a_folder_made_on_the_website_comes_down_with_a_new_local_file(
+        fake_drive, local_tree, write_mappings, engine):
+    # Issue #14: a new local file and a folder made in the web app, one pass.
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups", direction="twoway")])
+    assert engine(cfg).returncode == 0
+    local_tree.write("Docs/new.txt", b"NEW", 1_000_000_100)
+    fake_drive.seed_folder("/my-files/Backups/Docs/WebFolder")
+    fake_drive.seed_file("/my-files/Backups/Docs/WebFolder/w.txt", b"WEB")
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout
+    assert fake_drive.content("/my-files/Backups/Docs/new.txt") == b"NEW"
+    assert (src / "Docs" / "WebFolder" / "w.txt").read_bytes() == b"WEB"
+
+
+def test_a_failed_download_says_why_in_plain_words(
+        fake_drive, local_tree, write_mappings, engine):
+    from ui import run
+
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups", direction="twoway")])
+    assert engine(cfg).returncode == 0
+    fake_drive.seed_file("/my-files/Backups/Docs/web.txt", b"WEB")
+    fake_drive.add_fault(cmd="download", times=5)
+    result = engine(cfg)
+    assert result.returncode == 5, result.stdout
+    lines = result.stdout.splitlines()
+    assert "could not be sent or downloaded" in result.stdout
+    failed = [line for line in lines if line.startswith("[download-failed]")]
+    reasons = [line for line in lines if "could not be sent or downloaded" in line]
+    assert failed and reasons
+    # Shown without Verbose, and under "Errors only".
+    for line in failed + reasons:
+        assert run.visible_text(line, verbose=False, errors_only=False)
+        assert run.visible_text(line, verbose=False, errors_only=True)
+    counters = run.parse_run_result(lines[-1])
+    assert counters["files_failed"] >= 1
+    status = run.sync_status(5, counters)
+    assert "could not be sent or downloaded" in status
+    assert not (src / "Docs" / "web.txt").exists()
