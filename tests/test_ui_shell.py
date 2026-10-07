@@ -65,3 +65,78 @@ def test_window_reloads_the_last_mappings_file(tmp_path, monkeypatch):
         assert commit in window._qt.windowTitle()
     window.close()
     app.processEvents()
+
+
+def _open_window_and_wait(monkeypatch, cfg):
+    import time
+    import config
+    import realtime_manager
+    import volume
+    from PySide6.QtWidgets import QApplication
+    from ui.shell import MainWindow
+
+    started = []
+    monkeypatch.setattr(volume, "start_watcher", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(
+        realtime_manager, "install_or_update_units",
+        lambda *a, **k: started.append(a) or (True, "", None))
+    monkeypatch.setattr(volume, "ensure_dolphin_place", lambda *a, **k: started.append(a))
+    assert config.set_last_mappings_path(str(cfg))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.02)
+    return app, window, started
+
+
+def test_opening_the_window_changes_nothing(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    import json
+    from ui import launcher
+
+    folder = tmp_path / "Docs"
+    folder.mkdir()
+    cfg = tmp_path / "mappings.json"
+    text = json.dumps([
+        {"type": "folder", "source": str(folder), "dest_parent": "/my-files/Docs"},
+    ])
+    cfg.write_text(text, encoding="utf-8")
+    launcher.remove_ui_autostart()
+    app, window, started = _open_window_and_wait(monkeypatch, cfg)
+    assert cfg.read_text(encoding="utf-8") == text
+    assert not os.path.exists(launcher.ui_autostart_path())
+    assert started == []
+    assert not getattr(window.mappings, "_live_source", "")
+    window.close()
+    app.processEvents()
+
+
+def test_a_trial_pick_is_asked_about_and_not_started(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    import json
+    from ui import launcher, widgets
+
+    folder = tmp_path / "Docs"
+    folder.mkdir()
+    cfg = tmp_path / "mappings.json"
+    text = json.dumps([
+        {"type": "folder", "source": str(folder), "dest_parent": "/my-files/Docs",
+         "direction": "twoway", "live": True, "allow_delete": True,
+         "delete_mode": "trash"},
+    ])
+    cfg.write_text(text, encoding="utf-8")
+    launcher.remove_ui_autostart()
+    asked = []
+    monkeypatch.setattr(widgets, "confirm", lambda *a, **k: asked.append(a) or True)
+    monkeypatch.setattr(widgets, "confirm_check", lambda *a, **k: (False, False))
+    app, window, started = _open_window_and_wait(monkeypatch, cfg)
+    assert len(asked) == 1
+    assert cfg.read_text(encoding="utf-8") == text
+    assert not os.path.exists(launcher.ui_autostart_path())
+    assert started == []
+    window.close()
+    app.processEvents()

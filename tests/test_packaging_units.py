@@ -330,12 +330,79 @@ def test_pkgbuild_syntax():
     assert (ARCH / install).is_file()
     for glob_pattern in re.findall(r"in (locale/[^;\s]+)", body):
         assert list(REPO.glob(glob_pattern)), glob_pattern
+    for glob_pattern in re.findall(r"\b(ui/[\w/]*\*\.py)\b", body):
+        assert list(REPO.glob(glob_pattern)), glob_pattern
     assert "python-dbus" in text and "python-gobject" in text
     assert "arch=('x86_64')" in text
     assert "packaging/dolphin" in text
     assert (REPO / "packaging" / "dolphin" / "CMakeLists.txt").is_file()
     assert "proton-drive-cli-sync-dolphin" in text
     assert "check()" in text and "pytest" in text
+
+
+def _pkgbuild_python_files():
+    """Repository .py paths the git package installs, globs expanded."""
+    text = (ARCH / "PKGBUILD").read_text(encoding="utf-8")
+    start = text.index("package_proton-drive-cli-sync-git() {")
+    end = text.index("package_proton-drive-cli-sync-dolphin() {")
+    body = re.sub(r"\$\{(?:pkgdir|_lib)\}\S*", "", text[start:end])
+    files = set()
+    for word in re.findall(r"[A-Za-z0-9_./*-]+\.py\b", body):
+        if word.startswith("packaging/"):
+            continue
+        if "*" in word:
+            files |= {p.relative_to(REPO).as_posix() for p in REPO.glob(word)}
+        else:
+            files.add(word)
+    return files
+
+
+def _local_imports(path):
+    """Repository modules (``a.py`` or ``a/b.py``) a file imports, at any depth."""
+    import ast
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names += [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.append(node.module)
+            names += ["%s.%s" % (node.module, a.name) for a in node.names]
+    found = set()
+    for name in names:
+        rel = name.replace(".", "/")
+        for candidate in (rel + ".py", rel + "/__init__.py"):
+            if (REPO / candidate).is_file():
+                found.add(candidate)
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            init = "/".join(parts[:i]) + "/__init__.py"
+            if (REPO / init).is_file():
+                found.add(init)
+    return found
+
+
+def test_pkgbuild_installs_every_module_the_program_imports():
+    installed = _pkgbuild_python_files()
+    entry = {"ui/__main__.py", "proton_sync.py", "doctor.py", "cloudlaunch.py"}
+    todo, seen = list(entry | installed), set()
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        todo += sorted(_local_imports(REPO / rel) - seen)
+    missing = sorted(seen - installed)
+    assert not missing, "imported but not installed by the PKGBUILD: %s" % missing
+
+
+def test_pkgbuild_builds_the_two_way_branch():
+    text = (ARCH / "PKGBUILD").read_text(encoding="utf-8")
+    branch = re.search(r"^_branch=(\S+)", text, re.MULTILINE).group(1)
+    assert branch == "feature/twoway"
+    assert "#branch=${_branch}" in text
+    version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
+    assert re.search(r"^pkgver=%s$" % re.escape(version), text, re.MULTILINE)
 
 
 def test_gui_launcher_starts_qt_ui():

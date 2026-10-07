@@ -172,9 +172,9 @@ class MainWindow:
         QTimer.singleShot(300, self._probe_cli)
         QTimer.singleShot(500, self._startup_notices)
         from ui.tray import Tray
-        from ui.launcher import install_ui_autostart
         self._tray = Tray(self)
-        install_ui_autostart()
+        # Opening the window changes nothing on disk. Live sync resumes only
+        # for a folder the person chose with Choose mapping….
         QTimer.singleShot(400, self.mappings.resume_live)
 
     def _startup_notices(self):

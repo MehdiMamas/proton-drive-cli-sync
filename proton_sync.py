@@ -3104,7 +3104,7 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
         complete = twoway.sync_tree(
             mapping, subpath, remote_parent, config_path, cache, exclusions,
             dry_run=dry_run, verbose=verbose, allow_mass_delete=allow_mass_delete,
-            global_ex=global_ex)
+            global_ex=global_ex, delete=delete)
         return "ok" if complete else "failed"
     complete = sync_folder(subpath, remote_parent, dry_run=dry_run, verbose=verbose,
                            verify_hash=verify_hash,
@@ -3758,7 +3758,7 @@ def main():
             complete = twoway.sync_mapping(
                 m, args.config, cache, eff_ex, dry_run=args.dry_run,
                 verbose=args.verbose, allow_mass_delete=args.allow_mass_delete,
-                global_ex=global_ex)
+                global_ex=global_ex, delete=args.delete)
             if complete:
                 _RUN.add("mappings_complete")
             health.append((m["source"], bool(complete), _take_unreadable()))

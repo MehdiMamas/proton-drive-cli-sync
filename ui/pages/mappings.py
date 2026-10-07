@@ -370,7 +370,7 @@ class MappingsPage:
         except Exception as exc:
             widgets.error(self.window, str(exc), _("Load error"))
             return
-            self._refresh()
+        self._refresh()
         import config as appconfig
         appconfig.set_last_mappings_path(os.path.abspath(path))
         self.window.set_status(_("Loaded: {p} ({n} entries)").format(
@@ -535,20 +535,62 @@ class MappingsPage:
         if not self._offer_save(_(
                 "The mappings file has unsaved changes. Save them before choosing?")):
             return
+        current = volume_mod.confirmed_live(self.doc.mappings)
         labels = [
             "{s}  →  {d}".format(s=row.get("source"), d=row.get("dest_parent") or "")
             for row in folders
         ]
+        stop_label = None
+        if current is not None:
+            stop_label = _("Stop live sync for {s}").format(s=current["source"])
+            labels.append(stop_label)
+        start = folders.index(current) if current in folders else 0
         label, accepted = QInputDialog.getItem(
             widgets.qt_parent(self.window),
             _("Choose mapping"),
-            _("Proton Drive in Dolphin opens this folder, so you can see how "
-              "syncing is going. The rest of the account is not downloaded."),
-            labels, 0, False)
+            _("Pick the folder to keep in sync on its own. Proton Drive in "
+              "Dolphin opens it. The rest of the account is not downloaded. "
+              "You confirm on the next screen."),
+            labels, start, False)
         if not accepted:
             return
+        if stop_label is not None and label == stop_label:
+            self._stop_live(current)
+            return
         mapping = folders[labels.index(label)]
-        if volume_mod.mark_live(self.doc.mappings, mapping["source"]) is None:
+        accepted, trash = self._live_consent(mapping)
+        if not accepted:
+            return
+        self._start_live(mapping, trash)
+
+    def _live_consent(self, mapping):
+        """(accepted, trash). Nothing is written before the person says yes."""
+        lines = [
+            _("{s} will stay in sync with Proton Drive ({d}):").format(
+                s=mapping.get("source"), d=mapping.get("dest_parent") or ""),
+            "",
+            _("• Files you add or change here are sent to Proton Drive."),
+            _("• Files added or changed on Proton Drive are downloaded here."),
+            _("• If the same file changed on both sides, both versions are "
+              "kept and you choose."),
+            _("• This window opens when you log in and keeps watching the "
+              "folder from the tray."),
+        ]
+        if mapping.get("direction") != "twoway":
+            lines += ["", _("This folder is upload-only now. It becomes two-way.")]
+        lines += ["", _("You can stop at any time with Choose mapping… → Stop live sync.")]
+        return widgets.confirm_check(
+            self.window, "\n".join(lines), _("Live sync"),
+            _("Start live sync"), _("Cancel"),
+            _("Also move files I delete here to the Proton Drive trash "
+              "(they can be restored from the trash on the Proton website)"),
+            checked=bool(mapping.get("allow_delete")))
+
+    def _start_live(self, mapping, trash):
+        import volume as volume_mod
+        from ui import launcher
+        if volume_mod.mark_live(
+                self.doc.mappings, mapping["source"], allow_delete=bool(trash)) is None:
             return
         self.doc.dirty = True
         try:
@@ -556,53 +598,124 @@ class MappingsPage:
         except Exception as exc:
             widgets.error(self.window, str(exc), _("Save error"))
             return
-        self._arm_live(mapping["source"], announce_cli=True)
+        launcher.install_ui_autostart()
+        self._arm_live(mapping["source"], announce_cli=True, install=True)
+
+    def _stop_live(self, mapping, ask=True, trash_off=False):
+        """The folder stays mapped. It is no longer synced on its own."""
+        import volume as volume_mod
+        from ui import launcher
+        stop_daemons = True
+        if ask:
+            accepted, stop_daemons = widgets.confirm_check(
+                self.window,
+                _("Stop live sync for {s}?\n\nNo file is moved or deleted. The "
+                  "mapping stays in the list and Run sync still syncs it. The "
+                  "window no longer opens when you log in.").format(
+                      s=mapping.get("source")),
+                _("Live sync"), _("Stop live sync"), _("Cancel"),
+                _("Also stop real-time sync in the background"),
+                checked=True)
+            if not accepted:
+                return False
+        volume_mod.clear_live(
+            self.doc.mappings, allow_delete=False if trash_off else None)
+        self.doc.dirty = True
+        try:
+            self.doc.save(self.doc.path)
+        except Exception as exc:
+            widgets.error(self.window, str(exc), _("Save error"))
+            return False
+        launcher.remove_ui_autostart()
+        timer = getattr(self, "_remote_timer", None)
+        if timer is not None:
+            timer.stop()
+        watchers = getattr(self.window, "watchers", None)
+        if watchers is not None:
+            watchers.stop()
+        self._live_source = ""
+        if stop_daemons:
+            try:
+                import realtime_manager
+                realtime_manager.disable_daemons()
+            except Exception:
+                pass
+        self._refresh()
+        self.window.set_status(_("Live sync stopped. No file was changed."))
+        return True
 
     def resume_live(self):
-        """Open Proton Drive on a folder and watch it. A pass starts on its own."""
+        """Watch the folder the person chose earlier. Never chooses one."""
         if not self.doc.path:
             self._auth_then("", announce_cli=False)
             return
         import volume as volume_mod
-        chosen, changed = volume_mod.ensure_chosen(self.doc.mappings)
-        if chosen is None:
-            self._auth_then("", announce_cli=False)
+        chosen = volume_mod.confirmed_live(self.doc.mappings)
+        if chosen is not None:
+            self._arm_live(chosen["source"], announce_cli=False)
             return
-        if changed:
-            self.doc.dirty = True
-            try:
-                self.doc.save(self.doc.path)
-            except Exception as exc:
-                self.window.set_status(str(exc))
-                return
-        self._prepare_live(chosen["source"])
-        self._auth_then(chosen["source"], announce_cli=False)
+        self._auth_then("", announce_cli=False)
+        legacy = volume_mod.unconfirmed_live(self.doc.mappings)
+        if legacy is not None:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._ask_about_legacy_live(legacy))
+
+    def _ask_about_legacy_live(self, mapping):
+        """An earlier build picked this folder by itself. Ask; start nothing."""
+        keep = widgets.confirm(
+            self.window,
+            _("An earlier test version picked this folder for live sync by "
+              "itself:\n{s}\n\nIt made the folder two-way and turned on "
+              "\"move files I delete here to the Proton Drive trash\". This "
+              "version does not start it, and does not trash anything from "
+              "it, until you decide.\n\nKeep live sync for this folder? You "
+              "will see what it does before it starts.").format(
+                  s=mapping.get("source")),
+            _("Live sync"), _("Review and keep…"), _("Turn it off"))
+        if keep:
+            accepted, trash = self._live_consent(mapping)
+            if accepted:
+                self._start_live(mapping, trash)
+            return
+        if self._stop_live(mapping, ask=False, trash_off=True):
+            widgets.info(
+                self.window,
+                _("Live sync and deletion are off for {s}. No file was "
+                  "changed. The mapping is still two-way; use Edit to make it "
+                  "upload-only. Background real-time sync was stopped too. "
+                  "Choose mapping… turns live sync back on if you change "
+                  "your mind.").format(s=mapping.get("source")),
+                _("Live sync"))
 
     def _live_mapping(self):
-        for row in self.doc.mappings:
-            if (row.get("live") is True and row.get("type", "folder") == "folder"
-                    and row.get("source")):
-                return row
-        return None
+        import volume as volume_mod
+        return volume_mod.confirmed_live(self.doc.mappings)
 
-    def _arm_live(self, source, announce_cli):
-        self._prepare_live(source)
+    def _arm_live(self, source, announce_cli, install=False):
+        self._prepare_live(source, install=install)
         self._auth_then(source, announce_cli=announce_cli)
 
-    def _prepare_live(self, source):
+    def _prepare_live(self, source, install=False):
+        """Watch ``source`` from the window.
+
+        ``install`` writes the Dolphin place and the systemd units. Only the
+        Choose mapping… confirmation asks for that; resuming at startup does
+        not touch either.
+        """
         import volume as volume_mod
-        try:
-            volume_mod.ensure_home_link(source)
-        except OSError:
-            pass
-        volume_mod.ensure_dolphin_place(source)
+        if install:
+            try:
+                volume_mod.ensure_home_link(source)
+            except OSError:
+                pass
+            volume_mod.ensure_dolphin_place(source)
+            try:
+                import realtime_manager
+                realtime_manager.write_config(2, 2)
+            except Exception:
+                pass
+            volume_mod.start_watcher(self.doc.path)
         self._arm_remote_poll()
-        try:
-            import realtime_manager
-            realtime_manager.write_config(2, 2)
-        except Exception:
-            pass
-        volume_mod.start_watcher(self.doc.path)
         self._refresh()
         tray = getattr(self.window, "_tray", None)
         if tray is not None:

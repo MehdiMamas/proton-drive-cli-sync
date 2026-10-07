@@ -7,6 +7,7 @@ A failed remote listing does not update the sync database for that folder.
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -39,6 +40,7 @@ except ImportError:
 
 _DOC_TYPES = ("document", "spreadsheet", "proton-doc")
 _CONFLICT_MARK = " (proton conflict)"
+_CONFLICT_STEM = re.compile(r" \(proton conflict(?: \d+)?\)$")
 WEB_DOCUMENT_LINE = (
     "Proton web document. Open it on the web. This copy is not uploaded."
 )
@@ -54,36 +56,42 @@ def is_volume(mapping):
 
 
 def sync_mapping(mapping, config_path, cache, exclusions, dry_run=False,
-                 verbose=False, allow_mass_delete=False, global_ex=None):
-    """Reconcile one twoway mapping. Returns True when the tree completed."""
+                 verbose=False, allow_mass_delete=False, global_ex=None,
+                 delete=False):
+    """Reconcile one twoway mapping. Returns True when the tree completed.
+
+    ``delete`` is the pass's ``--delete`` switch. Without it nothing is
+    removed on either side, whatever the mapping says.
+    """
     source = mapping.get("source") or ""
     if mapping.get("type") == "file":
         ctx = _context(mapping, config_path, cache, exclusions, dry_run,
                        verbose, allow_mass_delete, source_root=os.path.dirname(source),
-                       global_ex=global_ex)
+                       global_ex=global_ex, delete=delete)
         with ctx.db:
             return _sync_file(source, mapping.get("dest_parent") or "", ctx)
     ctx = _context(mapping, config_path, cache, exclusions, dry_run,
                    verbose, allow_mass_delete, source_root=source,
-                   global_ex=global_ex)
+                   global_ex=global_ex, delete=delete)
     with ctx.db:
         return _sync_dir(source, mapping.get("dest_parent") or "", ctx)
 
 
 def sync_tree(mapping, local_dir, remote_parent, config_path, cache, exclusions,
-              dry_run=False, verbose=False, allow_mass_delete=False, global_ex=None):
+              dry_run=False, verbose=False, allow_mass_delete=False, global_ex=None,
+              delete=False):
     """Reconcile one folder of a twoway mapping (a full pass or a subpath)."""
     ctx = _context(mapping, config_path, cache, exclusions, dry_run,
                    verbose, allow_mass_delete,
                    source_root=mapping.get("source") or local_dir,
-                   global_ex=global_ex)
+                   global_ex=global_ex, delete=delete)
     with ctx.db:
         return _sync_dir(local_dir, remote_parent, ctx)
 
 
 class _Ctx:
     def __init__(self, mapping, db, cache, exclusions, dry_run, verbose,
-                 opts, source_root, config_path):
+                 opts, source_root, config_path, delete=False):
         self.mapping = mapping
         self.db = db
         self.cache = cache
@@ -93,15 +101,16 @@ class _Ctx:
         self.opts = opts
         self.source_root = source_root
         self.config_path = config_path
+        self.delete = bool(delete)
 
 
 def _context(mapping, config_path, cache, exclusions, dry_run, verbose,
-             allow_mass_delete, source_root, global_ex=None):
+             allow_mass_delete, source_root, global_ex=None, delete=False):
     opts = _ps.build_delete_opts(
         mapping, source_root, allow_mass_delete, verbose, global_ex=global_ex)
     db = syncdb.SyncDB(syncdb.database_path(config_path))
     return _Ctx(mapping, db, cache, exclusions, dry_run, verbose, opts,
-                source_root, config_path)
+                source_root, config_path, delete=delete)
 
 
 def _sync_file(local_file, remote_parent, ctx):
@@ -212,11 +221,19 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
             continue
         row = ctx.db.get(local_path)
         if row and row.get("state") == "synced":
-            gone.append((local_path, remote_path, info, row))
-        elif row and row.get("state") == "pending-down":
-            restores.append((local_path, remote_path, info))
+            if _remote_changed_since(info, row) is False:
+                gone.append((local_path, remote_path, info, row))
+            else:
+                # Removed here, but the Proton copy changed after the last
+                # sync, or the listing cannot tell. The newer copy comes back.
+                print("[restore] " + _(
+                    "deleted here but changed on Proton since, downloading "
+                    "it again: {p}").format(p=local_path))
+                restores.append((local_path, remote_path, info))
         elif row and row.get("state") == "conflict":
-            continue
+            # The original was removed during a conflict. The Proton version
+            # comes back under the original name; any conflict copy stays.
+            restores.append((local_path, remote_path, info))
         else:
             restores.append((local_path, remote_path, info))
 
@@ -256,12 +273,11 @@ def _reconcile_file(local_path, remote_folder, remote_info, ctx):
         return True
     row = ctx.db.get(local_path)
     if row and row.get("state") == "conflict":
-        print("[conflict] " + _("both sides changed, kept both: {p}").format(p=local_path))
-        return True
+        return _resolve_conflict(local_path, remote_folder, remote_info, row, ctx)
 
     if not isinstance(remote_info, dict) or remote_info.get("type") not in (None, "file"):
         if row and row.get("state") == "synced":
-            return _hold(local_path, ctx)
+            return _remote_gone(local_path, remote_folder, remote_info, row, ctx)
         return _upload(local_path, remote_folder, remote_info, ctx)
 
     action, reason = _ps.download_decision(local_path, remote_info, row)
@@ -356,28 +372,112 @@ def _fetch(remote_path, directory):
 
 
 def _write_conflict(local_path, remote_path, remote_info, row, ctx):
-    print("[conflict] " + _("both sides changed, kept both: {p}").format(p=local_path))
+    """Keep both: the Proton version is saved next to the local file.
+
+    Each copy gets a fresh name, so an older conflict copy is never
+    overwritten.
+    """
     if ctx.dry_run:
+        print("[conflict] " + _(
+            "[DRY-RUN] both sides changed, would keep both: {p}").format(p=local_path))
         return True
-    conflict_path = _conflict_path(local_path)
-    if not os.path.exists(conflict_path):
-        parent = os.path.dirname(local_path) or "."
-        temporary = tempfile.mkdtemp(prefix=".proton-sync-download-", dir=parent)
-        try:
-            fetched, skipped = _fetch(remote_path, temporary)
-            if skipped:
-                _mark_document(local_path, remote_path, remote_info, ctx)
-                return True
-            if fetched is None:
-                print("[download-failed] " + _(
-                    "download failed, local file kept: {p}").format(p=local_path))
-                _ps._RUN.add("files_failed")
-                return False
-            os.replace(fetched, conflict_path)
-        finally:
-            shutil.rmtree(temporary, ignore_errors=True)
+    parent = os.path.dirname(local_path) or "."
+    temporary = tempfile.mkdtemp(prefix=".proton-sync-download-", dir=parent)
+    try:
+        fetched, skipped = _fetch(remote_path, temporary)
+        if skipped:
+            _mark_document(local_path, remote_path, remote_info, ctx)
+            return True
+        if fetched is None:
+            print("[download-failed] " + _(
+                "download failed, local file kept: {p}").format(p=local_path))
+            _ps._RUN.add("files_failed")
+            return False
+        conflict_path = _conflict_path(local_path)
+        os.replace(fetched, conflict_path)
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+    print("[conflict] " + _(
+        "both sides changed. Your file is kept; the Proton version is saved "
+        "as {c}").format(c=conflict_path))
+    _conflict_help(local_path)
     _mark_conflict(local_path, remote_path, remote_info, row, ctx)
     return True
+
+
+def _conflict_help(local_path):
+    print("[conflict] " + _(
+        "To finish: keep the version you want under the name {n} and delete "
+        "the \"(proton conflict)\" copy. The next pass sends your choice to "
+        "Proton.").format(n=os.path.basename(local_path)))
+
+
+def _resolve_conflict(local_path, remote_folder, remote_info, row, ctx):
+    """Finish a conflict once the person has picked a version.
+
+    The row holds the Proton version from when the conflict was found.
+    Nothing on Proton is replaced while a conflict copy is still here.
+    """
+    remote_path = remote_folder.rstrip("/") + "/" + os.path.basename(local_path)
+    if not isinstance(remote_info, dict) or remote_info.get("type") not in (None, "file"):
+        # The Proton copy is gone. The local file is the only one left.
+        print("[conflict-resolved] " + _(
+            "no Proton copy any more, sending yours: {p}").format(p=local_path))
+        return _upload(local_path, remote_folder, remote_info, ctx)
+    remote_sha = _ps._optional_sha1(remote_info.get("sha1"))
+    if remote_sha:
+        try:
+            same = _ps._local_sha1(local_path) == remote_sha
+        except OSError:
+            same = False
+        if same:
+            print("[conflict-resolved] " + _(
+                "both versions are the same now: {p}").format(p=local_path))
+            if not ctx.dry_run:
+                _save_synced(local_path, remote_path, remote_info, ctx)
+            return True
+    if _conflict_copies(local_path):
+        print("[conflict] " + _(
+            "waiting for you to choose a version: {p}").format(p=local_path))
+        _conflict_help(local_path)
+        return True
+    if _remote_changed_since(remote_info, row) is False:
+        print("[conflict-resolved] " + _(
+            "conflict copy removed, sending your version: {p}").format(p=local_path))
+        return _upload(local_path, remote_folder, remote_info, ctx)
+    # Proton changed again after the conflict. Keep that version too.
+    return _write_conflict(local_path, remote_path, remote_info, row, ctx)
+
+
+def _remote_gone(local_path, remote_folder, remote_info, row, ctx):
+    """The Proton copy was removed after the last sync.
+
+    An edit made here since then wins and is sent again. An unchanged file
+    is moved to the holding folder, never deleted, and only on a pass that
+    allows deletions.
+    """
+    if _ps._local_differs_from_row(local_path, row) is not False:
+        print("[restore] " + _(
+            "removed on Proton but changed here since, sending it again: "
+            "{p}").format(p=local_path))
+        return _upload(local_path, remote_folder, remote_info, ctx)
+    if not ctx.delete:
+        print("[kept] " + _(
+            "removed on Proton; local file kept because deletions are off "
+            "for this pass: {p}").format(p=local_path))
+        return True
+    return _hold(local_path, ctx)
+
+
+def _remote_changed_since(remote_info, row):
+    """True, False, or None when the listing cannot tell."""
+    if not isinstance(remote_info, dict) or not isinstance(row, dict):
+        return None
+    return _ps._remote_differs_from_row(
+        _ps._claimed_size_of(remote_info),
+        _ps._optional_sha1(remote_info.get("sha1")),
+        _ps._remote_mtime_seconds(remote_info.get("mtime")),
+        row)
 
 
 def _hold(local_path, ctx):
@@ -387,8 +487,11 @@ def _hold(local_path, ctx):
         return True
     dest = _holding_destination(ctx, local_path)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if os.path.exists(dest):
-        dest = dest + ".kept"
+    # A file held earlier under the same name is never replaced.
+    base, n = dest, 1
+    while os.path.lexists(dest):
+        dest = base + (".kept" if n == 1 else ".kept%d" % n)
+        n += 1
     try:
         os.rename(local_path, dest)
     except OSError:
@@ -408,7 +511,20 @@ def _hold(local_path, ctx):
 
 
 def _can_trash(ctx, remote_path):
-    if not ctx.mapping.get("allow_delete"):
+    # Two switches, as for one-way mappings: the pass's --delete and the
+    # mapping's allow_delete.
+    if not ctx.delete or not ctx.mapping.get("allow_delete"):
+        return False
+    if (ctx.mapping.get("live") is True
+            and ctx.mapping.get("live_confirmed") is not True):
+        # An earlier build turned allow_delete on by itself for the folder it
+        # picked. Nothing is trashed until the person confirms in the window.
+        if not ctx.opts.get("live_unconfirmed_noted"):
+            ctx.opts["live_unconfirmed_noted"] = True
+            print("[delete-guard] " + _(
+                "deletion is off until you confirm this folder with "
+                "Choose mapping… in the window"))
+            _ps._RUN.add("deletions_refused")
         return False
     if (str(remote_path).startswith("/shared-with-me")
             and ctx.mapping.get("shared_delete_confirmed") is not True):
@@ -469,30 +585,28 @@ def _save_synced(local_path, remote_path, remote_info, ctx):
 
 
 def _mark_conflict(local_path, remote_path, remote_info, row, ctx):
-    if row:
-        stored = dict(row)
-        stored["state"] = "conflict"
-        stored["remote_path"] = remote_path
-    else:
-        try:
-            st = os.stat(local_path)
-            sha = _ps._local_sha1(local_path)
-        except OSError:
-            return
-        stored = {
-            "local_path": local_path,
-            "remote_path": remote_path,
-            "remote_node_id": None,
-            "sha1": sha,
-            "claimed_size": st.st_size,
-            "claimed_mtime": float(st.st_mtime),
-            "local_inode": st.st_ino,
-            "local_mtime": st.st_mtime,
-            "state": "conflict",
-        }
-    if isinstance(remote_info, dict) and remote_info.get("node_id"):
-        stored["remote_node_id"] = remote_info.get("node_id")
-    ctx.db.upsert(stored)
+    """The row remembers the Proton version that was saved as the copy.
+
+    A later pass compares the listing with it. Unchanged means the person's
+    choice can be sent. Changed means Proton moved on and gets a new copy.
+    """
+    info = remote_info if isinstance(remote_info, dict) else {}
+    try:
+        st = os.stat(local_path)
+        inode, mtime = st.st_ino, st.st_mtime
+    except OSError:
+        inode, mtime = None, None
+    ctx.db.upsert({
+        "local_path": local_path,
+        "remote_path": remote_path,
+        "remote_node_id": info.get("node_id") or (row or {}).get("remote_node_id"),
+        "sha1": _ps._optional_sha1(info.get("sha1")),
+        "claimed_size": _ps._claimed_size_of(info),
+        "claimed_mtime": _ps._remote_mtime_seconds(info.get("mtime")),
+        "local_inode": inode,
+        "local_mtime": mtime,
+        "state": "conflict",
+    })
 
 
 def _is_web_marker(local_path):
@@ -586,11 +700,36 @@ def _holding_destination(ctx, local_path):
 
 
 def _conflict_path(local_path):
+    """A conflict-copy name that is not in use yet."""
     directory = os.path.dirname(local_path)
     stem, ext = os.path.splitext(os.path.basename(local_path))
-    return os.path.join(directory, stem + _CONFLICT_MARK + ext)
+    candidate = os.path.join(directory, stem + _CONFLICT_MARK + ext)
+    number = 2
+    while os.path.lexists(candidate):
+        candidate = os.path.join(
+            directory, "{s} (proton conflict {n}){e}".format(s=stem, n=number, e=ext))
+        number += 1
+    return candidate
 
 
 def _is_conflict_copy(name):
     stem, _ext = os.path.splitext(name)
-    return stem.endswith(_CONFLICT_MARK)
+    return bool(_CONFLICT_STEM.search(stem))
+
+
+def _conflict_copies(local_path):
+    """Conflict copies of this file that are still in its folder."""
+    directory = os.path.dirname(local_path) or "."
+    stem, ext = os.path.splitext(os.path.basename(local_path))
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        other_stem, other_ext = os.path.splitext(name)
+        if other_ext != ext or not _is_conflict_copy(name):
+            continue
+        if _CONFLICT_STEM.sub("", other_stem) == stem:
+            found.append(os.path.join(directory, name))
+    return sorted(found)
