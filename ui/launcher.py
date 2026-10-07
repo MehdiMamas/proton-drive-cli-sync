@@ -114,9 +114,26 @@ def apply_launcher(menu_enabled, desktop_enabled, target_path):
         pass
 
 
+def ui_autostart_path():
+    return os.path.expanduser("~/.config/autostart/proton-drive-sync-ui.desktop")
+
+
+def remove_ui_autostart():
+    try:
+        os.remove(ui_autostart_path())
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
 def install_ui_autostart():
-    """Plasma login starts ``python -m ui``. The XApp tray file is not touched."""
-    path = os.path.expanduser("~/.config/autostart/proton-drive-sync-ui.desktop")
+    """Plasma login starts ``python -m ui``. The XApp tray file is not touched.
+
+    Only after the person asked for it: live sync for a folder, or the
+    Settings checkbox. Opening the window never writes this file.
+    """
+    path = ui_autostart_path()
     body = (
         "[Desktop Entry]\n"
         "Type=Application\n"

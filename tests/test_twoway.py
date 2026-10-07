@@ -186,7 +186,7 @@ def test_local_deletion_restores_on_the_next_pass_unless_deletion_is_on(
     ])
     assert engine(deleting).returncode == 0
     (src2 / "Gone" / "a.txt").unlink()
-    trashed = engine(deleting)
+    trashed = engine(deleting, "--delete")
     assert trashed.returncode == 0, trashed.stdout + trashed.stderr
     assert fake_drive.trashed(remote2)
     assert not (src2 / "Gone" / "a.txt").exists()
@@ -203,7 +203,7 @@ def test_shared_folder_is_not_trashed_without_confirmation(
     ])
     assert engine(cfg).returncode == 0
     (src / "Docs" / "a.txt").unlink()
-    kept = engine(cfg)
+    kept = engine(cfg, "--delete")
     assert kept.returncode == 0, kept.stdout + kept.stderr
     assert not fake_drive.trashed(remote)
     assert fake_drive.content(remote) == b"AAAA"
@@ -221,7 +221,7 @@ def test_confirmed_shared_folder_may_trash(
     ])
     assert engine(cfg).returncode == 0
     (src / "Docs" / "a.txt").unlink()
-    trashed = engine(cfg)
+    trashed = engine(cfg, "--delete")
     assert trashed.returncode == 0, trashed.stdout + trashed.stderr
     assert fake_drive.trashed(remote)
 
@@ -237,13 +237,36 @@ def test_missing_remote_moves_the_local_file_aside(
     def mutate(state):
         state["nodes"].pop(remote_state.normalize(remote), None)
     fake_drive._update(mutate)
-    result = engine(cfg)
+    result = engine(cfg, "--delete")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[held] " in result.stdout
     assert not (src / "Docs" / "a.txt").exists()
     dest = result.stdout.split("[held] ", 1)[1].split(" -> ", 1)[1].splitlines()[0].strip()
     assert os.path.isfile(dest)
     assert open(dest, "rb").read() == b"AAAA"
+
+
+def test_holding_the_same_name_again_keeps_every_copy(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"v1", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    cfg = write_mappings([
+        _mapping(src / "Docs", "/my-files/Backups", direction="twoway"),
+    ])
+    held = []
+    for i, data in enumerate((b"v1", b"v2", b"v3")):
+        if i:
+            local_tree.write("Docs/a.txt", data, 1_000_000_000 + i * 100)
+        assert engine(cfg).returncode == 0
+        assert fake_drive.content(remote) == data
+        fake_drive._update(
+            lambda state: state["nodes"].pop(remote_state.normalize(remote), None))
+        result = engine(cfg, "--delete")
+        assert result.returncode == 0, result.stdout + result.stderr
+        held.append(result.stdout.split("[held] ", 1)[1].split(" -> ", 1)[1]
+                    .splitlines()[0].strip())
+    assert len(set(held)) == 3
+    assert [open(p, "rb").read() for p in held] == [b"v1", b"v2", b"v3"]
 
 
 def test_failed_listing_does_not_update_the_sync_row(
@@ -333,7 +356,7 @@ def test_one_mapping_trashes_and_the_other_does_not(
     cfg = write_mappings([
         _mapping(src / "Docs", "/my-files/Backups", direction="twoway",
                  allow_delete=True, delete_mode="trash", source_kind="local",
-                 live=True),
+                 live=True, live_confirmed=True),
         _mapping(src / "Other", "/my-files/Other", direction="twoway",
                  allow_delete=False),
     ])
@@ -345,3 +368,186 @@ def test_one_mapping_trashes_and_the_other_does_not(
     assert fake_drive.trashed(remote_a)
     assert not fake_drive.trashed(remote_b)
     assert fake_drive.content(remote_b) == b"BBBB"
+
+
+def _state(isolated_home, cfg, path):
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        row = database.get(str(path))
+    return row["state"] if row else None
+
+
+def _trashing(src, dest):
+    return _mapping(src, dest, direction="twoway", allow_delete=True,
+                    delete_mode="trash", source_kind="local")
+
+
+def test_allow_delete_alone_does_not_trash_without_the_delete_switch(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    cfg = write_mappings([_trashing(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    (src / "Docs" / "a.txt").unlink()
+    first = engine(cfg)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert not fake_drive.trashed(remote)
+    assert fake_drive.content(remote) == b"AAAA"
+    second = engine(cfg)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert not fake_drive.trashed(remote)
+    assert (src / "Docs" / "a.txt").read_bytes() == b"AAAA"
+
+
+def test_local_deletion_does_not_trash_a_newer_remote_edit(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    cfg = write_mappings([_trashing(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg, "--delete").returncode == 0
+    (src / "Docs" / "a.txt").unlink()
+    _set_remote(fake_drive, remote, b"NEWER", 1_000_000_500)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not fake_drive.trashed(remote)
+    assert fake_drive.content(remote) == b"NEWER"
+    assert (src / "Docs" / "a.txt").read_bytes() == b"NEWER"
+
+
+def test_remote_deletion_does_not_drop_a_newer_local_edit(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    cfg = write_mappings([_trashing(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg, "--delete").returncode == 0
+    def mutate(state):
+        state["nodes"].pop(remote_state.normalize(remote), None)
+    fake_drive._update(mutate)
+    local_tree.write("Docs/a.txt", b"EDITED", 1_000_000_500)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[held] " not in result.stdout
+    assert (src / "Docs" / "a.txt").read_bytes() == b"EDITED"
+    assert fake_drive.content(remote) == b"EDITED"
+
+
+def test_remote_deletion_is_not_applied_without_the_delete_switch(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    cfg = write_mappings([
+        _mapping(src / "Docs", "/my-files/Backups", direction="twoway"),
+    ])
+    assert engine(cfg).returncode == 0
+    def mutate(state):
+        state["nodes"].pop(remote_state.normalize(remote), None)
+    fake_drive._update(mutate)
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[held] " not in result.stdout
+    assert "[kept] " in result.stdout
+    assert (src / "Docs" / "a.txt").read_bytes() == b"AAAA"
+
+
+def _conflict(fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    cfg = write_mappings([
+        _mapping(src / "Docs", "/my-files/Backups", direction="twoway"),
+    ])
+    assert engine(cfg).returncode == 0
+    local_tree.write("Docs/a.txt", b"MINE", 1_000_000_300)
+    _set_remote(fake_drive, remote, b"THEIRS", 1_000_000_400)
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    copy = src / "Docs" / "a (proton conflict).txt"
+    assert copy.read_bytes() == b"THEIRS"
+    return src, remote, cfg, copy
+
+
+def test_conflict_clears_once_both_copies_match(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    local_tree.write("Docs/a.txt", b"THEIRS", 1_000_000_600)
+    copy.unlink()
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[conflict-resolved] " in result.stdout
+    assert _state(isolated_home, cfg, src / "Docs" / "a.txt") == "synced"
+    assert fake_drive.content(remote) == b"THEIRS"
+    again = engine(cfg)
+    assert "[conflict" not in again.stdout
+
+
+def test_conflict_waits_while_the_copy_is_there(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "waiting for you to choose" in result.stdout
+    assert fake_drive.content(remote) == b"THEIRS"
+    assert copy.read_bytes() == b"THEIRS"
+    assert _state(isolated_home, cfg, src / "Docs" / "a.txt") == "conflict"
+
+
+def test_conflict_keeps_mine_after_the_copy_is_removed(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    copy.unlink()
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.content(remote) == b"MINE"
+    assert _state(isolated_home, cfg, src / "Docs" / "a.txt") == "synced"
+
+
+def test_conflict_keeps_theirs_after_the_original_is_removed(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    (src / "Docs" / "a.txt").unlink()
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not fake_drive.trashed(remote)
+    assert (src / "Docs" / "a.txt").read_bytes() == b"THEIRS"
+    assert _state(isolated_home, cfg, src / "Docs" / "a.txt") == "synced"
+
+
+def test_conflict_saves_a_newer_remote_edit_before_sending_mine(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    copy.unlink()
+    _set_remote(fake_drive, remote, b"THEIRS-AGAIN", 1_000_000_900)
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.content(remote) == b"THEIRS-AGAIN"
+    assert (src / "Docs" / "a.txt").read_bytes() == b"MINE"
+    assert copy.read_bytes() == b"THEIRS-AGAIN"
+    assert _state(isolated_home, cfg, src / "Docs" / "a.txt") == "conflict"
+
+
+def test_a_second_conflict_does_not_overwrite_an_older_copy(
+        fake_drive, local_tree, write_mappings, engine):
+    src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    copy.write_bytes(b"MY NOTES ON THEIRS")
+    local_tree.write("Docs/a.txt", b"THEIRS", 1_000_000_600)
+    assert engine(cfg).returncode == 0
+    local_tree.write("Docs/a.txt", b"MINE-2", 1_000_000_700)
+    _set_remote(fake_drive, remote, b"THEIRS-2", 1_000_000_800)
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert copy.read_bytes() == b"MY NOTES ON THEIRS"
+    assert (src / "Docs" / "a (proton conflict 2).txt").read_bytes() == b"THEIRS-2"
+    assert "/my-files/Backups/Docs/a (proton conflict 2).txt" not in fake_drive.uploads()
+
+
+def test_a_trial_picked_folder_does_not_trash_until_confirmed(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/a.txt"
+    mapping = _trashing(src / "Docs", "/my-files/Backups")
+    mapping["live"] = True
+    cfg = write_mappings([mapping])
+    assert engine(cfg, "--delete").returncode == 0
+    (src / "Docs" / "a.txt").unlink()
+    result = engine(cfg, "--delete")
+    assert "Choose mapping" in result.stdout
+    assert not fake_drive.trashed(remote)
+    assert fake_drive.content(remote) == b"AAAA"

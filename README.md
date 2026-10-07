@@ -37,6 +37,26 @@ kept and nothing is deleted. Remote changes are noticed about every 5 minutes
 by the existing consumer, not every second. A mapping with no `direction` key
 stays upload-only, so an older file is not switched over by itself.
 
+- **Conflicts.** When both sides changed, your file keeps its name and
+  Proton's version is saved next to it as `name (proton conflict).ext`. A
+  later conflict gets `(proton conflict 2)`, so an older copy is never
+  overwritten. To finish, keep the version you want under the original name
+  and delete the conflict copy. The next pass sends your choice. If you make
+  both files identical, the conflict clears on its own.
+- **Deletions.** A file is only moved to the Proton trash when the pass runs
+  with `--delete` and the mapping has `allow_delete: true`. A file someone
+  changed on Proton after your last sync is downloaded again instead of being
+  trashed. A file removed on Proton is only moved out of the folder under
+  `--delete`, and only if you have not changed it since. It goes to the
+  `holding` folder in the app's data directory and is not deleted. A file you
+  changed is sent again.
+- **Live sync in the window.** Opening the window changes nothing: it does not
+  pick a folder, start watchers, or turn on login start. Live sync starts only
+  after you choose a folder with **Choose mapping…** and confirm. That dialog
+  asks separately whether local deletions should go to the Proton trash.
+  **Choose mapping…** also offers to stop it. "Open this window when I log
+  in" is in Configuration.
+
 Reference document for this project.
 
 > **To start the application:** `python3 -m ui`

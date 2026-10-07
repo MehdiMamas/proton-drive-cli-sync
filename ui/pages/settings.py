@@ -128,9 +128,11 @@ class SettingsPage:
         self.menu = QCheckBox(_("Applications menu launcher"))
         self.desktop = QCheckBox(_("Desktop shortcut"))
         self.open_current = QCheckBox(_("Open the current mappings file"))
+        self.login = QCheckBox(_("Open this window when I log in"))
         launch_l.addWidget(self.menu)
         launch_l.addWidget(self.desktop)
         launch_l.addWidget(self.open_current)
+        launch_l.addWidget(self.login)
         root.addWidget(launch_card)
 
         save = QPushButton(_("Save"))
@@ -205,6 +207,7 @@ class SettingsPage:
         self.menu.setChecked(os_path_exists(launcher.menu_path()))
         self.desktop.setChecked(os_path_exists(launcher.desktop_path()))
         self.open_current.setChecked(launcher.existing_opens_current())
+        self.login.setChecked(os_path_exists(launcher.ui_autostart_path()))
 
     def _refresh_account(self):
         import threading
@@ -311,6 +314,10 @@ class SettingsPage:
         launcher.apply_tray(self.tray.isChecked())
         target = self.window.doc.path if self.open_current.isChecked() else None
         launcher.apply_launcher(self.menu.isChecked(), self.desktop.isChecked(), target)
+        if self.login.isChecked():
+            launcher.install_ui_autostart()
+        else:
+            launcher.remove_ui_autostart()
         widgets.info(
             self.window,
             _("Saved. The interface language applies the next time you open the window."),

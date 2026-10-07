@@ -30,12 +30,14 @@ def confirm(parent, text, title, ok_text, cancel_text):
     return _notice(parent, title, text, ok_text, cancel_text)
 
 
-def confirm_check(parent, text, title, ok_text, cancel_text, check_text):
-    """(accepté, case cochée)."""
-    return _notice(parent, title, text, ok_text, cancel_text, check_text)
+def confirm_check(parent, text, title, ok_text, cancel_text, check_text,
+                  checked=False):
+    """(accepté, case cochée). ``checked`` est l'état initial de la case."""
+    return _notice(parent, title, text, ok_text, cancel_text, check_text, checked)
 
 
-def _notice(parent, title, text, ok_text, cancel_text=None, check_text=None):
+def _notice(parent, title, text, ok_text, cancel_text=None, check_text=None,
+            checked=False):
     """Dialogue au même chrome que les pages. Retourne un bool, ou (bool, bool)."""
     from PySide6.QtWidgets import QCheckBox, QDialog, QLabel
 
@@ -47,6 +49,7 @@ def _notice(parent, title, text, ok_text, cancel_text=None, check_text=None):
     box = None
     if check_text:
         box = QCheckBox(check_text)
+        box.setChecked(bool(checked))
         content.addWidget(box)
     if cancel_text:
         action(buttons, cancel_text, dlg.reject)

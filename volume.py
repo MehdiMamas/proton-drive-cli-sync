@@ -83,35 +83,42 @@ def _remote_for(mapping, root, local_path):
     return dest + "/" + rel.replace(os.sep, "/")
 
 
-def ensure_chosen(mappings):
-    """The folder Proton Drive opens.
-
-    Returns ``(mapping, changed)``. An existing ``live`` row is kept. Otherwise
-    the only two-way folder is used, or the first folder. That row becomes
-    two-way. Nothing is chosen when the file has no folder.
-    """
-    folders = []
+def _live_row(mappings):
     for row in mappings or []:
-        if not isinstance(row, dict):
-            continue
-        if row.get("type", "folder") != "folder" or not row.get("source"):
-            continue
-        if row.get("live") is True:
-            return row, False
-        folders.append(row)
-    twoway = [row for row in folders if row.get("direction") == "twoway"]
-    pick = twoway[0] if len(twoway) == 1 else (folders[0] if folders else None)
-    if pick is None:
-        return None, False
-    mark_live(mappings, pick["source"])
-    return pick, True
+        if (isinstance(row, dict) and row.get("live") is True
+                and row.get("type", "folder") == "folder" and row.get("source")):
+            return row
+    return None
 
 
-def mark_live(mappings, source):
+def confirmed_live(mappings):
+    """The folder the person chose in the window, or None.
+
+    Nothing is picked on their behalf. A ``live`` row without
+    ``live_confirmed`` was written by an earlier build on its own and is not
+    resumed.
+    """
+    row = _live_row(mappings)
+    if row is not None and row.get("live_confirmed") is True:
+        return row
+    return None
+
+
+def unconfirmed_live(mappings):
+    """A ``live`` row nobody confirmed (left by an earlier build), or None."""
+    row = _live_row(mappings)
+    if row is not None and row.get("live_confirmed") is not True:
+        return row
+    return None
+
+
+def mark_live(mappings, source, allow_delete=None):
     """The Proton Drive place opens this one folder. Other rows lose ``live``.
 
-    The chosen folder becomes two-way. It is not turned into a copy of the
-    whole account.
+    Called only after the person confirmed. The chosen folder becomes
+    two-way. ``allow_delete`` is their answer: True sends files deleted here
+    to the Proton trash, False keeps them on Proton, None leaves the row as
+    it is.
     """
     wanted = os.path.normpath(source)
     chosen = None
@@ -121,16 +128,35 @@ def mark_live(mappings, source):
         src = os.path.normpath(row.get("source") or "")
         if row.get("type", "folder") == "folder" and src == wanted:
             row["live"] = True
+            row["live_confirmed"] = True
             if row.get("direction") != "twoway":
                 row["direction"] = "twoway"
-            # This one folder sends local removals to the Proton trash.
-            # Other rows keep whatever deletion policy they already had.
-            row["allow_delete"] = True
-            row["delete_mode"] = "trash"
+            if allow_delete is True:
+                row["allow_delete"] = True
+                row["delete_mode"] = "trash"
+            elif allow_delete is False:
+                row["allow_delete"] = False
             chosen = row
         else:
             row.pop("live", None)
+            row.pop("live_confirmed", None)
     return chosen
+
+
+def clear_live(mappings, allow_delete=None):
+    """No folder is live any more. Returns the row that was, or None.
+
+    The row keeps its direction. ``allow_delete=False`` also turns deletion
+    off on it.
+    """
+    was = _live_row(mappings)
+    for row in mappings or []:
+        if isinstance(row, dict):
+            row.pop("live", None)
+            row.pop("live_confirmed", None)
+    if was is not None and allow_delete is False:
+        was["allow_delete"] = False
+    return was
 
 
 def note_local_change(config_path, mappings, local_path):

@@ -128,8 +128,9 @@ def test_choose_mapping_points_proton_drive_at_that_folder(tmp_path, monkeypatch
         {"type": "folder", "source": str(docs), "dest_parent": "/my-files/Backups"},
         {"type": "folder", "source": str(other), "dest_parent": "/my-files/Other"},
     ]
-    chosen = volume.mark_live(rows, str(docs))
+    chosen = volume.mark_live(rows, str(docs), allow_delete=True)
     assert chosen["live"] is True
+    assert chosen["live_confirmed"] is True
     assert chosen["direction"] == "twoway"
     assert chosen["allow_delete"] is True
     assert chosen["delete_mode"] == "trash"
@@ -152,22 +153,50 @@ def test_choose_mapping_points_proton_drive_at_that_folder(tmp_path, monkeypatch
     assert text.count("<bookmark ") == 1
 
 
-def test_a_folder_mapping_becomes_the_proton_drive_place():
+def test_nothing_is_chosen_for_the_person():
     rows = [
         {"type": "folder", "source": "/data/Docs", "dest_parent": "/my-files/Docs"},
         {"type": "folder", "source": "/data/Other", "dest_parent": "/my-files/Other",
          "direction": "twoway"},
     ]
-    chosen, changed = volume.ensure_chosen(rows)
-    assert changed is True
-    assert chosen["source"] == "/data/Other"
-    assert chosen["live"] is True
-    assert chosen["allow_delete"] is True
-    assert chosen["delete_mode"] == "trash"
-    assert "allow_delete" not in rows[0]
-    again, changed = volume.ensure_chosen(rows)
-    assert changed is False
-    assert again is chosen
+    before = [dict(row) for row in rows]
+    assert volume.confirmed_live(rows) is None
+    assert volume.unconfirmed_live(rows) is None
+    assert rows == before
+    assert not hasattr(volume, "ensure_chosen")
+
+
+def test_choosing_a_folder_keeps_its_deletion_answer():
+    rows = [
+        {"type": "folder", "source": "/data/Docs", "dest_parent": "/my-files/Docs",
+         "allow_delete": True, "delete_mode": "permanent"},
+        {"type": "folder", "source": "/data/Other", "dest_parent": "/my-files/Other",
+         "live": True, "live_confirmed": True},
+    ]
+    chosen = volume.mark_live(rows, "/data/Docs", allow_delete=False)
+    assert chosen["allow_delete"] is False
+    assert chosen["direction"] == "twoway"
+    assert volume.confirmed_live(rows) is chosen
+    assert "live" not in rows[1] and "live_confirmed" not in rows[1]
+    untouched = [{"type": "folder", "source": "/data/X", "dest_parent": "/my-files"}]
+    volume.mark_live(untouched, "/data/X")
+    assert "allow_delete" not in untouched[0]
+
+
+def test_a_trial_pick_is_not_resumed_and_can_be_cleared():
+    rows = [
+        {"type": "folder", "source": "/data/Docs", "dest_parent": "/my-files/Docs",
+         "direction": "twoway", "live": True, "allow_delete": True,
+         "delete_mode": "trash"},
+    ]
+    assert volume.confirmed_live(rows) is None
+    assert volume.unconfirmed_live(rows) is rows[0]
+    was = volume.clear_live(rows, allow_delete=False)
+    assert was is rows[0]
+    assert "live" not in rows[0]
+    assert rows[0]["allow_delete"] is False
+    assert rows[0]["direction"] == "twoway"
+    assert volume.unconfirmed_live(rows) is None
 
 
 def test_a_change_is_due_after_the_quiet_period():

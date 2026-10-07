@@ -11,6 +11,28 @@ supprimé. Les changements distants sont vus environ toutes les 5 minutes par
 le consommateur déjà en place, pas à chaque seconde. Un mapping sans clé
 `direction` reste en envoi seul, donc un ancien fichier ne bascule pas tout seul.
 
+- **Conflits.** Quand les deux côtés ont changé, votre fichier garde son nom
+  et la version de Proton est enregistrée à côté sous
+  `nom (proton conflict).ext`. Un conflit suivant donne
+  `(proton conflict 2)`, donc une copie plus ancienne n'est jamais écrasée.
+  Pour terminer, gardez la version voulue sous le nom d'origine et supprimez
+  la copie de conflit. La passe suivante envoie votre choix. Si les deux
+  fichiers deviennent identiques, le conflit se règle tout seul.
+- **Suppressions.** Un fichier n'est mis à la corbeille Proton que si la passe
+  tourne avec `--delete` et que le mapping a `allow_delete: true`. Un fichier
+  modifié sur Proton après votre dernière synchro est retéléchargé au lieu
+  d'être mis à la corbeille. Un fichier supprimé sur Proton n'est sorti du
+  dossier qu'avec `--delete`, et seulement si vous ne l'avez pas modifié
+  depuis. Il va dans le dossier `holding` du répertoire de données de
+  l'application, il n'est pas effacé. Un fichier modifié est renvoyé.
+- **Synchro en direct dans la fenêtre.** Ouvrir la fenêtre ne change rien :
+  aucun dossier n'est choisi, aucun suivi ne démarre, le lancement à la
+  connexion n'est pas activé. La synchro en direct démarre seulement quand
+  vous choisissez un dossier avec **Choose mapping…** et confirmez. Cette
+  boîte demande à part si les suppressions locales vont à la corbeille
+  Proton. **Choose mapping…** propose aussi de l'arrêter. « Ouvrir cette
+  fenêtre à la connexion » est dans Configuration.
+
 Document de référence pour ce projet.
 
 > **Pour lancer l'application :** `python3 -m ui`
