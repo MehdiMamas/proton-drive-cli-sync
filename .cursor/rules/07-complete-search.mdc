@@ -13,4 +13,4 @@ When you change or remove an identity string, folder, protocol, mutex, endpoint,
 2. Search the sibling spellings too. A leading dot, a `-dev` suffix, and another product's folder name are different paths (`app-dev` and `.app-dev` are different directories).
 3. For each path, open every writer and every reader. A line in a doc about a reader means the writer still has to be found.
 4. Sort the hits. A package `"name"` is not a data folder; a `path.join` that contains the string is. Do not drop a page because most hits are the first kind.
-5. Record remaining intentional hits in `PROGRESS.md` under **Notes / decisions**, with the reason they stay.
+5. Record remaining intentional hits in the PR description, with the reason they stay.

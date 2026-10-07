@@ -11,7 +11,7 @@ alwaysApply: false
   or `bash scripts/test.sh` (inside WSL). Pass pytest args through: `wsl -- bash scripts/test.sh -k equal_size -vv`.
 - `scripts/test.sh` creates/uses `.venv-wsl/` inside WSL and installs `requirements-dev.txt`.
 - Never run the suite with Windows Python: `fcntl` does not exist there and results are meaningless.
-- The gate cell in `PROGRESS.md` and the PR's "How to test" section get the command and the final pytest summary line from WSL, plus the distro name.
+- The PR's "How to test" section gets the command and the final pytest summary line from WSL, plus the distro name.
 
 ## Writing
 - Use the fake CLI (`tests/fakes/fake_proton_drive.py`) through the fixtures in `tests/conftest.py`.

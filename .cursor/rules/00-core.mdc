@@ -1,17 +1,17 @@
 ---
-description: Proton Drive Sync core product contract, architecture boundaries and phase workflow
+description: Proton Drive Sync core product contract, architecture boundaries and workflow
 globs:
 alwaysApply: true
 ---
 
 # Proton Drive Sync – core rules
 
-The build is split into one plan per phase: `.cursor/plans/phase-NN-*.plan.md`. `.cursor/plans/00-roadmap.plan.md` is the index, and `PROGRESS.md` names the active phase. Phase discipline is defined in `05-phase-discipline.mdc`. The long-form spec is `PROTON_DRIVE_SYNC_MASTER_PLAN.md`, and plan items cite it as §N. Read the cited sections before implementing a phase.
+The long-form spec is `PROTON_DRIVE_SYNC_MASTER_PLAN.md` (cited as §N). Read the relevant sections before changing behavior. `.cursor/plans/` and `PROGRESS.md` are data for the Phase Autopilot dashboard; chats don't run or follow the phase workflow.
 
 ## Product contract
 - A **one-way local → Proton Drive** backup tool for Linux, forked from `lafontaj/proton-drive-cli-sync` at `5a852e2`. It never downloads remote changes and never claims two-way sync.
 - All Drive access goes through Proton's official `proton-drive` CLI (tested 0.8.0). We own the mapping policy, change detection, scheduling and reporting. We never reimplement the Drive protocol or handle Proton credentials.
-- **Data safety first.** The worst bugs are: skipping changed content, reporting success when files did not reach Drive, trashing remote data the user expected to keep, renaming local files. When unsure, pick the conservative behavior (upload again, keep markers, refuse deletion) and record it in `PROGRESS.md` under Notes / decisions.
+- **Data safety first.** The worst bugs are: skipping changed content, reporting success when files did not reach Drive, trashing remote data the user expected to keep, renaming local files. When unsure, pick the conservative behavior (upload again, keep markers, refuse deletion) and say so in the PR description.
 - **Backward compatibility.** Existing `mappings*.json`, `settings.json`, caches under `~/.proton-drive-sync/` and installed systemd units keep working. Unknown keys are preserved. Every intentional behavior change gets a `CHANGELOG.md` entry with a migration note.
 - Never: real Proton access from tests, permanent deletion, personal data in the repo (real mappings, settings, logs, emails, someone's paths), presenting the fork as an official Proton product.
 
@@ -44,6 +44,6 @@ Any change to this table updates `realtime_consumer.py`, `schedule_manager.py` (
 - Never auto-commit, auto-resume side-effecting actions, or loop verify/fix without a hard cap.
 
 ## Workflow
-- Implement only the active phase in `PROGRESS.md`, using its plan. Meet its **Gate**, record the evidence in `PROGRESS.md`, get the PR through the review loop and merged (see `.cursor/skills/phase/SKILL.md`), then hand off to a new headless session with `next-phase.sh`.
+- Do the task asked. Proof that it works is the command and its result (exit code, test counts), with the OS that ran it.
 - The dev machine is Windows. All Python execution and tests run in **WSL** (`wsl -- bash scripts/test.sh`). Git, `gh` and the review script run on Windows.
 - Area rules: `10-engine-safety.mdc`, `50-testing.mdc`, `55-python-style-i18n.mdc`, `60-build-release.mdc`. Testing helpers: `.cursor/skills/fake-cli-testing/SKILL.md`.
