@@ -271,6 +271,7 @@ TWO accepted formats (backward compatibility):
 
 - `source_kind`: `"nfs"` or `"local"`. Auto-detected by the GUI, confirmed when editing. Used by the safety guard: an `nfs` source only deletes if the network mount is alive.
 - `excluded_remote`: absent (the default) or `"prune"` sends the already-uploaded remote copy of a name excluded **on this mapping** to the Proton trash on the next `--delete` pass. `"keep"` is opt-in — the checkbox in the mapping dialog — and covers only exclusions written on that mapping. A name that matches a **global** exclusion is still trashed. Any other value is treated as `"prune"` with a warning. Applies to full passes, resets and `--subpath`.
+- `max_delete_min` / `max_delete_ratio`: optional per-mapping override of the mass-deletion thresholds (see "Deletion propagation"). Absent means the values from Configuration (`settings.json`). Defaults 20 and 0.5. They do nothing until the guard is turned on.
 
 ### Exclusions
 
@@ -387,7 +388,7 @@ The mount guard also runs again right before each folder's deletions. A healthy 
 - A local deletion changes the folder's fingerprint → it is re-checked at the next `--delete` → the orphan is propagated.
 - A pass WITHOUT `--delete` does not mark folders as reconciled → a later `--delete` will catch a deletion made in between. (Backward-compatible with old caches, migrated on the fly.)
 
-**No mass-deletion guard**: a deliberate choice. A local deletion is considered intentional, and the window between two passes (point-in-time sync, not continuous) plus the trash are sufficient safety nets. The only guard is the mount one (technical failure, not human decision).
+**Mass-deletion guard, off until you turn it on.** A local deletion is taken as intended: there is no such refusal until you enable it in ⚙ Configuration. With it on, in one remote folder, a pass that would trash at least `max_delete_min` items (default 20) **and** more than `max_delete_ratio` of that folder's remote children (default 0.5) trashes **nothing** there, prints `[delete-guard]`, and does not mark the folder as reconciled, so the next pass looks again. The refusal is counted in `deletions_refused`, so the pass ends with code 5. Names kept by `excluded_remote: keep` are not counted as deletions. The two thresholds live in `settings.json` and a mapping can override them with the same keys (blank in the mapping dialog keeps the global values). `--allow-mass-delete` turns the guard off for one run. When a pass started from the editor is refused, the editor offers to run that same pass again with the guard off for that run. The mount guard is unchanged (technical failure, not this choice).
 
 > **The trash does not empty itself.** A file stays recoverable there **for as long as you do not empty it** — there is no automatic purge after any delay (the 30 days often quoted apply to Proton Mail, not Drive). Without a manual purge, the trash keeps everything `--delete` passes send to it, and your plan's storage fills up with stale files. See "[Emptying the Proton trash](#emptying-the-proton-trash)".
 
@@ -453,7 +454,8 @@ Options:
 - `--dry-run`: shows what would be done without transferring anything (and without touching the cache)
 - `--verify-hash`: compares all equal-size files by SHA1, without trusting the last pass (slower, reads every file; bypasses the cache; once after an update, then monthly use)
 - `--ignore-cache`: forces a full re-check on the Proton side (rebuilds the cache on the fly); without the record of the last pass, equal-size files are compared by SHA1, hence read in full
-- `--delete`: **master switch** for deletion propagation. Without it, no deletion. With it, every mapping with `allow_delete: true` propagates its local deletions to Proton, according to its `delete_mode` (trash/permanent) and subject to the mount guard. A name excluded on that mapping is removed from Proton too, unless the mapping asks to keep it (`excluded_remote`: `keep`, the checkbox in the mapping dialog). Global exclusions always remove the remote copy. Always test with `--dry-run` first.
+- `--delete`: **master switch** for deletion propagation. Without it, no deletion. With it, every mapping with `allow_delete: true` propagates its local deletions to Proton, according to its `delete_mode` (trash/permanent) and subject to the mount guard. A name excluded on that mapping is removed from Proton too, unless the mapping asks to keep it (`excluded_remote`: `keep`, the checkbox in the mapping dialog). Global exclusions always remove the remote copy. If the mass-deletion guard is on (it is off by default), a folder that would lose too much at once is left untouched. Always test with `--dry-run` first.
+- `--allow-mass-delete`: with `--delete`, turns the mass-deletion guard off for this run only, even when the setting is on. The editor can pass it after you accept the offer that follows a refusal.
 - `--subpath <folder>` + `--mapping-source <source>`: processes only **one subfolder** of a given mapping, instead of sweeping everything. Deletions follow the same rules as a full pass, including `excluded_remote`. Used by the real-time layer (the consumer launches the engine targeted at the folder that just changed).
 - `--check-auth`: probes **only** authentication (is the keyring unlocked?) then exits — code 0 = OK, code 2 = locked. Doesn't take the lock, syncs nothing, doesn't touch the cache. Used by the real-time consumer to avoid launching passes doomed to exit code 2 while the session isn't open (reuses the engine's exact test, no duplicated logic).
 - `-v` / `--verbose`: also shows `unchanged` files, cache skips, and the raw JSON of each folder's first element
@@ -795,6 +797,9 @@ Since the "configuration" work package, everything that varies from one installa
 | `rename_ext_whitelist` | images, video, audio, documents (37 entries) | Extensions the normalization is allowed to touch. Empty list = no restriction (historical behavior) |
 | `cli_stall_minutes` | `5` | Minutes of total inactivity after which a frozen upload is stopped. `0` disables the circuit breaker |
 | `cli_stall_max_kills` | `0` | Consecutive freezes tolerated on one destination before skipping a pass. `0` = unlimited |
+| `mass_delete_guard` | `false` | Mass-deletion guard. Off until you turn it on in ⚙ Configuration. A local deletion stays intended while it is off |
+| `max_delete_min` | `20` | With the guard on: minimum number of items in one remote folder that arms the refusal (together with the ratio). A bad value falls back to 20 |
+| `max_delete_ratio` | `0.5` | With the guard on: fraction of that folder's remote children above which the pass trashes nothing there. A bad value falls back to 0.5. Overridable per mapping |
 | `tray_enabled` | `false` | Status icon in the system tray (see below) |
 
 Changes apply at the **next launch** of the GUI and the **next restart** of the daemons (like the language). The file is written atomically and **preserves unknown keys**.
