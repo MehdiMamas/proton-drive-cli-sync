@@ -193,13 +193,10 @@ class MappingsPage:
             return
         try:
             with open(path, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    if line.startswith("@@PROGRESS"):
-                        continue
-                    shown = run.visible_text(
-                        line, self._control.verbose, self._control.errors_only)
-                    if shown:
-                        self._append(shown)
+                lines = [line for line in handle if not line.startswith("@@PROGRESS")]
+            for text in run.visible_lines(
+                    lines, self._control.verbose, self._control.errors_only):
+                self._append(text)
         except OSError:
             pass
 
