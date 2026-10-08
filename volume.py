@@ -5,6 +5,7 @@ writes the mapping, the sidebar entry, and the not-yet-synced row. It does
 not upload or download.
 """
 
+import json
 import os
 from urllib.parse import quote
 
@@ -224,35 +225,110 @@ def _bookmark(local_dir):
     ).format(href=href, title=PLACE_TITLE, ident=PLACE_ID)
 
 
-def ensure_home_link(real_dir, link_path=None):
-    """Point ``~/Proton Drive`` at the chosen folder.
+def _inside(path, root):
+    """True when ``path`` is ``root`` or somewhere under it."""
+    path = os.path.normcase(os.path.abspath(path))
+    root = os.path.normcase(os.path.abspath(root)).rstrip(os.sep)
+    return path == root or path.startswith(root + os.sep)
 
-    A missing path, or a path that is already a symlink, becomes that link.
-    A real directory that already has files is left alone. Returns
-    ``linked``, ``same``, or ``kept``.
+
+def two_way_folders(mappings):
+    """Local folders of the two-way mappings, in file order (volumes left out)."""
+    found = []
+    for mapping in mappings or []:
+        if not isinstance(mapping, dict) or mapping.get("volume") is True:
+            continue
+        if mapping.get("direction") != "twoway" or mapping.get("type", "folder") != "folder":
+            continue
+        source = mapping.get("source")
+        if isinstance(source, str) and source:
+            found.append(os.path.abspath(source))
+    return found
+
+
+def _links_record():
+    import config
+    return os.path.join(config.DATA_DIR, "drive-links.json")
+
+
+def _read_links(record):
+    try:
+        with open(record, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    return [p for p in data if isinstance(p, str)] if isinstance(data, list) else []
+
+
+def ensure_drive_root(mappings, root=None, record=None):
+    """Make ``~/Proton Drive`` a folder that shows every two-way folder.
+
+    Like My files on the website, the root holds the synced folders: each
+    two-way folder appears inside it as a link named after the folder. A
+    link left by an earlier version (``~/Proton Drive`` pointing at one
+    folder) is replaced by the real folder; only the link is removed.
+
+    Links this function made are listed in ``record``; a link whose folder
+    is no longer two-way is removed, and nothing else in the root is
+    touched. When the root is itself synced (a volume, or inside a mapped
+    folder), no link is added, because the links would be uploaded.
+
+    Returns the root path. Raises ValueError when the root is a file.
     """
-    link = os.path.abspath(link_path or default_local_dir())
-    real = os.path.abspath(real_dir)
-    if os.path.normcase(link) == os.path.normcase(real):
-        return "same"
-    if os.path.islink(link) or not os.path.lexists(link):
-        parent = os.path.dirname(link)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        if os.path.lexists(link):
+    root = os.path.abspath(root or default_local_dir())
+    record = record or _links_record()
+    for mapping in mappings or []:
+        source = mapping.get("source") if isinstance(mapping, dict) else None
+        if isinstance(source, str) and source and _inside(root, source):
+            return root
+    if os.path.islink(root):
+        os.remove(root)
+    if os.path.lexists(root) and not os.path.isdir(root):
+        raise ValueError("not a directory")
+    os.makedirs(root, exist_ok=True)
+
+    wanted = [s for s in two_way_folders(mappings) if not _inside(s, root)]
+    ours = []
+    for link in _read_links(record):
+        if not _inside(link, root) or not os.path.islink(link):
+            continue
+        target = os.path.abspath(os.path.join(root, os.readlink(link)))
+        if target in wanted:
+            ours.append(link)
+        else:
             os.remove(link)
-        os.symlink(real, link)
-        return "linked"
-    return "kept"
+    shown = {os.path.abspath(os.path.join(root, os.readlink(link))) for link in ours}
+    for source in wanted:
+        if source in shown:
+            continue
+        name = os.path.basename(source.rstrip(os.sep)) or "Folder"
+        link, n = os.path.join(root, name), 2
+        while os.path.lexists(link):
+            link = os.path.join(root, "{name} ({n})".format(name=name, n=n))
+            n += 1
+        os.symlink(source, link)
+        ours.append(link)
+        shown.add(source)
+    parent = os.path.dirname(record)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    _replace(record, json.dumps(sorted(ours), indent=1) + "\n")
+    return root
 
 
 def places_path():
     return os.path.expanduser("~/.local/share/user-places.xbel")
 
 
-def ensure_dolphin_place(local_dir, path=None):
-    """Insert the Proton Drive place. Other bookmarks in the file stay."""
+def ensure_dolphin_place(local_dir, path=None, add=True):
+    """Insert the Proton Drive place. Other bookmarks in the file stay.
+
+    With ``add=False`` an existing place is pointed at ``local_dir`` and a
+    missing one (never made, or removed by the person) is not added.
+    """
     target = path or places_path()
+    if not add and not os.path.exists(target):
+        return False
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -285,7 +361,7 @@ def ensure_dolphin_place(local_dir, path=None):
         _replace(target, text)
         return True
     close = text.rfind("</xbel>")
-    if close < 0:
+    if close < 0 or not add:
         return False
     text = text[:close] + bookmark + text[close:]
     _replace(target, text)

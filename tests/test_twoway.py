@@ -593,3 +593,48 @@ def test_a_failed_download_says_why_in_plain_words(
     status = run.sync_status(5, counters)
     assert "could not be sent or downloaded" in status
     assert not (src / "Docs" / "web.txt").exists()
+
+
+def test_a_failed_download_names_the_cli_error_and_the_new_file(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups", direction="twoway")])
+    assert engine(cfg).returncode == 0
+    fake_drive.seed_file("/my-files/Backups/Docs/web.txt", b"WEB")
+    fake_drive.add_fault(cmd="download", times=5, stderr="Error: node is not ready")
+    result = engine(cfg)
+    assert result.returncode == 5, result.stdout
+    failed = [line for line in result.stdout.splitlines()
+              if line.startswith("[download-failed]")]
+    assert failed, result.stdout
+    # The file was only on Proton: nothing local was "kept".
+    assert "could not download" in failed[0]
+    assert "local file kept" not in failed[0]
+    assert "Proton CLI said: Error: node is not ready" in failed[0]
+
+
+def test_a_download_under_another_name_is_still_used(tmp_path, monkeypatch):
+    import types
+
+    import twoway
+
+    def wrote(name):
+        def run_cli(args, **_kw):
+            directory = args[-1]
+            if name:
+                (tmp_path / directory / name).write_bytes(b"WEB")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        return run_cli
+
+    first = tmp_path / "one"
+    first.mkdir()
+    monkeypatch.setattr(twoway._ps, "run_cli", wrote("web (1).txt"))
+    path, skipped, reason = twoway._fetch("/my-files/web.txt", str(first))
+    assert (path, skipped, reason) == (str(first / "web (1).txt"), False, "")
+
+    empty = tmp_path / "two"
+    empty.mkdir()
+    monkeypatch.setattr(twoway._ps, "run_cli", wrote(None))
+    path, skipped, reason = twoway._fetch("/my-files/web.txt", str(empty))
+    assert path is None and not skipped
+    assert "wrote 0 files" in reason

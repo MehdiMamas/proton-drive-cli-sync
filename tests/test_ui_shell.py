@@ -83,6 +83,7 @@ def _open_window_and_wait(monkeypatch, cfg):
         realtime_manager, "install_or_update_units",
         lambda *a, **k: started.append(a) or (True, "", None))
     monkeypatch.setattr(volume, "ensure_dolphin_place", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(volume, "ensure_drive_root", lambda *a, **k: started.append(a))
     assert config.set_last_mappings_path(str(cfg))
     app = QApplication.instance() or QApplication([])
     window = MainWindow()

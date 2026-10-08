@@ -340,14 +340,12 @@ def _download_over(local_path, remote_path, remote_info, ctx):
     parent = os.path.dirname(local_path) or "."
     temporary = tempfile.mkdtemp(prefix=".proton-sync-download-", dir=parent)
     try:
-        fetched, skipped = _fetch(remote_path, temporary)
+        fetched, skipped, reason = _fetch(remote_path, temporary)
         if skipped:
             _mark_document(local_path, remote_path, remote_info, ctx)
             return True
         if fetched is None:
-            print("[download-failed] " + _(
-                "download failed, local file kept: {p}").format(p=local_path))
-            _ps._RUN.add("files_failed")
+            _download_failed(local_path, reason)
             return False
         os.replace(fetched, local_path)
     finally:
@@ -358,17 +356,53 @@ def _download_over(local_path, remote_path, remote_info, ctx):
 
 
 def _fetch(remote_path, directory):
-    """Return (local path or None, skipped_document)."""
+    """Return (local path or None, skipped_document, reason).
+
+    ``directory`` is a fresh, empty folder. The CLI normally writes the file
+    under its remote name; if it picked another name, the one file it wrote
+    is used. ``reason`` is the CLI's own message when nothing usable came
+    back.
+    """
     result = _ps.run_cli(
         ["filesystem", "download", "-f", "replace", remote_path, directory])
     text = (result.stdout or "") + "\n" + (result.stderr or "")
     if "skipped:" in text:
-        return None, True
+        return None, True, ""
+    if result.returncode != 0:
+        return None, False, _cli_reason(result)
     name = os.path.basename(remote_path.rstrip("/"))
     path = os.path.join(directory, name)
-    if result.returncode != 0 or not os.path.isfile(path):
-        return None, False
-    return path, False
+    if os.path.isfile(path):
+        return path, False, ""
+    written = []
+    for parent, _dirs, files in os.walk(directory):
+        written.extend(os.path.join(parent, f) for f in files)
+    if len(written) == 1:
+        return written[0], False, ""
+    return None, False, _cli_reason(result) or _(
+        "the Proton CLI finished but wrote {n} files instead of one").format(
+            n=len(written))
+
+
+def _cli_reason(result):
+    """Last line the CLI printed on stderr, else stdout, kept short."""
+    for stream in (result.stderr, result.stdout):
+        lines = [line.strip() for line in (stream or "").splitlines() if line.strip()]
+        if lines:
+            reason = lines[-1]
+            return reason if len(reason) <= 300 else reason[:297] + "..."
+    return ""
+
+
+def _download_failed(local_path, reason):
+    if os.path.lexists(local_path):
+        text = _("download failed, local file kept: {p}").format(p=local_path)
+    else:
+        text = _("could not download {p}").format(p=local_path)
+    if reason:
+        text += " — " + _("Proton CLI said: {r}").format(r=reason)
+    print("[download-failed] " + text)
+    _ps._RUN.add("files_failed")
 
 
 def _write_conflict(local_path, remote_path, remote_info, row, ctx):
@@ -384,14 +418,12 @@ def _write_conflict(local_path, remote_path, remote_info, row, ctx):
     parent = os.path.dirname(local_path) or "."
     temporary = tempfile.mkdtemp(prefix=".proton-sync-download-", dir=parent)
     try:
-        fetched, skipped = _fetch(remote_path, temporary)
+        fetched, skipped, reason = _fetch(remote_path, temporary)
         if skipped:
             _mark_document(local_path, remote_path, remote_info, ctx)
             return True
         if fetched is None:
-            print("[download-failed] " + _(
-                "download failed, local file kept: {p}").format(p=local_path))
-            _ps._RUN.add("files_failed")
+            _download_failed(local_path, reason)
             return False
         conflict_path = _conflict_path(local_path)
         os.replace(fetched, conflict_path)

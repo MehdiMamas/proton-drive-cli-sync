@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- A file added on the Proton website could fail to come down with only "download failed, local file kept", which named no cause and claimed a local file that did not exist (#23). The `[download-failed]` line now says "could not download" for a new file and adds the Proton CLI's own message. If the CLI saves the file under another name, the one file it wrote is used instead of failing. Migration: none.
+
+### Changed
+
+- Proton Drive in Dolphin opened the one folder chosen for live sync, and `~/Proton Drive` was a link to it (#22). `~/Proton Drive` is now a folder that shows every two-way folder inside it, like My files on the website, and the Dolphin place opens it. Saving the mappings file keeps that list current once 🔄 Live sync… has set it up. Sync marks show inside those folders too. Nothing is added when `~/Proton Drive` is itself synced, because the links would be uploaded. Migration: the old link is replaced by the folder, and the Dolphin place moved to it, the next time you save the mappings or confirm 🔄 Live sync…. Only the link is removed, never a file. A place you removed from Dolphin is not added back on save.
+
 ## [2.3.1] - 2026-10-08
 
 Fixes from the first user reports (#14, #15, #16). Checked with the fake CLI in WSL Ubuntu, not against a real Proton account.

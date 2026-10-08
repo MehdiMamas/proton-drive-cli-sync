@@ -66,6 +66,10 @@ def file_status(db, local_path):
         if normalized != local_path:
             row = db.get(normalized)
     if row is None:
+        real = _resolved(local_path)
+        if real:
+            row = db.get(real)
+    if row is None:
         return "unknown"
     state = row.get("state")
     if state not in STATES:
@@ -99,13 +103,33 @@ def _is_immediate(normalized, root, prefix):
     return os.sep not in normalized[len(prefix):]
 
 
+def _resolved(path):
+    """The real path when ``path`` goes through a link, else None.
+
+    ``~/Proton Drive`` shows each synced folder as a link; the database
+    holds the real paths.
+    """
+    if not isinstance(path, str) or not path:
+        return None
+    real = os.path.realpath(path)
+    return real if real != os.path.normpath(path) else None
+
+
 def path_emblem(db, local_path):
-    """Emblem for one path.
+    """Emblem for one path, also when it is reached through a link.
 
     A file uses its own row. A directory with no row uses the strongest
     mark among the rows inside it, so the mapped folder itself can show a
     status. No row and no child row means no mark.
     """
+    found = _path_emblem(db, local_path)
+    if found:
+        return found
+    real = _resolved(local_path)
+    return _path_emblem(db, real) if real else ""
+
+
+def _path_emblem(db, local_path):
     state = file_status(db, local_path)
     own = emblem_for(state)
     if own:
@@ -137,9 +161,20 @@ def path_emblem(db, local_path):
 def directory_status(db, directory):
     """Emblem name for each immediate child row of ``directory``.
 
-    Keys are normalized absolute paths. A row with no emblem is omitted so
+    Keys are normalized absolute paths under ``directory`` as asked, also
+    when it is reached through a link. A row with no emblem is omitted so
     clients show no mark. Nested files wait until that folder is opened.
     """
+    found = _directory_status(db, directory)
+    real = None if found else _resolved(directory)
+    if not real:
+        return found
+    asked = os.path.normpath(directory)
+    return {os.path.join(asked, os.path.basename(path)): emblem
+            for path, emblem in _directory_status(db, real).items()}
+
+
+def _directory_status(db, directory):
     if not isinstance(directory, str) or not directory:
         return {}
     root = os.path.normpath(directory)

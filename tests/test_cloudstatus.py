@@ -252,3 +252,25 @@ def test_running_service_distinguishes_conflict_from_synced(tmp_path):
         if daemon.poll() is None:
             daemon.terminate()
             daemon.wait(timeout=5)
+
+
+def test_marks_follow_the_folder_links_in_proton_drive(tmp_path):
+    real = tmp_path / "data" / "Docs"
+    real.mkdir(parents=True)
+    real = type(real)(os.path.realpath(str(real)))
+    (real / "a.txt").write_text("a", encoding="utf-8")
+    root = tmp_path / "Proton Drive"
+    root.mkdir()
+    os.symlink(str(real), str(root / "Docs"))
+    shown = os.path.join(str(root), "Docs")
+    mappings = tmp_path / "mappings.json"
+    mappings.write_text("{}", encoding="utf-8")
+    with syncdb.SyncDB(syncdb.database_path(str(mappings), str(tmp_path))) as db:
+        db.upsert(_row(str(real / "a.txt"), "conflict"))
+        assert cloudstatus.file_status(db, os.path.join(shown, "a.txt")) == "conflict"
+        assert cloudstatus.path_emblem(db, shown) == cloudstatus.EMBLEM_PROBLEM
+        assert cloudstatus.directory_status(db, shown) == {
+            os.path.join(shown, "a.txt"): cloudstatus.EMBLEM_PROBLEM}
+        # The real paths still answer as before.
+        assert cloudstatus.directory_status(db, str(real)) == {
+            str(real / "a.txt"): cloudstatus.EMBLEM_PROBLEM}
