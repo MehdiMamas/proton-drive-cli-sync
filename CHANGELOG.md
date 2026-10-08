@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-10-08
+
+The fixes lafontaj made after merging upstream #8, applied here (#26, #27). Checked with the fake CLI in WSL Ubuntu, not against a real Proton account.
+
 ### Fixed
 
 - `--refresh-units` no longer moves an installed schedule to the folder it is run from. It keeps the engine command on `ExecStart` (quoting and the `/usr/bin/proton-drive-sync` launcher included) and the `PROTON_DRIVE_CLI` line, and does not add one that was not there. Install / Update in the Schedule tab still writes the engine and CLI of the running copy. Migration: none.
