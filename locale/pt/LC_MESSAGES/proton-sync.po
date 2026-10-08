@@ -3531,12 +3531,11 @@ msgstr "Não foi possível encontrar o binário da CLI do Proton Drive."
 
 msgid ""
 "This application does not perform the sync itself: it drives the official "
-"`proton-drive` binary, which you download separately. It does not search the "
-"system for it — it looks in this order:"
+"`proton-drive` binary, which you download separately. It looks in this order:"
 msgstr ""
 "Esta aplicação não faz a sincronização por si mesma: comanda o binário "
-"oficial `proton-drive`, que descarrega separadamente. Não o procura no "
-"sistema — resolve-o por esta ordem:"
+"oficial `proton-drive`, que descarrega separadamente. Resolve-o por esta "
+"ordem:"
 
 msgid "  1. the PROTON_DRIVE_CLI environment variable, if set;"
 msgstr "  1. a variável de ambiente PROTON_DRIVE_CLI, se estiver definida;"
@@ -3546,13 +3545,12 @@ msgstr ""
 "  2. o campo «Caminho do binário da CLI do Proton» na janela Configuração;"
 
 msgid ""
-"Simplest fix: place the binary next to the scripts, at the third location "
-"above — nothing to configure. To keep it elsewhere, fill in the "
-"Configuration field."
+"Simplest fix: install the `proton-drive` binary on PATH, or place it next to "
+"the scripts (step 3). To keep it elsewhere, fill in the Configuration field."
 msgstr ""
-"O mais simples: coloque o binário junto aos scripts, na terceira localização "
-"indicada acima — assim não há nada a configurar. Para o guardar noutro "
-"sítio, preencha o campo da janela Configuração."
+"O mais simples: instale o binário `proton-drive` no PATH, ou coloque-o junto "
+"aos scripts (passo 3). Para o guardar noutro sítio, preencha o campo da "
+"janela Configuração."
 
 msgid ""
 "If you change this path AFTER installing the services, reinstall them: "
@@ -3564,8 +3562,8 @@ msgstr ""
 "contrário, continuariam a apontar para o antigo."
 
 #, python-brace-format
-msgid "  3. failing that: {p}"
-msgstr "  3. na falta disso: {p}"
+msgid "  3. {p}, when that file is executable;"
+msgstr "  3. {p}, quando esse ficheiro é executável;"
 
 msgid "Open Configuration…"
 msgstr "Abrir Configuração…"
@@ -4128,6 +4126,46 @@ msgstr ""
 "Execute-o uma vez após atualizar a partir de uma versão anterior e depois "
 "reserve-o para uma verificação ocasional (ex. uma vez por mês), não para uso "
 "diário."
+
+msgid "  4. `proton-drive` on PATH;"
+msgstr "  4. `proton-drive` no PATH;"
+
+msgid "  5. otherwise the path in step 3, so the error can name it."
+msgstr "  5. caso contrário, o caminho do passo 3, para o erro o poder nomear."
+
+#, python-brace-format
+msgid "Settings copied to {p}. The previous file was left in place."
+msgstr ""
+"Definições copiadas para {p}. O ficheiro anterior foi deixado no lugar."
+
+#, python-brace-format
+msgid "Could not write settings to {p}; reading {legacy} instead."
+msgstr "Não foi possível escrever as definições em {p}; a ler {legacy}."
+
+msgid "Settings location"
+msgstr "Localização das definições"
+
+msgid "Settings file"
+msgstr "Ficheiro de definições"
+
+msgid "Settings file in use:"
+msgstr "Ficheiro de definições em uso:"
+
+#, python-brace-format
+msgid ""
+"Settings now live in {path}.\n"
+"\n"
+"The file beside the scripts is no longer read.\n"
+"\n"
+"A backup of the scripts folder no longer includes the configuration. Add "
+"this folder to your backups: {folder}."
+msgstr ""
+"As definições estão agora em {path}.\n"
+"\n"
+"O ficheiro ao lado dos scripts já não é lido.\n"
+"\n"
+"Uma cópia de segurança da pasta dos scripts já não inclui a configuração. "
+"Acrescente esta pasta às suas cópias de segurança: {folder}."
 
 #, python-brace-format
 msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."

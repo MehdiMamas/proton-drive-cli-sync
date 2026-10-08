@@ -2923,8 +2923,7 @@ msgstr ""
 
 msgid ""
 "This application does not perform the sync itself: it drives the official "
-"`proton-drive` binary, which you download separately. It does not search the "
-"system for it — it looks in this order:"
+"`proton-drive` binary, which you download separately. It looks in this order:"
 msgstr ""
 
 msgid "  1. the PROTON_DRIVE_CLI environment variable, if set;"
@@ -2934,9 +2933,8 @@ msgid "  2. the “Proton CLI binary path” field in the Configuration window;"
 msgstr ""
 
 msgid ""
-"Simplest fix: place the binary next to the scripts, at the third location "
-"above — nothing to configure. To keep it elsewhere, fill in the "
-"Configuration field."
+"Simplest fix: install the `proton-drive` binary on PATH, or place it next to "
+"the scripts (step 3). To keep it elsewhere, fill in the Configuration field."
 msgstr ""
 
 msgid ""
@@ -2946,7 +2944,7 @@ msgid ""
 msgstr ""
 
 #, python-brace-format
-msgid "  3. failing that: {p}"
+msgid "  3. {p}, when that file is executable;"
 msgstr ""
 
 msgid "Open Configuration…"
@@ -3331,6 +3329,39 @@ msgid ""
 "SLOWER: reads every file in full. Also ignores the cache.\n"
 "Run it once after updating from an older version, then keep it for an "
 "occasional check (e.g. once a month), not for daily use."
+msgstr ""
+
+msgid "  4. `proton-drive` on PATH;"
+msgstr ""
+
+msgid "  5. otherwise the path in step 3, so the error can name it."
+msgstr ""
+
+#, python-brace-format
+msgid "Settings copied to {p}. The previous file was left in place."
+msgstr ""
+
+#, python-brace-format
+msgid "Could not write settings to {p}; reading {legacy} instead."
+msgstr ""
+
+msgid "Settings location"
+msgstr ""
+
+msgid "Settings file"
+msgstr ""
+
+msgid "Settings file in use:"
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"Settings now live in {path}.\n"
+"\n"
+"The file beside the scripts is no longer read.\n"
+"\n"
+"A backup of the scripts folder no longer includes the configuration. Add "
+"this folder to your backups: {folder}."
 msgstr ""
 
 #, python-brace-format
