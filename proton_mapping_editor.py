@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.28.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.29.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -468,10 +468,10 @@ WINDOW_ICON_PATH = os.path.join(
 # dur — installer le dossier entier ailleurs fonctionne sans rien reconfigurer).
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Emplacements par défaut. Le binaire CLI suit la résolution PARTAGÉE de
-# config.py (variable d'environnement > réglage persistant > défaut intégré) ;
-# les deux autres se déduisent simplement d'APP_DIR (pas un réglage distinct —
-# c'est toujours « à côté de ce fichier »).
+# Emplacements par défaut. Le binaire CLI suit paths.resolve_cli
+# (variable d'environnement, puis réglage persistant, puis binaire exécutable
+# à côté des scripts, puis PATH). Les deux autres se déduisent simplement
+# d'APP_DIR (pas un réglage distinct — c'est toujours « à côté de ce fichier »).
 # 1.25.2 — RÉSOLU À L'USAGE, plus figé à l'import. Le GUI reste ouvert des
 # heures ; une constante calculée au démarrage ignorait tout chemin modifié
 # depuis la fenêtre Configuration, DANS LES DEUX SENS — ni la panne ni la
@@ -483,7 +483,11 @@ def cli_path():
     """Chemin du binaire CLI, relu à chaque appel (voir la note ci-dessus)."""
     if _HAS_CONFIG:
         return appconfig.resolve_proton_cli()
-    return os.path.join(APP_DIR, "proton-drive")
+    try:
+        import paths
+        return paths.resolve_cli(APP_DIR, None)
+    except ImportError:
+        return os.path.join(APP_DIR, "proton-drive")
 DEFAULT_ENGINE = os.path.join(APP_DIR, "proton_sync.py")
 DEFAULT_LOG_DIR = os.path.join(APP_DIR, "logs")
 
@@ -1346,6 +1350,10 @@ class MappingEditor(tk.Tk):
         # différé comme la sonde CLI. Pas de lecture du fichier ni de
         # systemctl dans __init__.
         self.after(400, self._refresh_legacy_service_unit)
+        # Même motif : le dialogue prend un grab, donc pas dans __init__ avant
+        # que la fenêtre puisse s'afficher. Un passage moteur qui a déjà copié
+        # le fichier laisse la clé en place ; seul l'éditeur la retire.
+        self.after(450, self._announce_settings_move)
         self._start_cli_version_probe()
 
         # Détection automatique de l'état d'authentification Proton, en arrière-plan
@@ -1444,6 +1452,22 @@ class MappingEditor(tk.Tk):
             except Exception:
                 pass
             return ok
+
+    def _announce_settings_move(self):
+        """Une fois : où sont les réglages, l'ancien fichier n'est plus lu,
+        et quel dossier ajouter aux sauvegardes.
+
+        Le texte et le retrait de la clé sont dans paths (appelables sans Tk).
+        """
+        try:
+            import paths
+        except ImportError:
+            return
+        if not paths.settings_move_notice_pending():
+            return
+        dlg_info(self, paths.settings_move_notice_text(),
+                 title=_("Settings location"))
+        paths.clear_settings_move_notice()
 
     def _check_cli_present_at_startup(self):
         """Prévient si le binaire `proton-drive` est introuvable, et propose
@@ -1634,11 +1658,13 @@ class MappingEditor(tk.Tk):
         try:
             if appconfig.rename_ext_auto_disabled():
                 return                      # déjà fait : le choix de l'utilisateur prime
+            # Même décision que le moteur (lecture seule). On n'écrit le fichier
+            # que pour mémoriser la bascule unique, et le dialogue reste ici.
+            if appconfig.effective_rename_ext(_ENGINE.cli_supports_shared_delete):
+                return                      # CLI ancien, ou choix explicite : on garde
             if not appconfig.rename_ext_enabled():
                 appconfig.set_rename_ext_auto_disabled(True)   # déjà décoché
                 return
-            if not _ENGINE.cli_supports_shared_delete():
-                return                      # CLI ancien : le contournement sert encore
             appconfig.set_rename_ext_enabled(False)
             appconfig.set_rename_ext_auto_disabled(True)
         except Exception:
@@ -2095,7 +2121,7 @@ class MappingEditor(tk.Tk):
         parse plus qu'~1×/10 s au lieu de 2×/1,5 s."""
         if not self.config_path:
             return {}
-        cache_dir = appconfig.CACHE_DIR if _HAS_CONFIG else os.path.expanduser("~/.proton_sync_cache")
+        cache_dir = appconfig.CACHE_DIR if _HAS_CONFIG else os.path.expanduser("~/.proton-drive-sync/cache")
         name = os.path.basename(self.config_path).replace(".json", "") + ".cache"
         path = os.path.join(cache_dir, name)
         try:
@@ -3060,7 +3086,7 @@ class MappingEditor(tk.Tk):
         if not self.config_path or mapping.get("type") != "folder":
             return
         cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
-                     else os.path.expanduser("~/.proton_sync_cache"))
+                     else os.path.expanduser("~/.proton-drive-sync/cache"))
         name = os.path.basename(self.config_path).replace(".json", "") + ".cache"
         path = os.path.join(cache_dir, name)
         try:
@@ -3096,7 +3122,7 @@ class MappingEditor(tk.Tk):
         """Chemin du fichier cache associé à un fichier de mappings quelconque
         (même règle que le moteur : CACHE_DIR/<nom sans .json>.cache)."""
         cache_dir = (appconfig.CACHE_DIR if _HAS_CONFIG
-                     else os.path.expanduser("~/.proton_sync_cache"))
+                     else os.path.expanduser("~/.proton-drive-sync/cache"))
         name = os.path.basename(config_path).replace(".json", "") + ".cache"
         return os.path.join(cache_dir, name)
 
@@ -3986,6 +4012,21 @@ class MappingEditor(tk.Tk):
                 except tk.TclError:
                     pass
             ttk.Button(parent, text="?", width=2, command=show).pack(side="left", padx=(4, 0))
+
+        # Chemin réellement lu (paths.settings_path). Lecture seule : ce n'est
+        # pas un réglage saisi dans cette fenêtre.
+        try:
+            import paths as _paths
+            _settings_file = _paths.settings_path()
+        except Exception:
+            _settings_file = ""
+        if _settings_file:
+            loc = ttk.LabelFrame(frm, text=_("Settings file"), padding=10)
+            loc.pack(fill="x", pady=(0, 10))
+            ttk.Label(loc, text=_("Settings file in use:")).pack(anchor="w")
+            _loc_var = tk.StringVar(value=_settings_file)
+            ttk.Entry(loc, textvariable=_loc_var, width=72,
+                      state="readonly").pack(anchor="w", fill="x")
 
         # ---- Section Compte Proton ----
         if _HAS_REALTIME:
@@ -5217,7 +5258,7 @@ class MappingEditor(tk.Tk):
             self.status.set(_("Sync interrupted."))
 
     def _lock_is_busy(self, env=None):
-        """True si le verrou moteur (~/.proton_sync.lock) est actuellement tenu par
+        """True si le verrou moteur (~/.proton-drive-sync/proton_sync.lock) est actuellement tenu par
         un autre passage. Utilise --check-lock du moteur : une sonde qui teste
         EXACTEMENT le même flock puis le relâche aussitôt (non destructif, ne lance
         aucune synchro). Renvoie False en cas de doute (mieux vaut tenter le passage
@@ -5604,7 +5645,7 @@ class MappingEditor(tk.Tk):
 
             # 3a) ATTENTE PATIENTE DU VERROU (au lieu d'échouer en code 1). Le
             #     consommateur vient d'être arrêté, mais le watcher NAS ou une passe
-            #     planifiée peut encore tenir le flock ~/.proton_sync.lock ; et le
+            #     planifiée peut encore tenir le flock ~/.proton-drive-sync/proton_sync.lock ; et le
             #     consommateur peut mettre un instant à le relâcher. Plutôt que de
             #     laisser le moteur sortir immédiatement (« Une autre instance… »,
             #     code 1), on sonde le verrou (--check-lock, non destructif) et on

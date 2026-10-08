@@ -3571,12 +3571,11 @@ msgstr "Die Proton Drive CLI-Binärdatei wurde nicht gefunden."
 
 msgid ""
 "This application does not perform the sync itself: it drives the official "
-"`proton-drive` binary, which you download separately. It does not search the "
-"system for it — it looks in this order:"
+"`proton-drive` binary, which you download separately. It looks in this order:"
 msgstr ""
 "Diese Anwendung führt die Synchronisierung nicht selbst durch: Sie steuert "
 "die offizielle `proton-drive`-Binärdatei, die Sie separat herunterladen. Sie "
-"sucht nicht im System danach — sie ermittelt den Pfad in dieser Reihenfolge:"
+"ermittelt den Pfad in dieser Reihenfolge:"
 
 msgid "  1. the PROTON_DRIVE_CLI environment variable, if set;"
 msgstr "  1. die Umgebungsvariable PROTON_DRIVE_CLI, sofern gesetzt;"
@@ -3586,13 +3585,12 @@ msgstr ""
 "  2. das Feld „Pfad zur Proton-CLI-Binärdatei“ im Fenster „Konfiguration“;"
 
 msgid ""
-"Simplest fix: place the binary next to the scripts, at the third location "
-"above — nothing to configure. To keep it elsewhere, fill in the "
-"Configuration field."
+"Simplest fix: install the `proton-drive` binary on PATH, or place it next to "
+"the scripts (step 3). To keep it elsewhere, fill in the Configuration field."
 msgstr ""
-"Am einfachsten: Legen Sie die Binärdatei neben die Skripte, an den dritten "
-"oben genannten Ort — dann ist nichts zu konfigurieren. Um sie anderswo zu "
-"behalten, füllen Sie das Feld im Konfigurationsfenster aus."
+"Am einfachsten: Installieren Sie die `proton-drive`-Binärdatei im PATH oder "
+"legen Sie sie neben die Skripte (Schritt 3). Um sie anderswo zu behalten, "
+"füllen Sie das Feld im Konfigurationsfenster aus."
 
 msgid ""
 "If you change this path AFTER installing the services, reinstall them: "
@@ -3604,8 +3602,8 @@ msgstr ""
 "Erstellung und würden sonst weiterhin auf den alten verweisen."
 
 #, python-brace-format
-msgid "  3. failing that: {p}"
-msgstr "  3. andernfalls: {p}"
+msgid "  3. {p}, when that file is executable;"
+msgstr "  3. {p}, wenn diese Datei ausführbar ist;"
 
 msgid "Open Configuration…"
 msgstr "Konfiguration öffnen…"
@@ -4180,6 +4178,49 @@ msgstr ""
 "Einmal nach dem Update von einer älteren Version ausführen, danach nur für "
 "gelegentliche Prüfungen (z. B. einmal im Monat), nicht für die tägliche "
 "Nutzung."
+
+msgid "  4. `proton-drive` on PATH;"
+msgstr "  4. `proton-drive` im PATH;"
+
+msgid "  5. otherwise the path in step 3, so the error can name it."
+msgstr ""
+"  5. andernfalls der Pfad aus Schritt 3, damit die Fehlermeldung ihn nennen "
+"kann."
+
+#, python-brace-format
+msgid "Settings copied to {p}. The previous file was left in place."
+msgstr "Einstellungen nach {p} kopiert. Die bisherige Datei wurde belassen."
+
+#, python-brace-format
+msgid "Could not write settings to {p}; reading {legacy} instead."
+msgstr ""
+"Einstellungen konnten nicht nach {p} geschrieben werden; stattdessen wird "
+"{legacy} gelesen."
+
+msgid "Settings location"
+msgstr "Speicherort der Einstellungen"
+
+msgid "Settings file"
+msgstr "Einstellungsdatei"
+
+msgid "Settings file in use:"
+msgstr "Verwendete Einstellungsdatei:"
+
+#, python-brace-format
+msgid ""
+"Settings now live in {path}.\n"
+"\n"
+"The file beside the scripts is no longer read.\n"
+"\n"
+"A backup of the scripts folder no longer includes the configuration. Add "
+"this folder to your backups: {folder}."
+msgstr ""
+"Die Einstellungen liegen jetzt in {path}.\n"
+"\n"
+"Die Datei neben den Skripten wird nicht mehr gelesen.\n"
+"\n"
+"Eine Sicherung des Skriptordners enthält die Konfiguration nicht mehr. "
+"Nehmen Sie diesen Ordner in Ihre Sicherungen auf: {folder}."
 
 #, python-brace-format
 msgid "Summary: uploaded {files_uploaded}, would upload {files_would_upload}, failed {files_failed}, vanished {files_vanished}, listing failed {folders_listing_failed}, unreadable {folders_unreadable}, permission denied {folders_permission_denied}, stall-skipped {folders_stall_skipped}, trashed {items_trashed}, trash failed {trash_failed}, deletions refused {deletions_refused}, sources missing {sources_missing}, mappings {mappings_complete}/{mappings_total}."

@@ -771,7 +771,7 @@ Le projet est **bilingue français/anglais**, via **GNU gettext** (module Python
 
 - **Langue source = anglais** (les chaînes du code, `msgid`) — convention GitHub : les futurs traducteurs partent de l'anglais. Le **français** est restitué par le catalogue `locale/fr/LC_MESSAGES/proton-sync.po` (source de traduction, éditable avec Poedit) compilé en `.mo` (binaire livré).
 - **Résolution de la langue**, identique partout (GUI, moteur, démons) via `i18n.py` : **1)** préférence explicite dans `settings.json` (`{"language": "fr"}`) → **2)** sinon langue du système (`LANG`) → **3)** sinon anglais. Le sélecteur **« 🌍 Language… »** du GUI écrit `settings.json` ; le changement s'applique au **prochain lancement** du GUI et au **prochain redémarrage** des démons.
-- **Cas du NAS (sans GUI)** : le watcher NAS suit la langue du système du NAS ; pour forcer, déposer à la main un `settings.json` à côté (`echo '{"language": "fr"}' > /home/nasuser/proton-sync/settings.json`). Sans `i18n.py`/`locale/`, rien ne casse : les messages restent en anglais (import guardé, même motif que `mount_check`).
+- **Cas du NAS (sans GUI)** : le watcher NAS suit la langue du système du NAS ; pour forcer, écrire `~/.config/proton-drive-sync/settings.json` sur le NAS (`echo '{"language": "fr"}' > ~/.config/proton-drive-sync/settings.json`, ou `$XDG_CONFIG_HOME/proton-drive-sync/settings.json` si cette variable est définie). Un fichier à côté des scripts n'est plus lu ; le premier lancement le copie une fois et le laisse en place. Sans `i18n.py`/`locale/`, rien ne casse : les messages restent en anglais (import guardé, même motif que `mount_check`).
 - **Programmes externes** : zenity (calendrier) est lancé avec un environnement de locale ajusté (`i18n.subprocess_env()`) pour suivre la langue choisie et non celle du système. Limite : afficher une langue exige que sa locale soit **générée** sur le système (`locale -a`).
 - **Descriptions des unités systemd** : générées **dans la langue courante au moment de « Installer / Mettre à jour »**, puis figées dans les fichiers `.service`/`.timer` (nature de systemd) — refaire un Install/Update après un changement de langue pour les réécrire.
 - **`build_locales.sh`** : outil de **développement** uniquement (recompiler les `.po` après édition ; nécessite le paquet `gettext`). Jamais requis en production.
@@ -786,7 +786,7 @@ Le projet est **bilingue français/anglais**, via **GNU gettext** (module Python
 
 ## Configuration (settings.json) et mode local seul
 
-Depuis le chantier « configuration », tout ce qui varie d'une installation à l'autre est **externalisé dans `settings.json`** (le même fichier que la langue, à côté des scripts) — plus rien d'essentiel n'est codé en dur. Le module **`config.py`** est la source de vérité unique, partagée par le moteur, le GUI et les démons (import tolérant : sans lui, chaque fichier retombe sur ses défauts historiques).
+Depuis le chantier « configuration », tout ce qui varie d'une installation à l'autre est **externalisé dans `settings.json`** — plus rien d'essentiel n'est codé en dur. Le fichier est `~/.config/proton-drive-sync/settings.json` (`$XDG_CONFIG_HOME/proton-drive-sync/settings.json` si cette variable est définie). Le fichier à côté des scripts n'est plus lu. Si une ancienne installation l'a encore et que le nouveau fichier n'existe pas, le premier lancement le copie une fois (mode 0600) et le laisse en place. Une sauvegarde du dossier des scripts n'inclut plus la configuration : ajoutez aussi `~/.config/proton-drive-sync`, ou `$XDG_CONFIG_HOME/proton-drive-sync` si cette variable est définie. L'éditeur le dit une fois, à la première ouverture après la copie. `PROTON_SYNC_SETTINGS`, si elle est définie, désigne ce fichier à la place et ne lance pas la copie. Le module **`config.py`** est la source de vérité unique, partagée par le moteur, le GUI et les démons (import tolérant : sans lui, chaque fichier retombe sur ses défauts historiques). La fenêtre Configuration affiche le chemin du fichier utilisé.
 
 **Réglages disponibles** (dialogue **« ⚙ Configuration… »** du GUI, chacun avec son bouton « ? » d'aide en langage non-programmeur ; ou édition directe du JSON — voir `settings.example.json`) :
 
@@ -847,7 +847,7 @@ Les principaux fichiers du projet :
 - `i18n.py` — socle de traduction (résolution de langue, gettext, `settings.json`) — **requis à côté des autres `.py`**, machine locale ET NAS
 - `locale/` — catalogues de traduction (`fr/LC_MESSAGES/proton-sync.po` + `.mo` compilé, modèle `.pot`) — machine locale ET NAS
 - `build_locales.sh` — outil de dev : recompilation des catalogues (jamais requis en production)
-- `settings.json` — préférence de langue (créé par le GUI ; optionnel, à la main sur le NAS)
+- `~/.config/proton-drive-sync/settings.json` — réglages (créé par le GUI ; optionnel, à la main sur le NAS). Plus à côté des scripts. `$XDG_CONFIG_HOME/proton-drive-sync/settings.json` si cette variable est définie. Une sauvegarde du dossier des scripts ne l'inclut pas.
 - `Temporary-files-exclusions.fr.md` — catalogue des motifs d'exclusion recommandés par logiciel (référence à part)
 - `INSTALLATION-systemd.fr.md` — guide d'installation du timer nocturne
 - `INSTALLATION-realtime.fr.md` — guide d'installation de la couche temps réel

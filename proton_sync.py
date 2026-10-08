@@ -27,9 +27,9 @@ Usage :
 
 Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
-                        (par défaut : ~/Logiciels/Proton-drive/proton-drive)
+                        (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.15.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.16.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -56,6 +56,10 @@ except ImportError:
 # Le moteur cherche mount_check.py (et config.py) dans son propre dossier.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
+    import paths as _apppaths
+except ImportError:
+    _apppaths = None
+try:
     import mount_check
     _HAS_MOUNT_CHECK = True
 except ImportError:
@@ -79,23 +83,25 @@ if _HAS_CONFIG:
     HEALTH_FILE = appconfig.HEALTH_FILE
     LAST_RUN_FILE = appconfig.LAST_RUN_FILE
 else:
+    # Même arborescence que config.DATA_DIR, sans importer config.
+    _DATA_DIR = os.path.expanduser("~/.proton-drive-sync")
     # Verrou pour empêcher deux exécutions simultanées sous le même compte
     # Linux. Placé sous le home plutôt que /tmp/ pour que chaque utilisateur
     # (un par utilisateur) ait son propre verrou.
-    LOCK_FILE = os.path.expanduser("~/.proton_sync.lock")
+    LOCK_FILE = os.path.join(_DATA_DIR, "proton_sync.lock")
     # Répertoire des fichiers de cache. Un cache par fichier de mappings,
     # indexé par le nom du JSON (chaque utilisateur a le sien).
-    CACHE_DIR = os.path.expanduser("~/.proton_sync_cache")
+    CACHE_DIR = os.path.join(_DATA_DIR, "cache")
     # Journal DÉDIÉ des échecs d'upload (option #2) : chaque fichier qui
     # refuse de monter (même après ré-essai individuel) y est consigné, une
     # ligne par échec, horodatage + chemin + raison. But : relire SEULEMENT
     # les échecs sans dérouler tout le journal.
-    FAILURES_LOG = os.path.expanduser("~/.proton_sync/failures.log")
+    FAILURES_LOG = os.path.join(_DATA_DIR, "failures.log")
     # Journal DÉDIÉ des renommages d'extension (majuscule -> minuscule).
-    RENAMED_LOG = os.path.expanduser("~/.proton_sync/renamed-extensions.log")
+    RENAMED_LOG = os.path.join(_DATA_DIR, "renamed-extensions.log")
     # État de santé publié en fin de passage complet (cf. config.py).
-    HEALTH_FILE = os.path.expanduser("~/.proton_sync/health.json")
-    LAST_RUN_FILE = os.path.expanduser("~/.proton_sync/last-run.json")
+    HEALTH_FILE = os.path.join(_DATA_DIR, "health.json")
+    LAST_RUN_FILE = os.path.join(_DATA_DIR, "last-run.json")
 
 
 # Compteurs du passage en cours. Même durée de vie que _UNREADABLE : un
@@ -861,6 +867,8 @@ def cli_path():
     """
     if _HAS_CONFIG:
         return appconfig.resolve_proton_cli()
+    if _apppaths is not None:
+        return _apppaths.resolve_cli(os.path.dirname(os.path.abspath(__file__)), None)
     return os.environ.get(
         "PROTON_DRIVE_CLI",
         os.path.expanduser("~/Logiciels/Proton-drive/proton-drive"),
@@ -3193,15 +3201,15 @@ def main():
     parser.add_argument(
         "--no-rename-ext", action="store_true",
         help="DÉSACTIVE la normalisation des extensions pour CE passage, quel que "
-             "soit le réglage persistant (config.py / GUI). Par défaut, le moteur "
-             "renomme les fichiers source dont l'extension finale contient des "
-             "majuscules -> extension en minuscule (IMG.JPG -> IMG.jpg, DOC.PDF -> "
-             "DOC.pdf), pour que Proton détecte le bon type MIME (vignette, aperçu, "
-             "icône) et que le cache reste cohérent (local = distant). En cas de "
-             "collision avec une cible existante, on n'écrase jamais (suffixe "
-             "configurable, voir rename_ext_collision_suffix dans settings.json). "
-             "Ne touche pas aux dossiers ni aux fichiers exclus. Chaque renommage "
-             "est journalisé (renamed-extensions.log).",
+             "soit le réglage persistant (config.py / GUI). Sans ce drapeau, "
+             "effective_rename_ext décide : un faux explicite reste arrêté, un vrai "
+             "explicite après la migration du GUI reste allumé, sinon le "
+             "contournement ne reste actif que pour un CLI antérieur à 0.5.0 "
+             "(IMG.JPG -> IMG.jpg). En cas de collision avec une cible existante, "
+             "on n'écrase jamais (suffixe configurable, voir "
+             "rename_ext_collision_suffix dans settings.json). Ne touche pas aux "
+             "dossiers ni aux fichiers exclus. Chaque renommage est journalisé "
+             "(renamed-extensions.log).",
     )
     parser.add_argument(
         "--check-lock", action="store_true",
@@ -3220,17 +3228,6 @@ def main():
     if args.wipe_remote and not args.reset_source:
         print(_("❌ --wipe-remote requires --reset-source."))
         sys.exit(2)
-
-    # Normalisation des extensions : réglage PERSISTANT (config.py / GUI), avec
-    # --no-rename-ext comme surcharge ponctuelle qui force TOUJOURS l'arrêt pour
-    # ce passage, quel que soit le réglage. Résolu une seule fois ici, propagé
-    # à tous les appels du passage.
-    if _HAS_CONFIG:
-        effective_rename_ext = appconfig.rename_ext_enabled() and not args.no_rename_ext
-        effective_collision_suffix = appconfig.rename_ext_collision_suffix()
-    else:
-        effective_rename_ext = not args.no_rename_ext
-        effective_collision_suffix = _EXT_COLLISION_SUFFIX_DEFAULT
 
     # Sonde d'authentification pure (--check-auth) : réutilise EXACTEMENT le même
     # test que le passage normal (check_auth ci-dessus), mais sans prendre le
@@ -3258,6 +3255,22 @@ def main():
             fcntl.flock(probe_fp, fcntl.LOCK_UN)   # libre : on relâche tout de suite
             probe_fp.close()
             sys.exit(0)
+
+    # Normalisation des extensions : réglage PERSISTANT (config.py / GUI), avec
+    # --no-rename-ext comme surcharge ponctuelle qui force TOUJOURS l'arrêt pour
+    # ce passage. Calculé APRÈS --check-auth et --check-lock : ces sondes ne
+    # renomment rien, et la décision interroge la version du CLI (un processus
+    # Bun de plusieurs secondes la première fois). Le moteur ne réécrit pas
+    # rename_ext_enabled ni rename_ext_auto_disabled.
+    if _HAS_CONFIG:
+        effective_rename_ext = (
+            appconfig.effective_rename_ext(cli_supports_shared_delete)
+            and not args.no_rename_ext
+        )
+        effective_collision_suffix = appconfig.rename_ext_collision_suffix()
+    else:
+        effective_rename_ext = not args.no_rename_ext
+        effective_collision_suffix = _EXT_COLLISION_SUFFIX_DEFAULT
 
     # À partir d'ici, on fait un VRAI passage : le fichier de mappings est requis
     # (les sondes --check-auth / --check-lock ci-dessus sont déjà sorties sans lui).
