@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `--refresh-units` no longer moves an installed schedule to the folder it is run from. It keeps the engine command on `ExecStart` (quoting and the `/usr/bin/proton-drive-sync` launcher included) and the `PROTON_DRIVE_CLI` line, and does not add one that was not there. Install / Update in the Schedule tab still writes the engine and CLI of the running copy. Migration: none.
+- A dry-run of a new mapping or a new subfolder no longer counts a listing failure and exits 5 because the remote folder does not exist yet. It reports what would be uploaded. A listing that fails on a folder that exists still exits 5.
+- The run output (Tk and Qt) no longer shows the `[run-result]` line. The summary line before it is shown in the default and errors-only views only when a failure counter is above zero. Detailed alone shows it. Errors only wins over Detailed when both are ticked. The log file still has every line.
+
 ## [2.1.0] - 2026-10-05
 
 ### Added

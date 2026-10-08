@@ -198,7 +198,7 @@ Code 3 is only for `--subpath` when the folder has not been indexed yet. The sch
 
 The last line of a pass is a `[run-result]` JSON object (exit code, mode, counters). `~/.proton-drive-sync/last-run.json` keeps the last full pass and the last subpath pass separately.
 
-Units installed before this change do not contain `RestartPreventExitStatus=5`. Rewrite them without changing the mappings file, the clock or `--delete`:
+Units installed before this change do not contain `RestartPreventExitStatus=5`. Rewrite them without changing the mappings file, the clock or `--delete`. The engine command on `ExecStart` and `PROTON_DRIVE_CLI` stay as they are; only Install / Update in the Schedule tab changes those two:
 
 ```bash
 python3 schedule_manager.py --refresh-units

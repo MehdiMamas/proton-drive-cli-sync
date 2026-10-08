@@ -203,7 +203,7 @@ Le code 3 ne concerne que `--subpath` quand le dossier n'a pas encore été inde
 
 La dernière ligne d'un passage est un objet JSON `[run-result]` (code de sortie, mode, compteurs). `~/.proton-drive-sync/last-run.json` garde le dernier passage complet et le dernier passage `--subpath` séparément.
 
-Les unités installées avant ce changement ne contiennent pas `RestartPreventExitStatus=5`. Réécris-les sans changer le fichier de mappings, l'heure ni `--delete` :
+Les unités installées avant ce changement ne contiennent pas `RestartPreventExitStatus=5`. Réécris-les sans changer le fichier de mappings, l'heure ni `--delete`. La commande du moteur sur `ExecStart` et `PROTON_DRIVE_CLI` restent telles quelles ; seul Installer / Mettre à jour dans l'onglet Planification change ces deux-là :
 
 ```bash
 python3 schedule_manager.py --refresh-units

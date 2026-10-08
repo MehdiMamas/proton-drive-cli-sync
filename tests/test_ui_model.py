@@ -1,5 +1,6 @@
 """Document de mappings, filtres de sortie et calendrier — sans écran."""
 
+import io
 import json
 import os
 
@@ -142,6 +143,36 @@ def test_engine_args_progress_and_exit_code():
     assert run.sync_status(5).startswith("Sync finished with failures")
     assert "code 0" in run.sync_status(0)
     assert "code 5" in run.finished_banner("prime", 5, True, "/log")
+
+
+class _FakeProc:
+    def __init__(self, lines):
+        self.stdout = iter(lines)
+        self.returncode = None
+
+    def wait(self):
+        self.returncode = 0
+
+
+def test_live_pass_holds_the_summary_until_run_result():
+    clean = ('[run-result] {"exit": 0, "files_failed": 0}\n')
+    failed = ('[run-result] {"exit": 5, "files_failed": 2}\n')
+    summary = "Summary: uploaded 1, failed 0, mappings 1/1.\n"
+    for machine, expected in ((clean, ["📂 /data/Docs\n"]),
+                              (failed, ["📂 /data/Docs\n", summary])):
+        control = run.PassControl()
+        shown = []
+        control.on_text = shown.append
+        log = io.StringIO()
+        run._pump(_FakeProc(["📂 /data/Docs\n", summary, machine]), control, log)
+        assert shown == expected
+        assert machine in log.getvalue()
+    control = run.PassControl()
+    shown = []
+    control.on_text = shown.append
+    run._pump(_FakeProc(["📂 /data/Docs\n", "Summary: failed 1\n"]), control, None)
+    assert shown == ["📂 /data/Docs\n"]
+    assert control.pending is None
 
 
 def test_calendar_roundtrip():
