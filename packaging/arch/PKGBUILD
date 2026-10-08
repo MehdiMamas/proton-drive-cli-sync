@@ -4,7 +4,7 @@ pkgname=('proton-drive-cli-sync-git' 'proton-drive-cli-sync-dolphin')
 _reponame=proton-drive-cli-sync
 # Two-way sync lives on this branch until it is merged into main.
 _branch=feature/twoway
-pkgver=2.3.0
+pkgver=2.3.1
 pkgrel=1
 pkgdesc="Two-way Proton Drive sync built on Proton's official CLI. Not affiliated with Proton AG."
 arch=('x86_64')
