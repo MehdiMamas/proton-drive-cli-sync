@@ -130,6 +130,63 @@ def test_listing_failure_exits_5(fake_drive, local_tree, write_mappings, engine)
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") is None
 
 
+def test_dry_run_new_subfolder_is_not_a_failure(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs")])
+    warmed = engine(cfg)
+    assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    local_tree.write("Docs/extra/c.txt", b"new", 1_000_000_100)
+    dry = engine(cfg, "--dry-run")
+    assert dry.returncode == 0, dry.stdout + dry.stderr
+    payload = _run_result(dry.stdout)
+    assert payload["folders_listing_failed"] == 0
+    assert payload["files_would_upload"] >= 1
+    assert "[DRY-RUN] would upload:" in dry.stdout
+
+
+def test_dry_run_new_mapping_is_not_a_failure(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs")])
+    dry = engine(cfg, "--dry-run")
+    assert dry.returncode == 0, dry.stdout + dry.stderr
+    payload = _run_result(dry.stdout)
+    assert payload["folders_listing_failed"] == 0
+    assert payload["files_would_upload"] == 1
+    assert "would upload:" in dry.stdout
+
+
+def test_dry_run_new_file_mapping_is_not_a_failure(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"notes.txt": (b"hello", 1_000_000_000)})
+    cfg = write_mappings([{
+        "type": "file",
+        "source": str(src / "notes.txt"),
+        "dest_parent": "/my-files/Backups/New",
+    }])
+    dry = engine(cfg, "--dry-run")
+    assert dry.returncode == 0, dry.stdout + dry.stderr
+    payload = _run_result(dry.stdout)
+    assert payload["folders_listing_failed"] == 0
+    assert payload["files_would_upload"] == 1
+
+
+def test_dry_run_listing_fault_on_existing_folder_exits_5(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"hello", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs")])
+    warmed = engine(cfg)
+    assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    local_tree.write("Docs/a.txt", b"hello!", 1_000_000_100)
+    fake_drive.add_fault(cmd="list", match="/my-files/Backups/Docs", times=5)
+    dry = engine(cfg, "--dry-run")
+    assert dry.returncode == 5, dry.stdout + dry.stderr
+    payload = _run_result(dry.stdout)
+    assert payload["folders_listing_failed"] >= 1
+    assert "Could not list" in dry.stdout
+
+
 def test_unreadable_folder_exits_5(fake_drive, local_tree, write_mappings, engine):
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         pytest.skip("mode 000 is ignored when running as root")
@@ -422,7 +479,8 @@ def test_refresh_units_preserves_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(schedule_manager, "TIMER_PATH", str(timer))
     service.write_text(
         "[Service]\n"
-        "ExecStart=/usr/bin/python3 /opt/proton_sync.py /data/mappings.json --delete\n"
+        "Environment=PROTON_DRIVE_CLI=/opt/prod/proton-drive\n"
+        "ExecStart=/usr/bin/python3 /opt/prod/proton_sync.py /data/mappings.json --delete\n"
         "SuccessExitStatus=0 2\n",
         encoding="utf-8",
     )
@@ -444,4 +502,193 @@ def test_refresh_units_preserves_settings(tmp_path, monkeypatch):
     assert "--delete" in rewritten
     assert "RestartPreventExitStatus=5" in rewritten
     assert "SuccessExitStatus=0 2 4" in rewritten
+    assert ("ExecStart=/usr/bin/python3 /opt/prod/proton_sync.py "
+            "/data/mappings.json --delete") in rewritten
+    assert "Environment=PROTON_DRIVE_CLI=/opt/prod/proton-drive" in rewritten
+    assert schedule_manager.DEFAULT_ENGINE not in rewritten
+    assert schedule_manager.DEFAULT_CLI not in rewritten
     assert "OnCalendar=*-*-* 04:15:00" in timer.read_text(encoding="utf-8")
+
+
+def _unit_files(tmp_path, monkeypatch, service_text):
+    unit_dir = tmp_path / "user"
+    unit_dir.mkdir()
+    service = unit_dir / schedule_manager.SERVICE_NAME
+    timer = unit_dir / schedule_manager.TIMER_NAME
+    monkeypatch.setattr(schedule_manager, "SYSTEMD_USER_DIR", str(unit_dir))
+    monkeypatch.setattr(schedule_manager, "SERVICE_PATH", str(service))
+    monkeypatch.setattr(schedule_manager, "TIMER_PATH", str(timer))
+    service.write_text(service_text, encoding="utf-8")
+    timer.write_text("[Timer]\nOnCalendar=*-*-* 03:00:00\n", encoding="utf-8")
+    monkeypatch.setattr(schedule_manager, "_run", lambda args: (0, "inactive\n", ""))
+    return service
+
+
+def test_refresh_units_does_not_add_cli_path(tmp_path, monkeypatch):
+    service = _unit_files(tmp_path, monkeypatch, (
+        "[Service]\n"
+        "ExecStart=/usr/bin/python3 /opt/prod/proton_sync.py /data/mappings.json\n"))
+    ok, _message = schedule_manager.refresh_units()
+    assert ok
+    rewritten = service.read_text(encoding="utf-8")
+    assert "PROTON_DRIVE_CLI=" not in rewritten
+    assert "ExecStart=/usr/bin/python3 /opt/prod/proton_sync.py /data/mappings.json\n" in rewritten
+    assert "--delete" not in rewritten
+    assert schedule_manager.DEFAULT_ENGINE not in rewritten
+
+
+def test_refresh_units_keeps_quoted_paths_and_the_launcher(tmp_path, monkeypatch):
+    service = _unit_files(tmp_path, monkeypatch, (
+        "[Service]\n"
+        "Environment=\"PROTON_DRIVE_CLI=/opt/my tools/proton-drive\"\n"
+        "ExecStart=/usr/bin/python3 \"/opt/my prod/proton_sync.py\" "
+        "\"/data/my mappings.json\" --delete\n"))
+    assert schedule_manager.refresh_units()[0]
+    rewritten = service.read_text(encoding="utf-8")
+    assert ("ExecStart=/usr/bin/python3 \"/opt/my prod/proton_sync.py\" "
+            "\"/data/my mappings.json\" --delete\n") in rewritten
+    assert "Environment=\"PROTON_DRIVE_CLI=/opt/my tools/proton-drive\"\n" in rewritten
+
+    service.write_text(
+        "[Service]\nExecStart=/usr/bin/proton-drive-sync /data/mappings.json\n",
+        encoding="utf-8")
+    assert schedule_manager.refresh_units()[0]
+    rewritten = service.read_text(encoding="utf-8")
+    assert "ExecStart=/usr/bin/proton-drive-sync /data/mappings.json\n" in rewritten
+    assert "PROTON_DRIVE_CLI=" not in rewritten
+
+
+def test_install_still_uses_the_running_folder(tmp_path, monkeypatch):
+    service = _unit_files(tmp_path, monkeypatch, (
+        "[Service]\n"
+        "Environment=PROTON_DRIVE_CLI=/opt/prod/proton-drive\n"
+        "ExecStart=/usr/bin/python3 /opt/prod/proton_sync.py /data/mappings.json\n"))
+    ok, _message = schedule_manager.install_or_update("/data/mappings.json", enable=False)
+    assert ok
+    rewritten = service.read_text(encoding="utf-8")
+    assert "/opt/prod/" not in rewritten
+    assert schedule_manager.DEFAULT_ENGINE in rewritten
+
+
+def _editor_lines():
+    import pathlib
+    source = (pathlib.Path(__file__).resolve().parents[1]
+              / "proton_mapping_editor.py").read_text(encoding="utf-8")
+    start = source.index("# --- editor output filter (no Tk) ---")
+    end = source.index("# --- end editor output filter ---")
+    namespace = {"json": json}
+    exec(source[start:end], namespace)
+    return namespace["visible_editor_lines"]
+
+
+@pytest.fixture(params=["tk", "qt"])
+def show(request):
+    """Le même filtre dans les deux interfaces : l'éditeur Tk et ui/run.py (Qt)."""
+    if request.param == "tk":
+        return _editor_lines()
+    from ui import run as ui_run
+
+    def qt_lines(lines, verbose=False, errors_only=False):
+        return ui_run.visible_lines(lines, verbose, errors_only)
+    return qt_lines
+
+
+def test_editor_hides_machine_line_and_clean_summary(show):
+    summary = (
+        "Summary: uploaded 1, would upload 0, failed 0, vanished 0, "
+        "listing failed 0, unreadable 0, permission denied 0, "
+        "stall-skipped 0, trashed 0, trash failed 0, deletions refused 0, "
+        "sources missing 0, mappings 1/1.\n"
+    )
+    machine = (
+        '[run-result] {"exit": 0, "mode": "full", "files_failed": 0, '
+        '"folders_listing_failed": 0, "folders_unreadable": 0, '
+        '"folders_permission_denied": 0, "folders_stall_skipped": 0, '
+        '"trash_failed": 0, "deletions_refused": 0, "sources_missing": 0}\n'
+    )
+    french = (
+        "Résumé : envoyés 1, enverrait 0, échecs 0, disparus 0, "
+        "listage échoué 0, illisibles 0, permission refusée 0, "
+        "sautés après blocage 0, à la corbeille 0, corbeille échouée 0, "
+        "suppressions refusées 0, sources absentes 0, mappings 1/1.\n"
+    )
+    lines = ["📂 /data/Docs\n", "Done.\n", summary, machine]
+    assert show(lines) == ["📂 /data/Docs\n", "Done.\n"]
+    assert show(lines, errors_only=True) == []
+    assert show([french, machine], errors_only=True) == []
+    assert show([french, machine]) == []
+    detailed = show(lines, verbose=True)
+    assert summary in detailed
+    assert machine not in detailed
+
+
+def test_editor_shows_failure_summary_in_the_default_view(show):
+    summary = (
+        "Summary: uploaded 0, would upload 0, failed 2, vanished 0, "
+        "listing failed 0, unreadable 0, permission denied 0, "
+        "stall-skipped 0, trashed 0, trash failed 0, deletions refused 0, "
+        "sources missing 0, mappings 0/1.\n"
+    )
+    machine = (
+        '[run-result] {"exit": 5, "mode": "full", "files_failed": 2, '
+        '"folders_listing_failed": 0, "folders_unreadable": 0, '
+        '"folders_permission_denied": 0, "folders_stall_skipped": 0, '
+        '"trash_failed": 0, "deletions_refused": 0, "sources_missing": 0}\n'
+    )
+    lines = ["📂 /data/Docs\n", summary, machine]
+    assert show(lines) == ["📂 /data/Docs\n", summary]
+    assert show(lines, errors_only=True) == [summary]
+    detailed = show(lines, verbose=True)
+    assert summary in detailed
+    assert machine not in detailed
+    warning = ("    ⚠  Could not list /my-files/Backups/Docs — "
+               "folder skipped this pass\n")
+    assert show([warning], errors_only=True) == [warning]
+
+
+def test_errors_only_wins_over_detailed(show):
+    detail = "    [DRY-RUN] would upload: /data/Docs/a.txt\n"
+    blank = "\n"
+    warning = "    ⚠  Could not list /my-files/Backups — folder skipped\n"
+    summary = (
+        "Summary: uploaded 1, would upload 0, failed 0, vanished 0, "
+        "listing failed 0, unreadable 0, permission denied 0, "
+        "stall-skipped 0, trashed 0, trash failed 0, deletions refused 0, "
+        "sources missing 0, mappings 1/1.\n"
+    )
+    machine = (
+        '[run-result] {"exit": 0, "files_failed": 0, '
+        '"folders_listing_failed": 0, "folders_unreadable": 0, '
+        '"folders_permission_denied": 0, "folders_stall_skipped": 0, '
+        '"trash_failed": 0, "deletions_refused": 0, "sources_missing": 0}\n'
+    )
+    lines = ["📂 /data/Docs\n", detail, blank, warning, summary, machine]
+    both = show(lines, verbose=True, errors_only=True)
+    only = show(lines, verbose=False, errors_only=True)
+    detailed = show(lines, verbose=True, errors_only=False)
+    assert both == only
+    assert warning in both
+    assert detail not in both
+    assert blank not in both
+    assert machine not in both
+    assert summary not in both
+    assert detail in detailed
+
+
+def test_detailed_keeps_blank_lines(show):
+    lines = [
+        "=== Launch ===\n",
+        "\n",
+        "▶ Mapping 1/1 : /data/Docs  =>  /my-files/Backups\n",
+        "📂 /data/Docs\n",
+        "\n",
+        "Done.\n",
+        '[run-result] {"exit": 0, "files_failed": 0, '
+        '"folders_listing_failed": 0, "folders_unreadable": 0, '
+        '"folders_permission_denied": 0, "folders_stall_skipped": 0, '
+        '"trash_failed": 0, "deletions_refused": 0, "sources_missing": 0}\n',
+    ]
+    shown = show(lines, verbose=True, errors_only=False)
+    assert shown == lines[:-1]
+    assert shown[1] == "\n"
+    assert shown[-2] == "\n"

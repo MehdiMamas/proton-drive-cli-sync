@@ -23,8 +23,9 @@ EOF
 post_upgrade() {
   cat <<'EOF'
 ==> proton-drive-cli-sync updated. Rewrite your systemd units once so they use the
-    stable launcher and current options: open the GUI Schedule tab and save,
-    or run: python3 /usr/lib/proton-drive-cli-sync/schedule_manager.py --refresh-units
+    stable launcher and current options: open the GUI Schedule tab and save.
+    To add the current options without moving the engine or CLI path, run:
+    python3 /usr/lib/proton-drive-cli-sync/schedule_manager.py --refresh-units
     then: systemctl --user daemon-reload
 EOF
 }
