@@ -1,7 +1,12 @@
-"""excluded_remote: absent means prune; keep is opt-in for this mapping only.
+"""Deletion safety: excluded_remote and the mass-deletion guard.
 
+excluded_remote: absent means prune; keep is opt-in for this mapping only.
 A remote name is kept only when the mapping says "keep", the name matches
 that mapping's own exclusions, and it does not match a global exclusion.
+
+Mass-deletion guard: off by default, so a large deletion still trashes. A
+refusal (guard on, both thresholds crossed) leaves the bytes in place and is
+counted in deletions_refused, so the pass ends with code 5.
 """
 
 import json
@@ -186,3 +191,126 @@ def test_unchecked_box_drops_excluded_remote_after_carry():
     again["excluded_remote"] = "keep"
     assert again["excluded_remote"] == "keep"
     assert again["future_key"] == 1
+
+
+def _run_result(result):
+    line = [x for x in result.stdout.splitlines() if x.startswith("[run-result] ")][-1]
+    return json.loads(line[len("[run-result] "):])
+
+
+def _many(count):
+    return {"Docs/f%02d.txt" % i: (b"data%d" % i, 1_000_000_000) for i in range(count)}
+
+
+def _emptied(local_tree, write_mappings, engine, count, remove, **extra):
+    src = local_tree(_many(count))
+    cfg = write_mappings([_mapping(src / "Docs", **extra)])
+    assert engine(cfg).returncode == 0
+    for i in range(remove):
+        (src / "Docs" / ("f%02d.txt" % i)).unlink()
+    return cfg
+
+
+def _trashed_count(fake_drive, count):
+    return sum(1 for i in range(count) if fake_drive.trashed(REMOTE + "/f%02d.txt" % i))
+
+
+def test_guard_off_by_default_still_trashes(fake_drive, local_tree, write_mappings, engine):
+    cfg = _emptied(local_tree, write_mappings, engine, 30, 30)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[delete-guard]" not in result.stdout
+    assert _trashed_count(fake_drive, 30) == 30
+
+
+def test_guard_on_refuses_twenty_and_half(fake_drive, local_tree, write_mappings, engine):
+    engine.update_settings(mass_delete_guard=True)
+    cfg = _emptied(local_tree, write_mappings, engine, 30, 30)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "[delete-guard]" in result.stdout
+    assert "refusing to trash 30 of 30" in result.stdout
+    assert _run_result(result)["deletions_refused"] == 1
+    assert _trashed_count(fake_drive, 30) == 0
+    # Not marked reconciled: the next pass looks again and refuses again.
+    again = engine(cfg, "--delete")
+    assert again.returncode == 5, again.stdout + again.stderr
+    assert "refusing to trash 30 of 30" in again.stdout
+    assert _trashed_count(fake_drive, 30) == 0
+
+
+def test_guard_on_below_threshold_trashes(fake_drive, local_tree, write_mappings, engine):
+    engine.update_settings(mass_delete_guard=True)
+    cfg = _emptied(local_tree, write_mappings, engine, 30, 3)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[delete-guard]" not in result.stdout
+    assert _trashed_count(fake_drive, 30) == 3
+
+
+def test_allow_mass_delete_overrides_enabled_guard(
+        fake_drive, local_tree, write_mappings, engine):
+    engine.update_settings(mass_delete_guard=True)
+    cfg = _emptied(local_tree, write_mappings, engine, 30, 30)
+    result = engine(cfg, "--delete", "--allow-mass-delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[delete-guard]" not in result.stdout
+    assert _trashed_count(fake_drive, 30) == 30
+
+
+def test_per_mapping_threshold_override(fake_drive, local_tree, write_mappings, engine):
+    engine.update_settings(mass_delete_guard=True)
+    cfg = _emptied(
+        local_tree, write_mappings, engine, 30, 3,
+        max_delete_min=2, max_delete_ratio=0.05)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "refusing to trash 3 of 30" in result.stdout
+    assert _trashed_count(fake_drive, 30) == 0
+
+
+def test_bad_config_values_fall_back(fake_drive, local_tree, write_mappings, engine):
+    import config
+    assert config.DEFAULTS["mass_delete_guard"] is False
+    assert config.mass_delete_guard() is False
+    assert config.max_delete_min() == 20
+    assert config.max_delete_ratio() == 0.5
+    config._put("mass_delete_guard", "no")
+    config._put("max_delete_min", "lots")
+    config._put("max_delete_ratio", 2)
+    assert config.mass_delete_guard() is False
+    assert config.max_delete_min() == 20
+    assert config.max_delete_ratio() == 0.5
+    config._put("max_delete_min", -3)
+    config._put("max_delete_ratio", -0.2)
+    assert config.max_delete_min() == 20
+    assert config.max_delete_ratio() == 0.5
+
+    # The engine process reads its own settings file. Garbage there still
+    # refuses the 20-and-half case, using the defaults.
+    engine.update_settings(
+        mass_delete_guard=True, max_delete_min="nope", max_delete_ratio=9)
+    cfg = _emptied(local_tree, write_mappings, engine, 30, 21)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "refusing to trash 21 of 30" in result.stdout
+    assert _trashed_count(fake_drive, 30) == 0
+
+
+def test_kept_excluded_names_do_not_count_toward_the_guard(
+        fake_drive, local_tree, write_mappings, engine):
+    """Names kept by excluded_remote are not orphans, so they do not arm it."""
+    engine.update_settings(mass_delete_guard=True)
+    cfg = _emptied(local_tree, write_mappings, engine, 30, 30)
+    kept = write_mappings([_mapping(
+        cfg_source(cfg), excluded_remote="keep",
+        exclusions={"names": [], "patterns": ["f*.txt"]})])
+    result = engine(kept, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[delete-guard]" not in result.stdout
+    assert _trashed_count(fake_drive, 30) == 0
+
+
+def cfg_source(cfg):
+    with open(cfg, encoding="utf-8") as f:
+        return json.load(f)["mappings"][0]["source"]
