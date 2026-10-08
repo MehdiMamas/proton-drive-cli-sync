@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [2.3.2] - 2026-10-08
+
+Fixes for #22 and #23. Checked with the fake CLI in WSL Ubuntu, not against a real Proton account.
 
 ### Fixed
 
