@@ -5,6 +5,7 @@ l'orchestration amorçage/réinitialisation suivent l'éditeur Tk. Un code 5
 n'est pas présenté comme une réussite.
 """
 
+import json
 import os
 import shlex
 import subprocess
@@ -28,8 +29,14 @@ ENGINE = os.path.join(APP_DIR, "proton_sync.py")
 _STATUS_PREFIXES = (
     "===", "▶", "⏸", "✓", "✗", "❌", "⚠", "🔑", "🌱", "⟳",
     "♻", "🗑", "⛔", "📂", "==", "Terminé", "Done", "Erreur",
-    "Error", "Cache", "Global", "▶ Mapping", "  ↪",
+    "Error", "Cache", "Global", "▶ Mapping", "  ↪", "✅", "⏭",
+    # Two-way lines: what came down, what failed, what was kept or held back.
+    "[download", "[upload-failed]", "[list-skipped]", "[delete-guard]",
+    "[held]", "[kept]", "[restore]", "[conflict",
 )
+
+# Tags that mean something was skipped or refused, without the word "failed".
+_ERROR_TAGS = ("[list-skipped]", "[delete-guard]")
 
 
 def cli_path():
@@ -161,6 +168,8 @@ def is_error_line(stripped):
         return False
     if any(glyph in stripped for glyph in ("❌", "⛔", "⚠")):
         return True
+    if stripped.startswith(_ERROR_TAGS):
+        return True
     head = stripped.split("/", 1)[0].lower()
     return ("erreur" in head or "error" in head
             or "échec" in head or "echec" in head or "failed" in head)
@@ -217,11 +226,38 @@ def parse_progress(line):
     return _("Uploading — {n} file(s), {size}").format(n=files, size=size)
 
 
-def sync_status(code):
-    """Libellé de fin. Le code 5 n'est pas une réussite."""
+def first_reason(counters):
+    """Première raison d'un code 5, en clair, ou "" si on ne sait pas."""
+    if not counters:
+        return ""
+    try:
+        import proton_sync
+        reasons = proton_sync.failure_reasons(counters)
+    except Exception:
+        return ""
+    return reasons[0] if reasons else ""
+
+
+def sync_status(code, counters=None):
+    """Libellé de fin. Le code 5 n'est pas une réussite et dit ce qui a manqué."""
     if code == 5:
+        reason = first_reason(counters)
+        if reason:
+            return _("Sync finished with problems: {r}").format(r=reason)
         return _("Sync finished with failures (code 5).")
     return _("Sync finished (code {c}).").format(c=code)
+
+
+def parse_run_result(line):
+    """Compteurs de la ligne [run-result], ou None."""
+    marker = "[run-result] "
+    if not line.startswith(marker):
+        return None
+    try:
+        data = json.loads(line[len(marker):])
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def finished_banner(kind, code, failures, log_path):
@@ -265,6 +301,9 @@ def _emit_line(control, line, log_handle):
         control.folders_shown += 1
     if "[auth-failed]" in line:
         control.auth_failed = True
+    result = parse_run_result(line)
+    if result is not None:
+        control.result = result
     if "[upload-failed]" in line:
         control.upload_failed = True
     if "[delete-guard]" in line and "refusing to trash" in line:
@@ -308,6 +347,7 @@ def run_sync(cmd, log_path, env, control):
     control.auth_failed = False
     control.upload_failed = False
     control.unreadable = []
+    control.result = None
     with open(log_path, "w", encoding="utf-8") as log_handle:
         proc = subprocess.Popen(
             cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -317,7 +357,7 @@ def run_sync(cmd, log_path, env, control):
         control.on_text(_("  ✓ Nothing to update — everything is already in sync.") + "\n")
     control.on_text("\n" + finished_banner("sync", code, code == 5, log_path) + "\n\n")
     control.on_progress("")
-    control.on_status(sync_status(code))
+    control.on_status(sync_status(code, control.result))
     control.on_auth(not control.auth_failed)
     return code
 
@@ -410,6 +450,7 @@ def run_orchestrated(cmd, config_path, log_path, env, control, kind):
         control.auth_failed = False
         control.upload_failed = False
         control.unreadable = []
+        control.result = None
         with open(log_path, "w", encoding="utf-8") as log_handle:
             proc = subprocess.Popen(
                 cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -428,7 +469,7 @@ def run_orchestrated(cmd, config_path, log_path, env, control, kind):
                     _("✓ {r}/{t} mapping(s) now ready for real-time.").format(
                         r=ready, t=total) + "\n\n")
                 if code == 5:
-                    control.on_status(_("Finished with failures (code 5)."))
+                    control.on_status(sync_status(code, control.result))
                 elif is_reset:
                     control.on_status(_(
                         "Reset done — {r}/{t} mapping(s) ready for real-time.").format(
@@ -438,9 +479,11 @@ def run_orchestrated(cmd, config_path, log_path, env, control, kind):
                         "Priming done — {r}/{t} mapping(s) ready for real-time.").format(
                             r=ready, t=total))
             except Exception:
-                control.on_status(sync_status(code) if code is not None else "")
+                control.on_status(
+                    sync_status(code, control.result) if code is not None else "")
         else:
-            control.on_status(sync_status(code) if code is not None else "")
+            control.on_status(
+                sync_status(code, control.result) if code is not None else "")
         return code
     except Exception as exc:
         if is_reset:
@@ -468,6 +511,7 @@ class PassControl:
         self.auth_failed = False
         self.upload_failed = False
         self.mass_refused = False
+        self.result = None
         self.on_text = lambda _s: None
         self.on_status = lambda _s: None
         self.on_progress = lambda _s: None

@@ -13,6 +13,7 @@ except ImportError:
 from ui.document import Document, backup_blurb
 from ui.live_sync import LiveSync
 from ui.pages.mappings import MappingsPage
+from ui.pages.schedule import SchedulePage
 from ui.pages.settings import SettingsPage
 from ui import widgets
 
@@ -109,6 +110,7 @@ class MainWindow:
         self.stack.setObjectName("PageHost")
         pages = (
             ("mappings", "📂", _("Mappings")),
+            ("schedule", "⏰", _("Sync schedule")),
             ("settings", "⚙", _("Configuration")),
         )
         group = QButtonGroup(self._qt)
@@ -150,8 +152,9 @@ class MainWindow:
         outer.addWidget(wrap, 1)
 
         self.mappings = MappingsPage(holders["mappings"], self)
+        self.schedule = SchedulePage(holders["schedule"], self)
         self.settings = SettingsPage(holders["settings"], self)
-        self._pages = {0: self.mappings, 1: self.settings}
+        self._pages = {0: self.mappings, 1: self.schedule, 2: self.settings}
         self._signed = False
         self.stack.currentChanged.connect(self._shown)
 
@@ -174,7 +177,7 @@ class MainWindow:
         from ui.tray import Tray
         self._tray = Tray(self)
         # Opening the window changes nothing on disk. Live sync resumes only
-        # for a folder the person chose with Choose mapping….
+        # for a folder the person chose with 🔄 Live sync….
         QTimer.singleShot(400, self.mappings.resume_live)
 
     def _startup_notices(self):

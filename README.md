@@ -52,16 +52,28 @@ stays upload-only, so an older file is not switched over by itself.
   changed is sent again.
 - **Live sync in the window.** Opening the window changes nothing: it does not
   pick a folder, start watchers, or turn on login start. Live sync starts only
-  after you choose a folder with **Choose mapping…** and confirm. That dialog
+  after you choose a folder with **🔄 Live sync…** and confirm. That dialog
   asks separately whether local deletions should go to the Proton trash.
-  **Choose mapping…** also offers to stop it. "Open this window when I log
-  in" is in Configuration.
+  **🔄 Live sync…** also offers to stop it. A line above the mappings says
+  whether anything syncs on its own. "Open this window when I log in" is in
+  Configuration.
+- **Sync schedule.** The **⏰ Sync schedule** page syncs the open mappings
+  file every hour, day or week through the systemd user timer, with the
+  window closed. Showing the page only reads the timer; Save schedule writes it.
+- **Where to look on Proton.** The mappings table shows the folder itself
+  ("Folder on Proton Drive"), and the Type column says "Two-way" or "Upload
+  only". A folder made on the Proton website comes down only into a two-way
+  mapping, and only inside that folder.
+- **When a sync ends with problems (code 5).** The output says what went wrong
+  in plain words, under "Not everything was synced", and the status bar names
+  the first reason. Failed downloads, skipped folders and held-back deletions
+  show without Verbose.
 
 Reference document for this project.
 
 > **To start the application:** `python3 -m ui`
 >
-> This opens the Qt window (mappings, schedule, real-time, configuration).
+> This opens the Qt window (mappings, sync schedule, configuration).
 > `python3 proton_mapping_editor.py` still opens the previous Tk editor.
 
 ---
