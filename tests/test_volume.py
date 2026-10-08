@@ -3,6 +3,8 @@
 import os
 import sqlite3
 
+import pytest
+
 import syncdb
 import volume
 from ui.status_service import StatusService, close_action
@@ -227,23 +229,80 @@ def test_a_change_is_due_after_the_quiet_period():
     assert "next remote check" in line
 
 
-def test_home_link_follows_the_folder_and_leaves_a_full_directory(tmp_path):
-    real = tmp_path / "Docs"
-    other = tmp_path / "Other"
-    real.mkdir()
+def _two_way(source, **extra):
+    mapping = {"type": "folder", "source": str(source),
+               "dest_parent": "/my-files", "direction": "twoway"}
+    mapping.update(extra)
+    return mapping
+
+
+def test_drive_root_shows_each_two_way_folder(tmp_path):
+    docs, work, up = (tmp_path / "a" / "Docs", tmp_path / "b" / "Docs",
+                      tmp_path / "Uploads")
+    for folder in (docs, work, up):
+        folder.mkdir(parents=True)
+    (docs / "d.txt").write_text("d", encoding="utf-8")
+    root, record = tmp_path / "Proton Drive", tmp_path / "state" / "links.json"
+    mappings = [_two_way(docs), _two_way(work),
+                {"type": "folder", "source": str(up), "dest_parent": "/my-files"}]
+    assert volume.ensure_drive_root(mappings, str(root), str(record)) == str(root)
+    assert root.is_dir() and not root.is_symlink()
+    # Same folder name twice: the second gets a number. Upload-only is left out.
+    assert sorted(os.listdir(root)) == ["Docs", "Docs (2)"]
+    assert (root / "Docs" / "d.txt").read_text(encoding="utf-8") == "d"
+    # Running again changes nothing.
+    volume.ensure_drive_root(mappings, str(root), str(record))
+    assert sorted(os.listdir(root)) == ["Docs", "Docs (2)"]
+
+
+def test_drive_root_drops_only_its_own_stale_links(tmp_path):
+    docs, other = tmp_path / "Docs", tmp_path / "Other"
+    docs.mkdir()
     other.mkdir()
-    link = tmp_path / "Proton Drive"
-    assert volume.ensure_home_link(str(real), str(link)) == "linked"
-    assert link.is_symlink()
-    assert os.path.realpath(link) == os.path.realpath(real)
-    assert volume.ensure_home_link(str(other), str(link)) == "linked"
-    assert os.path.realpath(link) == os.path.realpath(other)
-    full = tmp_path / "Full"
-    full.mkdir()
-    (full / "a.txt").write_text("x", encoding="utf-8")
-    assert volume.ensure_home_link(str(real), str(full)) == "kept"
-    assert not full.is_symlink()
-    assert (full / "a.txt").read_text(encoding="utf-8") == "x"
+    root, record = tmp_path / "Proton Drive", tmp_path / "links.json"
+    volume.ensure_drive_root([_two_way(docs)], str(root), str(record))
+    mine = root / "Mine"
+    os.symlink(str(other), str(mine))
+    (root / "notes.txt").write_text("keep", encoding="utf-8")
+    # The mapping became upload-only: its link goes, the folder stays.
+    volume.ensure_drive_root(
+        [{"type": "folder", "source": str(docs), "dest_parent": "/my-files"}],
+        str(root), str(record))
+    assert sorted(os.listdir(root)) == ["Mine", "notes.txt"]
+    assert docs.is_dir()
+
+
+def test_drive_root_replaces_the_old_single_folder_link(tmp_path):
+    docs = tmp_path / "Docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("x", encoding="utf-8")
+    root = tmp_path / "Proton Drive"
+    os.symlink(str(docs), str(root))
+    volume.ensure_drive_root([_two_way(docs)], str(root), str(tmp_path / "l.json"))
+    assert root.is_dir() and not root.is_symlink()
+    assert os.listdir(root) == ["Docs"]
+    assert (docs / "a.txt").read_text(encoding="utf-8") == "x"
+
+
+def test_drive_root_adds_no_links_where_they_would_be_uploaded(tmp_path):
+    root, docs = tmp_path / "Proton Drive", tmp_path / "Docs"
+    root.mkdir()
+    docs.mkdir()
+    record = tmp_path / "l.json"
+    # A volume syncs the root itself.
+    volume.ensure_drive_root(
+        [volume.mapping_for(str(root)), _two_way(docs)], str(root), str(record))
+    assert os.listdir(root) == []
+    # The root inside a mapped folder.
+    volume.ensure_drive_root(
+        [_two_way(tmp_path), _two_way(docs)], str(root), str(record))
+    assert os.listdir(root) == []
+    # A file in the way is refused, not replaced.
+    blocked = tmp_path / "file"
+    blocked.write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError):
+        volume.ensure_drive_root([_two_way(docs)], str(blocked), str(record))
+    assert blocked.read_text(encoding="utf-8") == "x"
 
 
 def test_new_places_file_is_the_shape_dolphin_reads(tmp_path):
@@ -304,3 +363,21 @@ def test_status_service_starts_one_child_and_stops_it(tmp_path):
     busy = StatusService(probe=lambda: True, popen=popen)
     assert busy.ensure(str(mappings)) is False
     assert len(started) == 1
+
+
+def test_moving_the_place_never_adds_one_back(tmp_path):
+    places = tmp_path / "user-places.xbel"
+    old, root = tmp_path / "Docs", tmp_path / "Proton Drive"
+    old.mkdir()
+    root.mkdir()
+    assert volume.ensure_dolphin_place(str(root), str(places), add=False) is False
+    assert not places.exists()
+    assert volume.ensure_dolphin_place(str(old), str(places))
+    assert volume.ensure_dolphin_place(str(root), str(places), add=False)
+    text = places.read_text(encoding="utf-8")
+    assert volume._file_uri(str(root)) in text
+    assert volume._file_uri(str(old)) + '"' not in text
+    # Removed by the person: saving does not bring it back.
+    places.write_text(text.replace(volume.PLACE_ID, "gone"), encoding="utf-8")
+    assert volume.ensure_dolphin_place(str(root), str(places), add=False) is False
+    assert volume.PLACE_ID not in places.read_text(encoding="utf-8")

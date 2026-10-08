@@ -426,6 +426,7 @@ class MappingsPage:
     def _after_save(self, path):
         self.window.set_status(_("Saved: {p}").format(p=path))
         self.window.refresh_file_chip()
+        self._refresh_drive_root()
         base = os.path.basename(path)
         if not (base.startswith("mappings-") and base.endswith(".json")):
             return
@@ -441,6 +442,21 @@ class MappingsPage:
             self.window.set_status(text)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _refresh_drive_root(self):
+        """Keep the folders shown in ~/Proton Drive in step with the saved file.
+
+        Only once 🔄 Live sync… has set up the Proton Drive place; before
+        that, saving writes nothing outside the mappings file.
+        """
+        try:
+            import volume as volume_mod
+            if volume_mod.confirmed_live(self.doc.mappings) is None:
+                return
+            root = volume_mod.ensure_drive_root(self.doc.mappings)
+            volume_mod.ensure_dolphin_place(root, add=False)
+        except (OSError, ValueError):
+            pass
 
     def on_global_exclusions(self):
         dlg = ExclusionsDialog(
@@ -571,8 +587,9 @@ class MappingsPage:
             widgets.qt_parent(self.window),
             _("Live sync"),
             _("Pick the folder to keep in sync on its own. Proton Drive in "
-              "Dolphin opens it. The rest of the account is not downloaded. "
-              "You confirm on the next screen."),
+              "Dolphin opens ~/Proton Drive, which shows each two-way folder, "
+              "like My files on the website. The rest of the account is not "
+              "downloaded. You confirm on the next screen."),
             labels, start, False)
         if not accepted:
             return
@@ -727,10 +744,10 @@ class MappingsPage:
         import volume as volume_mod
         if install:
             try:
-                volume_mod.ensure_home_link(source)
-            except OSError:
-                pass
-            volume_mod.ensure_dolphin_place(source)
+                place = volume_mod.ensure_drive_root(self.doc.mappings)
+            except (OSError, ValueError):
+                place = source
+            volume_mod.ensure_dolphin_place(place)
             try:
                 import realtime_manager
                 realtime_manager.write_config(2, 2)
