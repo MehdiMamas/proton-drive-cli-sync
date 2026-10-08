@@ -61,6 +61,27 @@ def mapping_remote_path(dest_parent, source):
     return dest + "/" + os.path.basename(src)
 
 
+def proton_location(mapping):
+    """Où le dossier ou le fichier se trouve sur Proton Drive, pas son parent.
+
+    Un dossier créé sur le site doit l'être ici pour revenir sur l'ordinateur.
+    Un volume deux sens est ``dest_parent`` lui-même.
+    """
+    dest = (mapping.get("dest_parent") or "").strip()
+    if mapping.get("direction") == "twoway" and mapping.get("volume") is True:
+        return dest.rstrip("/") or dest
+    return mapping_remote_path(dest, mapping.get("source", "")) or dest
+
+
+def kind_label(mapping):
+    """Libellé de la colonne Type : le sens se lit sans ouvrir Edit."""
+    if mapping.get("direction") == "twoway":
+        return _("Two-way")
+    if mapping.get("type") == "file":
+        return _("File, upload only")
+    return _("Upload only")
+
+
 class DocumentError(Exception):
     """Fichier illisible ou refus d'une édition. Le message est déjà traduit."""
 

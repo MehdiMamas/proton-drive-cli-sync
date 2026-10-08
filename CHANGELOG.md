@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A two-way pass that ended with code 5 did not say why, and its failed downloads, skipped folders and held-back deletions were hidden unless Verbose was on (#14). The engine now prints "Not everything was synced:" with one plain sentence per problem before the summary, in the terminal, the systemd journal and both windows. The Qt status bar names the first reason. `[download-failed]`, `[list-skipped]`, `[delete-guard]`, `[download]`, `[conflict]`, `[held]`, `[kept]` and `[restore]` lines show without Verbose, and the skipped and refused ones also under "Errors only". Migration: none.
+- The mappings table showed the parent folder on Proton Drive, so a folder made on the website could land beside the synced folder instead of inside it, and an upload-only mapping was labelled only "Folder" (#14). The column is now "Folder on Proton Drive" and shows the folder itself; the Type column says "Two-way", "Upload only" or "File, upload only". The add and edit dialog shows the resulting folder under the parent field. Migration: none.
+- The Sync schedule page was no longer in the window, so a scheduled sync could not be set up from it (#15). It is back as ⏰ Sync schedule, in plain words: every hour, day or week, Turn on / Turn off, Sync now, and the last scheduled run. Showing the page only reads the timer. Migration: none. An existing timer is shown as it is.
+- Automatic sync was hard to find (#16). The button is now 🔄 Live sync… (was Choose mapping…), and a line above the mappings says whether anything syncs on its own and where to turn it on. The two-way note in the mapping dialog says when Proton changes come down instead of promising a 5-minute check. Migration: none.
+
 ## [2.3.0] - 2026-10-07
 
 Safety release for two-way sync. Checked with the fake CLI in WSL Ubuntu, not against a real Proton account.

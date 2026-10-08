@@ -183,3 +183,66 @@ def test_calendar_roundtrip():
     assert calendar.build_on_calendar("weekly", 3, "Sun") == "Sun *-*-* 03:00:00"
     assert calendar.parse_on_calendar("Mon *-*-* 15:00:00") == ("weekly", 15, "Mon")
     assert calendar.parse_on_calendar("not a calendar") is None
+
+
+def test_table_names_the_direction_and_the_real_proton_folder():
+    # Issue #14: the folder to open on the website, not its parent.
+    up = {"type": "folder", "source": "/home/u/Docs", "dest_parent": "/my-files/Backups"}
+    two = dict(up, direction="twoway")
+    volume = {"type": "folder", "source": "/home/u/Proton Drive",
+              "dest_parent": "/my-files", "direction": "twoway", "volume": True}
+    single = {"type": "file", "source": "/home/u/a.txt", "dest_parent": "/my-files/X/"}
+    assert document.kind_label(up) == "Upload only"
+    assert document.kind_label(two) == "Two-way"
+    assert document.kind_label(single) == "File, upload only"
+    assert document.proton_location(up) == "/my-files/Backups/Docs"
+    assert document.proton_location(two) == "/my-files/Backups/Docs"
+    assert document.proton_location(volume) == "/my-files"
+    assert document.proton_location(single) == "/my-files/X/a.txt"
+
+
+def test_two_way_problem_lines_show_without_verbose():
+    for line in (
+            "[download-failed] could not download /x",
+            "[list-skipped] Could not list /my-files/A — folder skipped",
+            "    [delete-guard] refusing to trash 9 of 10 remote item(s)",
+            "[download] downloaded /home/u/Docs/a.txt",
+            "[conflict] both sides changed",
+            "[held] /a -> /b",
+            "⚠    • 1 file(s) could not be sent or downloaded.",
+    ):
+        assert run.visible_text(line, verbose=False, errors_only=False), line
+    assert run.is_error_line("[list-skipped] Could not list /my-files/A")
+    assert run.is_error_line("[delete-guard] refusing to trash")
+    assert not run.is_error_line("[download] downloaded /home/u/failed.txt")
+
+
+def test_code_5_status_names_the_first_reason():
+    assert run.parse_run_result('[run-result] {"exit": 5, "files_failed": 2}') == {
+        "exit": 5, "files_failed": 2}
+    assert run.parse_run_result("[run-result] nope") is None
+    assert run.parse_run_result("Summary: …") is None
+    text = run.sync_status(5, {"folders_listing_failed": 1})
+    assert "could not be read" in text
+    assert "code 5" in run.sync_status(5, {})
+    assert "code 0" in run.sync_status(0, {"files_failed": 0})
+
+
+def test_schedule_page_words():
+    from ui.pages import schedule
+
+    assert schedule.describe_calendar("*-*-* 03:00:00") == "every day at 03:00"
+    assert schedule.describe_calendar("*-*-* *:00:00") == "every hour"
+    assert schedule.describe_calendar("Sun *-*-* 15:00:00") == "every Sunday at 15:00"
+    assert schedule.describe_calendar("weird") == "weird"
+    line = "Thu 2026-10-08 03:00:00 CEST 9h left Wed 2026-10-07 03:00:01 CEST"
+    assert schedule.next_run_text(line) == "Thu 2026-10-08 03:00:00 CEST"
+    assert schedule.next_run_text("") == ""
+    off = schedule.state_lines({})
+    assert "not set up" in off[0]
+    on = schedule.state_lines({
+        "service_exists": True, "timer_exists": True, "timer_active": True,
+        "calendar": "*-*-* 03:00:00", "next_run": line, "linger": True,
+        "mappings_path": "/m.json"})
+    assert on[0] == "Scheduled sync is on: every day at 03:00."
+    assert "Thu 2026-10-08" in on[1]
