@@ -2879,6 +2879,7 @@ def sync_folder_guarded(mapping, local_dir, remote_parent, dry_run=False, verbos
             print(_("  ⚠  Deletions disabled for this mapping: {r}").format(r=raison))
             print(_("      (uploads continue normally)"))
             mapping_delete = False
+            _RUN.add("deletions_refused")
         else:
             label = _("permanent") if mode == "permanent" else _("to trash")
             print(_("  🗑  Deletion propagation ACTIVE ({l}) for this mapping").format(l=label))
@@ -3141,6 +3142,7 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
             print(_("  ⚠  Deletions disabled for this subpath: {r}").format(r=raison_gf))
             print(_("      (uploads continue normally)"))
             mapping_delete = False
+            _RUN.add("deletions_refused")
         else:
             label = _("permanent") if mode == "permanent" else _("to trash")
             print(_("  🗑  Deletion propagation ACTIVE ({l}) for this subpath").format(l=label))

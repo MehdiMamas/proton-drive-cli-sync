@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.25.5"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.25.6"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -1105,7 +1105,8 @@ def line_is_error(stripped):
         return False
     if any(g in stripped for g in ("❌", "⛔", "⚠")):
         return True
-    if stripped.startswith(_EDITOR_ERROR_TAGS):
+    # mount_check annonce aussi un verdict sain sous [delete-guard] (verbeux).
+    if stripped.startswith(_EDITOR_ERROR_TAGS) and not stripped.startswith("[delete-guard] OK"):
         return True
     head = stripped.split("/", 1)[0].lower()
     return ("erreur" in head or "error" in head
