@@ -24,10 +24,11 @@ Tout est centré sur l'utilisateur courant et son fichier de mappings actif.
 Conçu pour tourner SANS privilèges (session utilisateur). Le linger (sudo) est
 seulement LU et rappelé, jamais modifié ici.
 """
-__version__ = "1.6.2"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.7.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
+import sys
 import json
 import glob
 import time
@@ -45,6 +46,8 @@ try:
 except ImportError:
     def _(s):
         return s
+
+import unitexec  # guillemets/échappement systemd
 
 # Réglages d'installation (chemins, présence NAS...) : une SEULE source de
 # vérité partagée par le moteur, le GUI et les démons. Import tolérant : si
@@ -701,14 +704,22 @@ def drift_state(mappings_path):
 def _service_text(description, script, mappings_path):
     """Génère un .service --user simple, qui RESTE actif (Restart=on-failure)
     et redémarre à l'ouverture de session (WantedBy=default.target)."""
+    exec_line = unitexec.exec_line(script, [mappings_path], app_dir=H_ENGINE_DIR)
+    cli_value = appconfig.cli_unit_value(DEFAULT_CLI) if _HAS_CONFIG else (
+        DEFAULT_CLI if os.path.isfile(DEFAULT_CLI) and os.access(DEFAULT_CLI, os.X_OK)
+        else None)
+    if not cli_value or (unitexec.is_packaged(H_ENGINE_DIR) and cli_value == DEFAULT_CLI):
+        env_line = ""  # chemin absent ou paquet : proton-drive via PATH
+    else:
+        env_line = "Environment=" + unitexec.quote_environment(
+            "PROTON_DRIVE_CLI", cli_value) + "\n"
     return f"""[Unit]
 Description={description}
 After=network-online.target
 
 [Service]
 Type=simple
-Environment=PROTON_DRIVE_CLI={appconfig.cli_env_value(DEFAULT_CLI) if _HAS_CONFIG else DEFAULT_CLI}
-ExecStart=/usr/bin/python3 {script} {mappings_path}
+{env_line}{exec_line}
 Restart=on-failure
 RestartSec=5
 
@@ -760,8 +771,10 @@ def read_units_mappings_path():
             content = f.read()
     except OSError:
         return None
-    m = re.search(r"^ExecStart=.*realtime_consumer\.py\s+(\S+)", content, re.MULTILINE)
-    return m.group(1) if m else None
+    m = re.search(r"^ExecStart=(.*)$", content, re.MULTILINE)
+    if not m:
+        return None
+    return unitexec.mappings_arg_from_exec(m.group(1), "realtime_consumer.py")
 
 
 def mappings_ready_count(mappings_path):
@@ -940,21 +953,34 @@ def journal_follow_command(lines=500):
 # ─────────────────────────────────────────────────────────────────────────
 #  Authentification Proton Drive (session du CLI)
 # ─────────────────────────────────────────────────────────────────────────
+def auth_status():
+    """(ok, détail). Le détail est la dernière ligne du CLI, pas un motif inventé."""
+    try:
+        env = dict(os.environ)
+        env["PROTON_DRIVE_CLI"] = proton_cli()
+        r = subprocess.run(
+            [sys.executable, ENGINE, "--check-auth"],
+            capture_output=True, text=True, timeout=60, env=env)
+    except Exception as exc:
+        return False, str(exc)
+    if r.returncode == 0:
+        return True, ""
+    line = ""
+    for raw in ((r.stdout or "") + "\n" + (r.stderr or "")).splitlines():
+        raw = raw.strip()
+        if raw:
+            line = raw
+    return False, line or _("Session unavailable")
+
+
 def check_auth():
     """True si le CLI Proton est authentifié (session valide, trousseau accessible).
     Réutilise EXACTEMENT le préflight du moteur (`proton_sync.py --check-auth`,
     code 0 = OK, code 2 = indisponible) — aucune logique d'auth dupliquée ici. Ne
     prend pas le verrou, ne synchronise rien. Tolérant : en cas d'erreur, retourne
     False (on considère l'auth indisponible plutôt que de faire échouer le GUI)."""
-    try:
-        env = dict(os.environ)
-        env["PROTON_DRIVE_CLI"] = proton_cli()
-        r = subprocess.run(
-            ["python3", ENGINE, "--check-auth"],
-            capture_output=True, text=True, timeout=60, env=env)
-        return r.returncode == 0
-    except Exception:
-        return False
+    ok, _detail = auth_status()
+    return ok
 
 
 def auth_login_command():

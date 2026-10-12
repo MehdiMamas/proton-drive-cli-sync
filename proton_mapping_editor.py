@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.29.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.30.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -489,7 +489,13 @@ def cli_path():
     except ImportError:
         return os.path.join(APP_DIR, "proton-drive")
 DEFAULT_ENGINE = os.path.join(APP_DIR, "proton_sync.py")
-DEFAULT_LOG_DIR = os.path.join(APP_DIR, "logs")
+
+
+def run_log_dir():
+    """Directory for GUI run logs. A packaged APP_DIR is not writable."""
+    if _HAS_CONFIG:
+        return appconfig.RUN_LOG_DIR
+    return os.path.expanduser("~/.proton-drive-sync/logs")
 
 
 # ============================================================
@@ -521,10 +527,23 @@ def _zenity_run(args):
     return out or None
 
 
+def _dialog_dir(initialdir):
+    """Folder a file dialog opens in. A read-only APP_DIR (packaged install)
+    is not a usable default, so those dialogs start in the home directory."""
+    start = initialdir or APP_DIR
+    try:
+        same = os.path.realpath(start) == os.path.realpath(APP_DIR)
+    except (OSError, ValueError):
+        same = os.path.normpath(start) == os.path.normpath(APP_DIR)
+    if same and not os.access(APP_DIR, os.W_OK):
+        return os.path.expanduser("~")
+    return start
+
+
 def pick_open_file(parent=None, title=_("Open a mappings file"),
                    initialdir=None, json_only=True):
     """Sélecteur d'ouverture de fichier. zenity si dispo, sinon Tk."""
-    initialdir = initialdir or APP_DIR
+    initialdir = _dialog_dir(initialdir)
     if _ZENITY:
         args = ["--file-selection", "--title", title,
                 # --filename définit le dossier de départ (slash final = dossier)
@@ -543,7 +562,7 @@ def pick_open_file(parent=None, title=_("Open a mappings file"),
 def pick_save_file(parent=None, title=_("Save the mappings file"),
                    initialdir=None, initialfile="mappings.json"):
     """Sélecteur d'enregistrement. zenity si dispo, sinon Tk."""
-    initialdir = initialdir or APP_DIR
+    initialdir = _dialog_dir(initialdir)
     if _ZENITY:
         start = os.path.join(initialdir, initialfile)
         args = ["--file-selection", "--save", "--confirm-overwrite",
@@ -580,7 +599,7 @@ def pick_move_target(parent=None, title=None, initialdir=None):
     pas, on lui ajoute une entrée — le message « le fichier existe, remplacer ? »
     du sélecteur d'enregistrement serait trompeur ici. zenity si dispo, sinon Tk."""
     title = title or _("Move to which mappings file?")
-    initialdir = initialdir or APP_DIR
+    initialdir = _dialog_dir(initialdir)
     if _ZENITY:
         start = os.path.join(initialdir, "mappings.json")
         args = ["--file-selection", "--save",   # --save autorise un nom nouveau…
@@ -1073,7 +1092,13 @@ def mapping_remote_path(dest_parent, source):
 # --- editor output filter (no Tk) ---
 _EDITOR_STATUS_PREFIXES = ("===", "▶", "⏸", "✓", "✗", "❌", "⚠", "🔑", "🌱", "⟳",
                            "♻", "🗑", "⛔", "📂", "==", "Terminé", "Done", "Erreur",
-                           "Error", "Cache", "Global", "▶ Mapping", "  ↪")
+                           "Error", "Cache", "Global", "▶ Mapping", "  ↪", "✅", "⏭",
+                           # Lignes deux sens : téléchargé, échoué, gardé, retenu.
+                           "[download", "[upload-failed]", "[list-skipped]",
+                           "[delete-guard]", "[held]", "[kept]", "[restore]",
+                           "[conflict")
+# Sauté ou refusé, sans le mot « failed ».
+_EDITOR_ERROR_TAGS = ("[list-skipped]", "[delete-guard]")
 
 _EDITOR_FAILURE_COUNTERS = (
     "files_failed",
@@ -1109,6 +1134,9 @@ def line_is_error(stripped):
     if not stripped:
         return False
     if any(g in stripped for g in ("❌", "⛔", "⚠")):
+        return True
+    # mount_check annonce aussi un verdict sain sous [delete-guard] (verbeux).
+    if stripped.startswith(_EDITOR_ERROR_TAGS) and not stripped.startswith("[delete-guard] OK"):
         return True
     head = stripped.split("/", 1)[0].lower()
     return ("erreur" in head or "error" in head
@@ -2512,6 +2540,29 @@ class MappingEditor(tk.Tk):
                    command=lambda: RemoteFolderPicker(dlg, self, dest_var)
                    ).pack(side="left", padx=(6, 0))
 
+        # --- Zone Sens (dossiers seulement) ---
+        # Envoi seul par défaut. Deux sens écrit "direction": "twoway" ; revenir
+        # à l'envoi seul retire la clé (le moteur ne télécharge alors rien).
+        direction_var = tk.StringVar(
+            value="twoway" if (is_edit and mapping.get("direction") == "twoway")
+            else "upload")
+        if kind == "folder":
+            dir_frame = ttk.LabelFrame(body, text=_("Direction"), padding=8)
+            dir_frame.pack(fill="x", pady=(0, 8))
+            ttk.Radiobutton(
+                dir_frame, variable=direction_var, value="upload",
+                text=_("Upload only — local files are backed up. Remote changes "
+                       "are not downloaded")).pack(anchor="w")
+            ttk.Radiobutton(
+                dir_frame, variable=direction_var, value="twoway",
+                text=_("Two-way — for this mapping only")).pack(anchor="w")
+            ttk.Label(
+                dir_frame, wraplength=600, foreground="#7a5c00", justify="left",
+                text=_("If both sides change, both copies are kept and nothing is "
+                       "deleted. Changes made on Proton Drive come down when a sync "
+                       "runs: Run sync, the schedule, or real time (about every 5 "
+                       "minutes).")).pack(anchor="w", pady=(2, 0))
+
         # --- Zone Fichiers modifiés (mode de conflit) ---
         conf_frame = ttk.LabelFrame(body, text=_("Modified files"), padding=8)
         conf_frame.pack(fill="x", pady=(0, 8))
@@ -2949,6 +3000,10 @@ class MappingEditor(tk.Tk):
                 new_m["excluded_remote"] = "keep"
             else:
                 new_m.pop("excluded_remote", None)
+            if kind == "folder" and direction_var.get() == "twoway":
+                new_m["direction"] = "twoway"
+            else:
+                new_m.pop("direction", None)
             result["value"] = new_m
             dlg.destroy()
 
@@ -4828,7 +4883,7 @@ class MappingEditor(tk.Tk):
 
     def _log_path(self):
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-        return os.path.join(DEFAULT_LOG_DIR, f"sync-{ts}.log")
+        return os.path.join(run_log_dir(), f"sync-{ts}.log")
 
     def _build_shell_command(self, only_sources=None):
         """Reconstruit une commande shell équivalente, copiable dans un terminal.
@@ -4911,6 +4966,7 @@ class MappingEditor(tk.Tk):
 
     # ---------- Affichage épuré (un chemin par dossier) vs brut (« Détaillé ») ----------
     _STATUS_PREFIXES = _EDITOR_STATUS_PREFIXES
+    _ERROR_TAGS = _EDITOR_ERROR_TAGS
 
     def _is_status_line(self, stripped):
         """Ligne d'orchestration / de résumé / d'erreur : toujours affichée, même en
@@ -5109,7 +5165,7 @@ class MappingEditor(tk.Tk):
                 self.status.set(_("Launch cancelled."))
                 return
 
-        os.makedirs(DEFAULT_LOG_DIR, exist_ok=True)
+        os.makedirs(run_log_dir(), exist_ok=True)
         log_path = self._log_path()
         self._current_log_path = log_path
         engine_args = self._build_engine_args(only_sources)
@@ -5637,7 +5693,7 @@ class MappingEditor(tk.Tk):
                         pass
 
             # 3) Exécuter le moteur (commande déjà construite par l'appelant).
-            os.makedirs(DEFAULT_LOG_DIR, exist_ok=True)
+            os.makedirs(run_log_dir(), exist_ok=True)
             log_path = self._log_path()
             self._current_log_path = log_path
             env = dict(os.environ)

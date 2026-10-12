@@ -36,7 +36,7 @@ from a deployment):
     except ImportError:
         appconfig = None   # callers fall back to their own built-in defaults
 """
-__version__ = "1.9.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.10.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -408,6 +408,24 @@ def set_tray_enabled(value):
     return _put("tray_enabled", bool(value))
 
 
+def last_mappings_path():
+    """Fichier de mappings rouvert par ``python -m ui`` sans argument.
+
+    Chaîne vide si le réglage est absent : un fichier systemd reste le repli.
+    """
+    value = get("last_mappings_path")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def set_last_mappings_path(path):
+    path = (path or "").strip()
+    if not path:
+        return False
+    return _put("last_mappings_path", path)
+
+
 def rename_ext_collision_suffix():
     v = get("rename_ext_collision_suffix")
     if isinstance(v, str) and v.strip() and not (_SUFFIX_FORBIDDEN & set(v)):
@@ -597,12 +615,12 @@ def set_max_delete_ratio(value):
 
 def resolve_proton_cli():
     """Chemin du binaire CLI. L'ordre est décidé uniquement par paths.resolve_cli :
-      1. Variable d'environnement PROTON_DRIVE_CLI ;
-      2. Réglage 'proton_cli_path' de settings.json ;
+      1. Variable d'environnement PROTON_DRIVE_CLI, si ce fichier existe ;
+      2. Réglage 'proton_cli_path' de settings.json, si ce fichier existe ;
       3. <dossier d'installation>/proton-drive, s'il est un fichier exécutable ;
       4. `proton-drive` trouvé sur PATH ;
-      5. <dossier d'installation>/proton-drive quand même, pour que le message
-         d'erreur nomme un chemin."""
+      5. le premier chemin explicite quand même, pour que le message d'erreur
+         nomme un chemin."""
     return paths.resolve_cli(APP_DIR, proton_cli_path())
 
 
@@ -682,20 +700,20 @@ def cli_missing_explanation():
           "official `proton-drive` binary, which you download separately. "
           "It looks in this order:"),
         "",
-        _("  1. the PROTON_DRIVE_CLI environment variable, if set;"),
-        _("  2. the “Proton CLI binary path” field in the Configuration window;"),
+        _("  1. the PROTON_DRIVE_CLI environment variable, when that file exists;"),
+        _("  2. the “Proton CLI binary path” field in the Configuration window, "
+          "when that file exists;"),
         _("  3. {p}, when that file is executable;").format(
             p=os.path.join(APP_DIR, "proton-drive")),
         _("  4. `proton-drive` on PATH;"),
-        _("  5. otherwise the path in step 3, so the error can name it."),
+        _("  5. otherwise the first explicit path, so the error can name it."),
         "",
-        _("Simplest fix: install the `proton-drive` binary on PATH, or place "
-          "it next to the scripts (step 3). To keep it elsewhere, fill in "
-          "the Configuration field."),
+        _("A path that does not exist is skipped, so `proton-drive` on PATH "
+          "is still used. Simplest fix: install that binary on PATH "
+          "(/usr/bin/proton-drive)."),
         "",
-        _("If you change this path AFTER installing the services, reinstall "
-          "them: generated systemd units embed the path when created, and "
-          "would otherwise keep pointing at the old one."),
+        _("Reinstall the services after you change a path that does exist: "
+          "generated systemd units embed that path."),
     ]
 
 
@@ -710,6 +728,18 @@ def cli_env_value(default_template):
     return configured if configured else default_template
 
 
+def cli_unit_value(default_template):
+    """Chemin à figer dans l'unité, ou None.
+
+    Un chemin absent ne doit pas être écrit : le consommateur le prendrait
+    avant `proton-drive` sur PATH et refuserait de lancer un passage.
+    """
+    chosen = cli_env_value(default_template)
+    if chosen and os.path.isfile(chosen) and os.access(chosen, os.X_OK):
+        return chosen
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────
 #  2) Dossier de données unifié (cache, file temps réel, logs)
 # ─────────────────────────────────────────────────────────────────────────
@@ -719,6 +749,8 @@ def cli_env_value(default_template):
 # de fichiers que $HOME) : instantané, ne touche PAS le contenu -> aucun
 # re-balayage du cache existant.
 DATA_DIR = os.path.expanduser("~/.proton-drive-sync")
+# GUI "Run" logs. Not under APP_DIR: a packaged install is read-only there.
+RUN_LOG_DIR = os.path.join(DATA_DIR, "logs")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 QUEUE_DIR = os.path.join(DATA_DIR, "queue")
 REALTIME_CONF = os.path.join(DATA_DIR, "realtime.conf")

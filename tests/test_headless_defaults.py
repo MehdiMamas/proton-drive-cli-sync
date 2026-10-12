@@ -341,3 +341,47 @@ def test_cli_found_on_path_when_no_setting(tmp_path, monkeypatch):
     monkeypatch.delenv("PROTON_DRIVE_CLI", raising=False)
     found = config.resolve_proton_cli()
     assert os.path.samefile(found, binary)
+
+
+def test_missing_cli_path_does_not_hide_the_one_on_path(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    monkeypatch.setattr(config, "APP_DIR", str(app))
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    binary = bindir / "proton-drive"
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    missing = tmp_path / "gone" / "proton-drive"
+    monkeypatch.setenv("PROTON_DRIVE_CLI", str(missing))
+    monkeypatch.setattr(config, "proton_cli_path", lambda: str(tmp_path / "also-gone"))
+    found = config.resolve_proton_cli()
+    assert os.path.samefile(found, binary)
+    link = tmp_path / "link-proton-drive"
+    link.symlink_to(binary)
+    monkeypatch.setattr(config, "proton_cli_path", lambda: str(link))
+    found = config.resolve_proton_cli()
+    assert os.path.samefile(found, binary)
+
+
+def test_symlink_semantics(
+        fake_drive, local_tree, write_mappings, engine, tmp_path):
+    """A link to a file is sent as its target; a link to a directory is not
+    walked; a broken link is ignored (README, Detection logic)."""
+    src = local_tree({"Docs/real.txt": (b"data", 1_000_000_000)})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "inside.txt").write_bytes(b"secret")
+    docs = src / "Docs"
+    (docs / "link.txt").symlink_to(docs / "real.txt")
+    (docs / "dirlink").symlink_to(outside, target_is_directory=True)
+    (docs / "broken").symlink_to(docs / "missing-target")
+    cfg = write_mappings([_mapping(docs)])
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.content("/my-files/Backups/Docs/link.txt") == b"data"
+    assert fake_drive.content("/my-files/Backups/Docs/dirlink/inside.txt") is None
+    assert "inside.txt" not in fake_drive.listing("/my-files/Backups/Docs")
+    assert "broken" not in fake_drive.listing("/my-files/Backups/Docs")
+    assert fake_drive.content("/my-files/Backups/Docs/broken") is None

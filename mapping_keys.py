@@ -1,15 +1,16 @@
 """Pure helpers for mapping dictionaries (no GUI imports, testable without a display)."""
-__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 # Keys the mapping dialog builds itself on every save. A key in this set that the
 # dialog leaves out was deliberately switched off by the user and must NOT come back.
 # excluded_remote est édité par la case du dialogue : décochée, la clé ne revient pas.
 # max_delete_* aussi : un champ vide veut dire « réglage global », donc on n'y
-# recopie PAS l'ancienne surcharge.
+# recopie PAS l'ancienne surcharge. direction aussi : revenir à l'envoi seul
+# retire la clé, elle ne doit pas revenir de l'ancien mapping.
 DIALOG_KEYS = frozenset({
     "type", "source", "dest_parent", "exclusions",
     "conflict_mode", "allow_delete", "delete_mode", "source_kind",
-    "excluded_remote", "max_delete_min", "max_delete_ratio",
+    "excluded_remote", "max_delete_min", "max_delete_ratio", "direction",
 })
 
 

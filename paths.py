@@ -5,7 +5,7 @@ resolve_cli(). This module imports neither config nor i18n, so those imports
 cannot cycle. Nothing here raises: a missing home, a read-only config
 directory, or a failed copy falls back to a path.
 """
-__version__ = "1.0.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -205,21 +205,26 @@ def settings_path():
 def resolve_cli(app_dir, configured):
     """Path of the proton-drive binary. One order, nowhere else:
 
-    1. PROTON_DRIVE_CLI, when set and non-empty.
-    2. `configured` (the proton_cli_path setting).
+    1. PROTON_DRIVE_CLI, when set and that file exists.
+    2. `configured` (the proton_cli_path setting), when that file exists.
     3. An executable proton-drive next to the scripts (`app_dir`).
     4. proton-drive on PATH.
-    5. app_dir/proton-drive anyway, so an error can name that path.
+    5. The first explicit path anyway (1, 2, then app_dir/proton-drive), so
+       an error can name it.
+
+    A path that does not exist is skipped: a systemd unit that froze an old
+    location must not hide /usr/bin/proton-drive or the Configuration field.
     """
-    env = os.environ.get("PROTON_DRIVE_CLI")
-    if env:
-        return env
-    if isinstance(configured, str) and configured.strip():
-        return configured
+    env = os.environ.get("PROTON_DRIVE_CLI") or None
+    if not (isinstance(configured, str) and configured.strip()):
+        configured = None
+    for path in (env, configured):
+        if path and os.path.exists(path):
+            return path
     bundled = os.path.join(app_dir, "proton-drive")
     if os.path.isfile(bundled) and os.access(bundled, os.X_OK):
         return bundled
     found = shutil.which("proton-drive")
     if found:
         return found
-    return bundled
+    return env or configured or bundled
