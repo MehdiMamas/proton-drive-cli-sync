@@ -2,12 +2,18 @@
 
 # Proton Drive sync via the official CLI (Linux)
 
-**One-way backup**: this software pushes your local folders **to** Proton Drive,
-and nothing else. It never downloads from Proton, does not reconcile the two
-sides, and is not a replacement for a two-way sync client. Anything changed
-directly on Proton Drive is not brought back to your machine — and will be
-overwritten on the next run if the local file has changed. If you are looking
-for sync in both directions, this is not the right tool.
+**One-way backup by default**: this software pushes your local folders **to**
+Proton Drive. A mapping left as it is never downloads from Proton and does not
+reconcile the two sides. Anything changed directly on Proton Drive is not
+brought back to your machine — and will be overwritten on the next run if the
+local file has changed.
+
+**Two-way is an option, per mapping.** A folder mapping can be switched to
+two-way (Direction in the mapping dialog, `"direction": "twoway"` in the JSON).
+That mapping also brings down what changed on Proton, and keeps both copies
+when both sides changed. Every other mapping stays one-way, and a mappings file
+written before this option is not switched over. See
+"[Two-way sync (optional, per mapping)](#two-way-sync-optional-per-mapping)".
 
 Reference document for this project.
 
@@ -17,6 +23,10 @@ Reference document for this project.
 > everything is driven (sync, priming, scheduling, real-time, configuration). The
 > other `.py` files in the folder are internal modules — the engine, the watchers,
 > the service managers — called by the application, never directly by you.
+>
+> With PySide6 installed, `python3 -m ui` opens a newer Qt window on the same
+> mappings file (see "[Qt window](#qt-window)"). The tray icon opens that window
+> when PySide6 is there, and this editor otherwise.
 
 ---
 
@@ -273,6 +283,14 @@ TWO accepted formats (backward compatibility):
 - `excluded_remote`: absent (the default) or `"prune"` sends the already-uploaded remote copy of a name excluded **on this mapping** to the Proton trash on the next `--delete` pass. `"keep"` is opt-in — the checkbox in the mapping dialog — and covers only exclusions written on that mapping. A name that matches a **global** exclusion is still trashed. Any other value is treated as `"prune"` with a warning. Applies to full passes, resets and `--subpath`.
 - `max_delete_min` / `max_delete_ratio`: optional per-mapping override of the mass-deletion thresholds (see "Deletion propagation"). Absent means the values from Configuration (`settings.json`). Defaults 20 and 0.5. They do nothing until the guard is turned on.
 
+**Two-way fields (optional, per folder mapping)** — see "[Two-way sync](#two-way-sync-optional-per-mapping)":
+
+- `direction`: absent (the default) means upload only. `"twoway"` turns two-way on for this mapping. Any other value is upload only. Set by Direction in both mapping dialogs.
+- `poll_minutes`: how often the real-time consumer lists a two-way mapping on Proton. Default 5.
+- `live` / `live_confirmed`: the folder chosen with 🔄 Live sync… in the Qt window. Nothing is trashed for a `live` mapping until `live_confirmed` is `true` (set when you confirm in that dialog).
+- `shared_delete_confirmed`: a two-way mapping under `/shared-with-me` trashes nothing until this is `true` (the confirmation in the Qt mapping dialog).
+- `volume`: `true` on a two-way mapping whose local folder is the whole of My files. Such a mapping cannot be reset (the wipe is refused).
+
 ### Exclusions
 
 Two combined mechanisms, applying to **folders AND files**, by **name** (not full path):
@@ -315,6 +333,8 @@ So the SHA1 is computed only for files whose date changed while their size did n
 `--verify-hash` extends the SHA1 comparison to **all** files of equal size, without trusting the last pass — the only way to catch a change that kept both the size and the date (a rewritten music tag, for instance; equivalent of robocopy's monthly `/MIR /IS`). It reads every file in full and bypasses the cache: reserve it for a periodic check, not daily use. Reading stays much shorter than listing the remote folders (in the order of 100 MiB/s from a NAS over gigabit).
 
 ⚠ **After updating from a version older than v1.17.0, run one `--verify-hash` pass over all mappings** (in the interface: "SHA1 check" ticked, "Test (dry-run)" unticked). Earlier versions stopped at the size: a file modified at equal size was not sent, and its folder was still recorded in the cache as synced. Those stale copies stay on Proton until the file changes again; only this pass finds them.
+
+**Symbolic links.** A link to a file is sent as the target's content (the target may sit outside the mapped folder); the cache records it with the target's size and date, so a change to the target is noticed. A link to a directory is not followed: what it points at is not walked or sent. A broken link is ignored.
 
 ### Local cache (major optimization)
 
@@ -488,6 +508,75 @@ To fix this at the root **and** keep the cache coherent, the engine **renames th
 | tiff / heic / avif | yes | no (codec) | no ("internal error") |
 
 Cross-cutting rule: **everything depends first on a lowercase extension** (otherwise wrong type → no icon, no thumbnail, no preview). Then, whether a correctly-typed file gets a thumbnail or opens in the viewer depends on Proton's per-format support. BMP is the telling example: correct type, no thumbnail, but viewable.
+
+---
+
+## Two-way sync (optional, per mapping)
+
+A folder mapping with `"direction": "twoway"` is reconciled in both directions by `twoway.py`, called from the same engine pass (`proton_sync.py`, scheduled or `--subpath`). The engine still reaches Drive only through the official CLI: `filesystem list`, `upload`, `download` and `trash`. A mapping without that key never reaches `twoway.py` and behaves exactly as described above.
+
+**What it remembers.** Each two-way folder keeps a row per file in a small SQLite database (`syncdb.py`, one file per mappings file under `~/.proton-drive-sync/`): the size, date and SHA1 of both sides at the last successful sync. A two-way pass always lists the remote folder, even when the local fingerprint has not changed, because a change on Proton does not touch the local folder.
+
+**Decisions, per file:**
+
+- Changed here only: uploaded.
+- Changed on Proton only: downloaded into a temporary file, which replaces the local file only after the CLI exits 0. A failed download keeps the local file and does not update its row (`[download-failed]`, with the CLI's own message).
+- Changed on both sides: a conflict. Your file keeps its name, and Proton's version is saved next to it as `name (proton conflict).ext`; a later conflict gets `(proton conflict 2)`, so an older copy is never overwritten. Nothing is deleted. To finish, keep the version you want under the original name and delete the conflict copy: the next pass sends your choice. If you make both files identical, the conflict clears on its own.
+- A Proton document or spreadsheet cannot be downloaded by the CLI: a small text file is written at that name, marked on its first line as a Proton web document, and is never uploaded (`[download-skipped]`).
+
+**Deletions** follow the same two switches as a one-way pass: `--delete` for the pass and `allow_delete` on the mapping, plus the mount guard and, if turned on, the mass-deletion guard.
+
+- A file deleted here is sent to the Proton trash — unless someone changed it on Proton since the last sync: it is downloaded again instead.
+- A file removed on Proton is moved out of the local folder only under `--delete`, and only if you have not changed it since. It goes to `~/.proton-drive-sync/holding/` and is never deleted. A file you changed is sent again.
+- A failed remote listing does not update the database for that folder, and the pass ends with code 5.
+
+**When remote changes come down.** On every pass: ▶ Run sync, the scheduled timer (the same unit, nothing to change), or the real-time consumer, which lists each two-way mapping every `poll_minutes` (default 5). An upload-only mapping is never polled. In the Qt window, the folder chosen with 🔄 Live sync… is also listed every 30 seconds while the window or its tray icon is open.
+
+**What it is not.** There is no virtual file system and no per-second remote sync: the whole folder is kept on disk, and a remote change arrives at the next pass. Test a two-way mapping on a throwaway folder first, as for `--delete`.
+
+When a pass ends with code 5, the engine now prints "Not everything was synced:" with one plain sentence per failure counter, just before the summary line, in the terminal, the systemd journal and both windows.
+
+---
+
+## Qt window
+
+`python3 -m ui` (package `ui/`, PySide6) opens a newer window on the same mappings file and the same settings. It does not replace the Tk editor, which keeps every feature it had; headless runs never import Qt.
+
+- **Mappings**: the same list, with a Type column ("Two-way", "Upload only", "File, upload only") and the folder itself on Proton ("Folder on Proton Drive"). The add/edit dialog sets direction, deletion, `excluded_remote` and the per-mapping thresholds, and explains each choice under the control.
+- **🔄 Live sync…**: choose one folder to sync as soon as it changes, without a systemd unit. Opening the window changes nothing on disk: live sync starts only after you choose a folder and confirm. The dialog asks separately whether local deletions go to the Proton trash, and can turn live sync off. "Open this window when I log in" is in Configuration.
+- **⏰ Sync schedule**: every hour, day or week through the same systemd user timer, Turn on / Turn off, Sync now, and the last scheduled run. Showing the page only reads the timer.
+- **⚙ Configuration**: the same settings as the Tk Configuration window, including the mass-deletion guard. The real-time daemons (watchers, NAS) are still set up from the Tk editor's ⚡ Real-time window.
+- The run output uses the same filters as the Tk editor ([run-result] hidden, Errors only, Detailed). A pass refused by the mass-deletion guard offers to run once more with `--allow-mass-delete`.
+- **Tray**: closing the window hides it in the tray; Quit, in the tray menu, exits. The icon shows idle, syncing or error from the sync database.
+- Opening the window rewrites an old scheduled unit that would restart a failed pass, and shows the settings-moved notice once — the same checks as the Tk editor, off the window constructor.
+
+![Qt mappings page](docs/images/qt-mappings-editor.png)
+
+![Qt schedule page](docs/images/qt-schedule.png)
+
+![Qt configuration page](docs/images/qt-configuration.png)
+
+### File managers (Dolphin, Nautilus) and `~/Proton Drive`
+
+- **Status on the session bus.** `cloudproviders.py` (started by `cloudlaunch.py`, the `proton-drive-sync-cloud` launcher, or the Qt window) owns `org.protondrivesync.CloudProviders` and reads the sync database: one status per mapping folder for Nautilus and Nemo (libcloudproviders), and a per-file status for the plugins. It never calls the Proton CLI and never changes files. Saving or refreshing the schedule starts it for the scheduled mappings file.
+- **Nautilus**: `packaging/nautilus/proton_drive_sync.py` (with `nautilus-python`) draws a per-file emblem.
+- **Dolphin**: an overlay plugin in `packaging/dolphin/` (C++, KF6) draws synced, modified and pending marks, and refreshes an open folder when the database changes.
+- **`~/Proton Drive`**: when you choose a folder with 🔄 Live sync…, the Qt window creates `~/Proton Drive` with a link to each two-way folder (like My files on the website) and adds it to Dolphin's places. Nothing is added when `~/Proton Drive` is itself synced, and a real folder that already has files is left in place. Only links are ever removed.
+- Missing bus, missing mappings file or missing plugin: files are simply unmarked.
+
+### Diagnostic report (`doctor.py`)
+
+`python3 doctor.py [--redact]` (`proton-drive-sync-doctor` when packaged) prints what is needed to diagnose an unattended run: install, CLI resolution and version, systemd units and their last results, `last-run.json` and `health.json`, effective settings, per-mapping safety options and session facts. It never writes, never uploads and always exits 0. `--redact` replaces home paths, other absolute paths and e-mail addresses before you paste the report anywhere.
+
+### Arch Linux package
+
+`packaging/arch/PKGBUILD` builds `proton-drive-cli-sync-git` from this repository's `main`: program files in `/usr/lib/proton-drive-cli-sync/`, launchers `proton-drive-sync`, `proton-drive-sync-gui`, `proton-drive-sync-doctor` and `proton-drive-sync-cloud` in `/usr/bin/`, the desktop entry, the Nautilus extension and the icon. A second package, `proton-drive-cli-sync-dolphin`, holds the Dolphin plugin. Nothing writable is installed: settings stay in `~/.config/proton-drive-sync/`, data in `~/.proton-drive-sync/`, run logs in `~/.proton-drive-sync/logs/`. Generated systemd units call the stable `/usr/bin` launchers, quote paths, and do not freeze a CLI path that does not exist.
+
+```bash
+git clone https://github.com/lafontaj/proton-drive-cli-sync.git
+cd proton-drive-cli-sync/packaging/arch
+makepkg -si
+```
 
 ---
 
@@ -842,6 +931,14 @@ The project's main files:
 - `i18n.py` — translation foundation (language resolution, gettext, `settings.json`) — **required next to the other `.py` files**, local machine AND NAS
 - `locale/` — translation catalogs (`fr/LC_MESSAGES/proton-sync.po` + compiled `.mo`, `.pot` template) — local machine AND NAS
 - `build_locales.sh` — dev tool: catalog recompilation (never required in production)
+- `twoway.py` — two-way reconcile for a mapping with `"direction": "twoway"` (called by the engine)
+- `syncdb.py` — SQLite sync database of two-way mappings (one file per mappings file)
+- `volume.py` — `~/Proton Drive`, its Dolphin place, and the whole-account mapping
+- `unitexec.py` — quoting and parsing of systemd unit lines; **required next to** `schedule_manager.py` and `realtime_manager.py`
+- `cloudstatus.py`, `cloudproviders.py`, `cloudlaunch.py` — file-manager status on the session bus (read-only)
+- `doctor.py` — read-only diagnostic report
+- `ui/` — the Qt window (`python3 -m ui`, needs PySide6)
+- `packaging/` — Arch PKGBUILD and launchers, desktop entries, the Nautilus extension and the Dolphin plugin
 - `~/.config/proton-drive-sync/settings.json` — settings (created by the GUI; optional, by hand on the NAS). Not beside the scripts. `$XDG_CONFIG_HOME/proton-drive-sync/settings.json` when that variable is set. A backup of the scripts folder does not include it.
 - `Temporary-files-exclusions.md` — catalog of recommended exclusion patterns per application (separate reference)
 - `INSTALLATION-systemd.md` — nightly timer installation guide
@@ -867,3 +964,5 @@ The project's main files:
 ## Acknowledgements
 
 Equal-size detection originates from the fork [MehdiMamas/proton-drive-cli-sync](https://github.com/MehdiMamas/proton-drive-cli-sync): its analysis is what found that a file modified without a size change was never sent again, and the order of checks adopted here is its own.
+
+Two-way sync, the Qt window and the file-manager integration also come from that fork ([@MehdiMamas](https://github.com/MehdiMamas)). The ideas behind them, and much of their testing, are from [@nizarlahmar](https://github.com/nizarlahmar).
