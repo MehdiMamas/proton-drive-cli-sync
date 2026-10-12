@@ -4202,8 +4202,8 @@ msgstr "Aggiornamento del servizio pianificato non riuscito."
 
 #, python-brace-format
 msgid ""
-"mount check failed during the pass, deletions stopped for the rest of this "
-"mapping: {r}"
+"  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, the "
+"mount check failed during the pass: {r}"
 msgstr ""
-"controllo del mount fallito durante il passaggio, eliminazioni fermate per "
-"il resto di questo mapping: {r}"
+"  ⚠  [delete-guard] Eliminazioni disabilitate per il resto di questa "
+"mappatura, il controllo del mount è fallito durante il passaggio: {r}"

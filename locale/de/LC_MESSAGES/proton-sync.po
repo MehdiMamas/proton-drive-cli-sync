@@ -4223,8 +4223,8 @@ msgstr "Aktualisierung des geplanten Dienstes fehlgeschlagen."
 
 #, python-brace-format
 msgid ""
-"mount check failed during the pass, deletions stopped for the rest of this "
-"mapping: {r}"
+"  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, the "
+"mount check failed during the pass: {r}"
 msgstr ""
-"Einhängeprüfung während des Durchlaufs fehlgeschlagen, Löschungen für den "
-"Rest dieses Mappings gestoppt: {r}"
+"  ⚠  [delete-guard] Löschungen für den Rest dieser Zuordnung deaktiviert, "
+"die Einhängeprüfung ist während des Durchlaufs fehlgeschlagen: {r}"

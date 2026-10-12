@@ -48,3 +48,71 @@ def test_mount_lost_mid_pass_stops_deletions(fake_drive, local_tree):
     finally:
         proton_sync._REMOTE_KNOWN.clear()
         proton_sync._RUN.reset()
+
+
+def _refuse(source_path, source_kind, verbose=False):
+    return False, "mount gone"
+
+
+def test_refusal_at_start_of_mapping_counts(fake_drive, local_tree, monkeypatch, capsys):
+    src = local_tree({"Docs/a.txt": (b"a", 1_000_000_000)})
+    monkeypatch.setattr(proton_sync, "_delete_guard_ok", _refuse)
+    mapping = {"allow_delete": True, "source_kind": "local"}
+    proton_sync._REMOTE_KNOWN.clear()
+    proton_sync._RUN.reset()
+    try:
+        proton_sync.sync_folder_guarded(
+            mapping, str(src / "Docs"), "/my-files/Backups", delete=True, rename_ext=False)
+        assert "Deletions disabled for this mapping" in capsys.readouterr().out
+        assert proton_sync._RUN.deletions_refused == 1
+        assert proton_sync._RUN.has_failures()
+    finally:
+        proton_sync._REMOTE_KNOWN.clear()
+        proton_sync._RUN.reset()
+
+
+def test_refusal_at_start_of_subpath_counts(fake_drive, local_tree, monkeypatch, capsys):
+    src = local_tree({"Docs/sub/a.txt": (b"a", 1_000_000_000)})
+    monkeypatch.setattr(proton_sync, "_delete_guard_ok", _refuse)
+    mapping = {"type": "folder", "source": str(src / "Docs"),
+               "dest_parent": "/my-files/Backups",
+               "allow_delete": True, "source_kind": "local"}
+    proton_sync._REMOTE_KNOWN.clear()
+    proton_sync._RUN.reset()
+    try:
+        proton_sync.sync_subpath(
+            mapping, str(src / "Docs" / "sub"), delete=True, rename_ext=False)
+        assert "Deletions disabled for this subpath" in capsys.readouterr().out
+        assert proton_sync._RUN.deletions_refused == 1
+        assert proton_sync._RUN.has_failures()
+    finally:
+        proton_sync._REMOTE_KNOWN.clear()
+        proton_sync._RUN.reset()
+
+
+def _editor_filters():
+    import pathlib
+    source = (pathlib.Path(__file__).resolve().parents[1]
+              / "proton_mapping_editor.py").read_text(encoding="utf-8")
+    start = source.index("# --- editor output filter (no Tk) ---")
+    end = source.index("# --- end editor output filter ---")
+    namespace = {"json": __import__("json")}
+    exec(source[start:end], namespace)
+    return namespace["visible_editor_lines"]
+
+
+def test_mid_pass_refusal_line_is_visible_in_the_editor():
+    import gettext
+    import pathlib
+    show = _editor_filters()
+    msgid = ("  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, "
+             "the mount check failed during the pass: {r}")
+    locale_dir = pathlib.Path(__file__).resolve().parents[1] / "locale"
+    for lang in ("en", "fr", "de", "es", "it", "pt"):
+        tr = gettext.translation("proton-sync", str(locale_dir), languages=[lang],
+                                 fallback=True)
+        line = tr.gettext(msgid).format(r="mount gone") + "\n"
+        if lang != "en":
+            assert line.startswith("  ⚠  [delete-guard] ") and tr.gettext(msgid) != msgid, lang
+        assert show([line]) == [line], lang
+        assert show([line], errors_only=True) == [line], lang

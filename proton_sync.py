@@ -2572,9 +2572,9 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
                 if not ok_mount:
                     opts["mount_lost"] = True
                     deletions_blocked = True
-                    print("    [delete-guard] " + _(
-                        "mount check failed during the pass, deletions stopped for "
-                        "the rest of this mapping: {r}").format(r=raison_mount))
+                    print(_("  ⚠  [delete-guard] Deletions disabled for the rest of "
+                            "this mapping, the mount check failed during the pass: "
+                            "{r}").format(r=raison_mount))
                     _RUN.add("deletions_refused")
         if deletions_blocked:
             n_del_failed = 1
@@ -2647,6 +2647,7 @@ def sync_folder_guarded(mapping, local_dir, remote_parent, dry_run=False, verbos
             print(_("  ⚠  Deletions disabled for this mapping: {r}").format(r=raison))
             print(_("      (uploads continue normally)"))
             mapping_delete = False
+            _RUN.add("deletions_refused")
         else:
             label = _("permanent") if mode == "permanent" else _("to trash")
             print(_("  🗑  Deletion propagation ACTIVE ({l}) for this mapping").format(l=label))
@@ -2890,6 +2891,7 @@ def sync_subpath(mapping, subpath, dry_run=False, verbose=False, verify_hash=Fal
             print(_("  ⚠  Deletions disabled for this subpath: {r}").format(r=raison_gf))
             print(_("      (uploads continue normally)"))
             mapping_delete = False
+            _RUN.add("deletions_refused")
         else:
             label = _("permanent") if mode == "permanent" else _("to trash")
             print(_("  🗑  Deletion propagation ACTIVE ({l}) for this subpath").format(l=label))

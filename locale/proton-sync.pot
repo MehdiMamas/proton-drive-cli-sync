@@ -3375,6 +3375,6 @@ msgstr ""
 
 #, python-brace-format
 msgid ""
-"mount check failed during the pass, deletions stopped for the rest of this "
-"mapping: {r}"
+"  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, the "
+"mount check failed during the pass: {r}"
 msgstr ""

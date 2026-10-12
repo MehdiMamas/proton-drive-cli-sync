@@ -4171,8 +4171,8 @@ msgstr "Falha ao atualizar o serviço agendado."
 
 #, python-brace-format
 msgid ""
-"mount check failed during the pass, deletions stopped for the rest of this "
-"mapping: {r}"
+"  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, the "
+"mount check failed during the pass: {r}"
 msgstr ""
-"verificação da montagem falhou durante a passagem, eliminações paradas para "
-"o resto deste mapeamento: {r}"
+"  ⚠  [delete-guard] Eliminações desativadas para o resto deste mapeamento, a "
+"verificação da montagem falhou durante a passagem: {r}"
