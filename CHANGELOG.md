@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+Checked with the fake CLI in Docker (Debian, Python 3.12), not against a real Proton account.
+
+### Fixed
+
+- A file or folder whose name starts with a dash (such as `-1_-7.xwmc`) failed to upload on every pass with "Unknown option". Names now go after `--`, from upstream b9bea1c (reported upstream by @catsgoomo). The test double refuses unknown options the way the CLI does. Migration: none.
+- When the mount check refuses deletions before the first folder of a mapping or a subpath, the pass now counts it in `deletions_refused` and ends with code 5. A refusal found in the middle of a pass already did. Migration: none.
+- With Errors only and Detailed both ticked, the run output (Tk and Qt) no longer lists the mount check's healthy verdict (`[delete-guard] OK …`) as an error.
+
 ## [2.3.3] - 2026-10-08
 
 The fixes lafontaj made after merging upstream #8, applied here (#26, #27). Checked with the fake CLI in WSL Ubuntu, not against a real Proton account.

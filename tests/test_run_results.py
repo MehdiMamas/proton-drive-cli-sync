@@ -708,3 +708,10 @@ def test_detailed_keeps_blank_lines(show):
     assert shown == lines[:-1]
     assert shown[1] == "\n"
     assert shown[-2] == "\n"
+
+
+def test_editor_errors_only_skips_the_healthy_mount_verdict():
+    show = _editor_lines()
+    ok = "    [delete-guard] OK local : /home/u/Docs\n"
+    refused = "    [delete-guard] refusing to trash 9 of 10 remote item(s)\n"
+    assert show([ok, refused], verbose=True, errors_only=True) == [refused]

@@ -245,6 +245,10 @@ def test_two_way_problem_lines_show_without_verbose():
         assert run.visible_text(line, verbose=False, errors_only=False), line
     assert run.is_error_line("[list-skipped] Could not list /my-files/A")
     assert run.is_error_line("[delete-guard] refusing to trash")
+    # mount_check's healthy verdict (verbose) is not a problem line.
+    assert not run.is_error_line("[delete-guard] OK local : /home/u/Docs")
+    assert not run.visible_text("    [delete-guard] OK local : /home/u/Docs",
+                                verbose=True, errors_only=True)
     assert not run.is_error_line("[download] downloaded /home/u/failed.txt")
 
 

@@ -180,7 +180,8 @@ def is_error_line(stripped):
         return False
     if any(glyph in stripped for glyph in ("❌", "⛔", "⚠")):
         return True
-    if stripped.startswith(_ERROR_TAGS):
+    # mount_check also reports a healthy verdict under [delete-guard] (verbose).
+    if stripped.startswith(_ERROR_TAGS) and not stripped.startswith("[delete-guard] OK"):
         return True
     head = stripped.split("/", 1)[0].lower()
     return ("erreur" in head or "error" in head
