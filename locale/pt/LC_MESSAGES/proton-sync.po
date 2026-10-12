@@ -4168,3 +4168,11 @@ msgstr "Falha ao atualizar o serviço agendado: {e}"
 
 msgid "Scheduled service update failed."
 msgstr "Falha ao atualizar o serviço agendado."
+
+#, python-brace-format
+msgid ""
+"  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, the "
+"mount check failed during the pass: {r}"
+msgstr ""
+"  ⚠  [delete-guard] Eliminações desativadas para o resto deste mapeamento, a "
+"verificação da montagem falhou durante a passagem: {r}"

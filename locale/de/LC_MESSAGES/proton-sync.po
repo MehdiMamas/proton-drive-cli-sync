@@ -4220,3 +4220,11 @@ msgstr "Aktualisierung des geplanten Dienstes fehlgeschlagen: {e}"
 
 msgid "Scheduled service update failed."
 msgstr "Aktualisierung des geplanten Dienstes fehlgeschlagen."
+
+#, python-brace-format
+msgid ""
+"  ⚠  [delete-guard] Deletions disabled for the rest of this mapping, the "
+"mount check failed during the pass: {r}"
+msgstr ""
+"  ⚠  [delete-guard] Löschungen für den Rest dieser Zuordnung deaktiviert, "
+"die Einhängeprüfung ist während des Durchlaufs fehlgeschlagen: {r}"
