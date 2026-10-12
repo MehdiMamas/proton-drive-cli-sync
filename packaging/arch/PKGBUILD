@@ -1,12 +1,11 @@
-# Maintainer: community fork contributors (see the repository)
-# Community fork of lafontaj/proton-drive-cli-sync. Not affiliated with Proton AG.
+# Builds lafontaj/proton-drive-cli-sync. Not affiliated with Proton AG.
 pkgname=proton-drive-cli-sync-git
 _reponame=proton-drive-cli-sync
 pkgver=2.1.0
 pkgrel=1
-pkgdesc="One-way local to Proton Drive backup built on Proton's official CLI (community fork)"
+pkgdesc="One-way local to Proton Drive backup built on Proton's official CLI"
 arch=('any')
-url="https://github.com/MehdiMamas/proton-drive-cli-sync"
+url="https://github.com/lafontaj/proton-drive-cli-sync"
 license=('MIT')
 depends=('python' 'tk' 'python-pyinotify' 'pyside6')
 makedepends=('git')
@@ -20,7 +19,7 @@ optdepends=('python-gobject: tray icon'
 provides=('proton-drive-cli-sync')
 conflicts=('proton-drive-cli-sync' 'proton-drive-sync-bin')
 install=proton-drive-cli-sync-git.install
-source=("git+https://github.com/MehdiMamas/${_reponame}.git")
+source=("git+https://github.com/lafontaj/${_reponame}.git")
 sha256sums=('SKIP')
 
 pkgver() {
