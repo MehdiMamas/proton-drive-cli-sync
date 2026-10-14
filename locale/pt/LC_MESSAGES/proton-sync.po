@@ -852,6 +852,9 @@ msgstr "scripts não enviados (NAS inacessível)"
 msgid "translation catalogues"
 msgstr "catálogos de tradução"
 
+msgid "settings.json (language {lang})"
+msgstr "settings.json (idioma {lang})"
+
 #, python-brace-format
 msgid "scripts partly pushed ({e})"
 msgstr "scripts enviados parcialmente ({e})"

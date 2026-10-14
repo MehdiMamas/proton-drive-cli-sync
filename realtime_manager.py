@@ -24,7 +24,7 @@ Tout est centré sur l'utilisateur courant et son fichier de mappings actif.
 Conçu pour tourner SANS privilèges (session utilisateur). Le linger (sudo) est
 seulement LU et rappelé, jamais modifié ici.
 """
-__version__ = "1.6.2"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.7.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
@@ -116,6 +116,10 @@ NAS_MOUNT = appconfig.nas_mount_path() if _HAS_CONFIG else "/media/home_nas"
 NAS_BASE = os.path.join(NAS_MOUNT, "proton-sync")
 NAS_CONFIG_DIR = os.path.join(NAS_BASE, "config")   # mappings-<user>.json poussés
 NAS_QUEUE_DIR = os.path.join(NAS_BASE, "queue")     # queue/<user>/
+# Réglages du watcher NAS : proton-sync/settings.json, à côté de ses scripts
+# (nas_watcher.py y fixe PROTON_SYNC_SETTINGS). Il n'y lit que la langue, que
+# push_scripts_to_nas() écrit depuis la Configuration de ce compte.
+NAS_SETTINGS_PATH = os.path.join(NAS_BASE, "settings.json")
 
 # Scripts dont le WATCHER NAS a besoin — SEULE source de vérité, partagée par
 # push_scripts_to_nas() (qui les copie) et nas_scripts_stale() (qui détecte
@@ -431,12 +435,54 @@ def _version_sidecar(target_path):
     return target_path + ".version"
 
 
+def _interface_language():
+    """(langue, explicite) de l'interface de ce compte : le réglage choisi dans
+    la Configuration, ou en « auto » la langue résolue. (None, False) sans i18n."""
+    try:
+        import i18n
+        pref = i18n.read_language_setting()
+        if pref in i18n.SUPPORTED:
+            return pref, True
+        return i18n.resolve_language(), False
+    except Exception:
+        return None, False
+
+
+def _nas_settings_update(lenient=False):
+    """Contenu à écrire dans NAS_SETTINGS_PATH, ou None s'il porte déjà la
+    langue de l'interface. Les autres clés du fichier sont gardées.
+
+    lenient : pour le contrôle d'écart du consommateur. En « auto », la langue
+    résolue dépend de l'environnement du processus (le service n'a pas forcément
+    le LANG de la session) : une langue déjà écrite sur le NAS n'est alors pas
+    signalée comme un écart. Un fichier absent l'est toujours.
+    Lève OSError si le NAS ne se lit pas (les appelants l'attrapent)."""
+    lang, explicit = _interface_language()
+    if not lang:
+        return None
+    try:
+        with open(NAS_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+    except (FileNotFoundError, ValueError):
+        data = {}
+    current = data.get("language")
+    if current == lang:
+        return None
+    if lenient and not explicit and current:
+        return None
+    data["language"] = lang
+    return data
+
+
 def push_scripts_to_nas():
     """Copie vers le NAS les scripts dont le WATCHER NAS a besoin, pour que le
     NAS ne soit jamais désynchronisé du poste (un déploiement partiel — ex.
     config.py absent — met le service NAS en échec silencieux). Poussés dans
     NAS_BASE (proton-sync/) : nas_watcher.py, local_watcher.py, config.py,
-    i18n.py, mount_check.py + le dossier locale/.
+    i18n.py, mount_check.py + le dossier locale/, et settings.json avec la
+    langue de l'interface (NAS_SETTINGS_PATH).
 
     Le fichier .service, lui, est seulement DÉPOSÉ (nas_watcher.service.new) —
     jamais installé à distance : cela requiert sudo + daemon-reload système sur
@@ -482,6 +528,17 @@ def push_scripts_to_nas():
                         locale_pushed += 1
         if locale_pushed:
             pushed_names.append(_("translation catalogues"))
+        # settings.json du NAS : la langue de l'interface, rien d'autre. Pas de
+        # chmod 0600 : le service NAS tourne sous un autre compte et doit le lire.
+        settings = _nas_settings_update()
+        if settings is not None:
+            tmp = NAS_SETTINGS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=1)
+                f.write("\n")
+            os.replace(tmp, NAS_SETTINGS_PATH)
+            pushed_names.append(_("settings.json (language {lang})").format(
+                lang=settings["language"]))
         # .service : déposé à côté (jamais activé à distance).
         svc_src = os.path.join(APP_DIR, "nas_watcher.service")
         svc_changed = False
@@ -556,6 +613,9 @@ def nas_scripts_stale():
                     d = os.path.join(dst_dir, fn)
                     if _sha256_of_file(s) != _sha256_of_file(d):
                         return True
+        # settings.json du NAS : même règle que le push (langue de l'interface).
+        if _nas_settings_update(lenient=True) is not None:
+            return True
         # .service déposé à côté (nas_watcher.service.new).
         svc_src = os.path.join(APP_DIR, "nas_watcher.service")
         if os.path.exists(svc_src):

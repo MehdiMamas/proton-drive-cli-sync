@@ -29,11 +29,20 @@ Différences avec le watcher local (couche 3) :
 La logique pure (sélection des cibles, aiguillage, rattrapage, diff des watches)
 est testable sans pyinotify. Le branchement pyinotify est testé sur le NAS.
 """
-__version__ = "1.1.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
 import threading
+
+# Sur le NAS, les réglages restent dans proton-sync/, à côté de ce script :
+# « 💾 Installer / Mettre à jour » y écrit la langue de l'interface du poste.
+# Le passage à ~/.config ne vaut que pour les postes. Seulement quand le script
+# est lancé (le service NAS) : un import par le GUI ou les tests ne change rien.
+# Posé AVANT l'import d'i18n, qui lit la langue dès l'import.
+if __name__ == "__main__" and not os.environ.get("PROTON_SYNC_SETTINGS", "").strip():
+    os.environ["PROTON_SYNC_SETTINGS"] = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
 # i18n (import guardé : sans i18n.py, messages en anglais — langue source).
 try:

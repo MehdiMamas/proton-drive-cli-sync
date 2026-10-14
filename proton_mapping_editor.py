@@ -4035,9 +4035,10 @@ class MappingEditor(tk.Tk):
             loc = ttk.LabelFrame(frm, text=_("Settings file"), padding=10)
             loc.pack(fill="x", pady=(0, 10))
             ttk.Label(loc, text=_("Settings file in use:")).pack(anchor="w")
-            _loc_var = tk.StringVar(value=_settings_file)
-            ttk.Entry(loc, textvariable=_loc_var, width=72,
-                      state="readonly").pack(anchor="w", fill="x")
+            # Texte simple : rien à saisir ici. Le Label garde sa chaîne lui-même
+            # (une StringVar locale était collectée et la case restait vide).
+            ttk.Label(loc, text=_settings_file, wraplength=560,
+                      justify="left").pack(anchor="w", fill="x")
 
         # ---- Section Compte Proton ----
         if _HAS_REALTIME:

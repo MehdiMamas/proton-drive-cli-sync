@@ -1,7 +1,8 @@
 """Where settings.json and the proton-drive binary live.
 
 config.py and i18n.py both call settings_path(). The CLI order lives only in
-resolve_cli(). This module imports neither config nor i18n, so those imports
+resolve_cli(). On the NAS, nas_watcher.py sets PROTON_SYNC_SETTINGS to the
+settings.json beside it, so the NAS never uses the XDG path. This module imports neither config nor i18n, so those imports
 cannot cycle. Nothing here raises: a missing home, a read-only config
 directory, or a failed copy falls back to a path.
 """

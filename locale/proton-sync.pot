@@ -767,6 +767,9 @@ msgstr ""
 msgid "translation catalogues"
 msgstr ""
 
+msgid "settings.json (language {lang})"
+msgstr ""
+
 #, python-brace-format
 msgid "scripts partly pushed ({e})"
 msgstr ""

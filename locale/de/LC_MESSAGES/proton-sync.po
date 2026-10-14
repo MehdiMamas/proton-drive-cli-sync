@@ -865,6 +865,9 @@ msgstr "Skripte nicht übertragen (NAS nicht erreichbar)"
 msgid "translation catalogues"
 msgstr "Übersetzungskataloge"
 
+msgid "settings.json (language {lang})"
+msgstr "settings.json (Sprache {lang})"
+
 #, python-brace-format
 msgid "scripts partly pushed ({e})"
 msgstr "Skripte teilweise übertragen ({e})"
