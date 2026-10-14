@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.17.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.17.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -2190,7 +2190,10 @@ def delete_orphans(local_dir, remote_folder, remote_items, local_names,
             if verbose:
                 n_sub = _count_remote_recursive(remote_path)
                 if n_sub is None:
-                    print(_("    (orphan folder: {n} — size not measured, "
+                    # ⚠ : seul repère du filtre « Erreurs seules » qui tienne
+                    # dans toutes les langues (le mot « failed » n'est ni
+                    # traduit pareil, ni cherché après le « : »).
+                    print(_("    ⚠  (orphan folder: {n} — size not measured, "
                             "listing failed)").format(n=name))
                 else:
                     print(_("    (orphan folder: {n} — ~{c} remote element(s))").format(

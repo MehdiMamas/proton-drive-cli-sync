@@ -189,8 +189,8 @@ msgid "sent to trash"
 msgstr "enviado para a reciclagem"
 
 #, python-brace-format
-msgid "    (orphan folder: {n} — size not measured, listing failed)"
-msgstr "    (pasta órfã: {n} — tamanho não medido, listagem falhou)"
+msgid "    ⚠  (orphan folder: {n} — size not measured, listing failed)"
+msgstr "    ⚠  (pasta órfã: {n} — tamanho não medido, listagem falhou)"
 
 #, python-brace-format
 msgid "    (orphan folder: {n} — ~{c} remote element(s))"

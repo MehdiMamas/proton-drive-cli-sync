@@ -169,7 +169,7 @@ msgid "sent to trash"
 msgstr ""
 
 #, python-brace-format
-msgid "    (orphan folder: {n} — size not measured, listing failed)"
+msgid "    ⚠  (orphan folder: {n} — size not measured, listing failed)"
 msgstr ""
 
 #, python-brace-format

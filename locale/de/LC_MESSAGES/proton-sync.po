@@ -191,9 +191,9 @@ msgid "sent to trash"
 msgstr "in den Papierkorb verschoben"
 
 #, python-brace-format
-msgid "    (orphan folder: {n} — size not measured, listing failed)"
+msgid "    ⚠  (orphan folder: {n} — size not measured, listing failed)"
 msgstr ""
-"    (verwaister Ordner: {n} — Größe nicht ermittelt, Auflistung "
+"    ⚠  (verwaister Ordner: {n} — Größe nicht ermittelt, Auflistung "
 "fehlgeschlagen)"
 
 #, python-brace-format

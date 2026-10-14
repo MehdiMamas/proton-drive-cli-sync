@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.30.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.30.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -1140,12 +1140,15 @@ def line_is_error(stripped):
     Les glyphes ❌ ⛔ ⚠ marquent toujours une erreur, où qu'ils soient (ils ne
     figurent jamais dans un nom de fichier légitime). Les mots-clés (error /
     erreur / échec / failed) ne sont cherchés que dans le préfixe — avant le
-    premier « / » — pour ne pas attraper un fichier dont le nom les contient."""
+    premier « / » ET avant le premier « : » — pour ne pas attraper un fichier
+    dont le nom les contient. Le « : » couvre les lignes qui ne donnent que le
+    NOM du fichier, sans chemin : « (taille identique, contenu vérifié par
+    SHA1 — identique : Erreurs-2024.txt) » était retenue à tort."""
     if not stripped:
         return False
     if any(g in stripped for g in ("❌", "⛔", "⚠")):
         return True
-    head = stripped.split("/", 1)[0].lower()
+    head = stripped.split("/", 1)[0].split(":", 1)[0].lower()
     return ("erreur" in head or "error" in head
             or "échec" in head or "echec" in head or "failed" in head)
 
