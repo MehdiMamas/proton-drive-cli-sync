@@ -20,6 +20,7 @@ Two concerns:
        - mass_delete_guard             (bool, off by default)
        - max_delete_min                (int)
        - max_delete_ratio              (float)
+       - create_thumbnails             (bool, on by default)
 
   2. DATA_DIR and its subpaths (cache, queue, logs): a single computed
      location per installation (~/.proton-drive-sync), with a ONE-TIME, safe
@@ -118,6 +119,10 @@ DEFAULTS = {
     "mass_delete_guard": False,
     "max_delete_min": 20,
     "max_delete_ratio": 0.5,
+    # Vignettes créées par le CLI à l'envoi (images, par exemple). Activées
+    # par défaut (comportement du CLI) ; décochées, chaque envoi passe
+    # --skip-thumbnails. Ne touche pas aux fichiers déjà sur Proton.
+    "create_thumbnails": True,
     "tray_enabled": False,            # icône d'état dans la barre des tâches (tray_indicator.py)
     "account_name": None,             # identité NAS stable (None = auto : amorçage intelligent)
     # Correspondance des chemins de DONNÉES entre cette machine (desktop) et le
@@ -552,6 +557,27 @@ def mass_delete_guard():
 def set_mass_delete_guard(value):
     return _put("mass_delete_guard", bool(value))
 
+
+def create_thumbnails():
+    """Le CLI crée-t-il les vignettes à l'envoi ? Défaut True (son propre
+    comportement). Une valeur illisible retombe sur True : on ne retire pas
+    les aperçus par accident de saisie."""
+    v = get("create_thumbnails")
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        low = v.strip().lower()
+        if low in ("0", "false", "no", "off"):
+            return False
+        if low in ("1", "true", "yes", "on"):
+            return True
+    if isinstance(v, int):
+        return v != 0
+    return DEFAULTS["create_thumbnails"]
+
+
+def set_create_thumbnails(value):
+    return _put("create_thumbnails", bool(value))
 
 
 def parse_min(value):

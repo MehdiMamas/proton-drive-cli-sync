@@ -773,6 +773,17 @@ CONFIG_HELP = {
         "it avoids.\n\n"
         "Leave 0 to keep retrying every time."
     ),
+    "create-thumbnails": _(
+        "Create thumbnails when sending\n\n"
+        "On by default: when it sends a file it can preview, an image for "
+        "example, Proton's CLI also makes a small preview on this computer. "
+        "The Proton apps show it in place of the generic icon.\n\n"
+        "Unchecked, files are sent without a thumbnail. They are still backed "
+        "up in full; only the preview is missing in the Proton apps. The "
+        "computer no longer has to make these previews before sending.\n\n"
+        "This applies to files sent from now on, and to files sent again "
+        "because they changed. Files already on Proton are not touched."
+    ),
     "proton-cli-path": _(
         "Path to the Proton Drive CLI\n\n"
         "This app does not include Proton's CLI — you download it separately "
@@ -4184,6 +4195,14 @@ class MappingEditor(tk.Tk):
             ttk.Label(krow, text=_("  (0 = unlimited)")).pack(side="left")
             help_btn(krow, "cli-stall-max-kills")
 
+            # Vignettes : cochée par défaut (comportement du CLI). Décochée,
+            # le moteur passe --skip-thumbnails à chaque envoi.
+            thumb_var = tk.BooleanVar(value=appconfig.create_thumbnails())
+            trow = ttk.Frame(cli_frame); trow.pack(anchor="w", fill="x", pady=(8, 0))
+            ttk.Checkbutton(trow, text=_("Create thumbnails when sending"),
+                            variable=thumb_var).pack(side="left")
+            help_btn(trow, "create-thumbnails")
+
             # Garde-fou de masse : éteint par défaut. Les deux seuils sont
             # toujours éditables, y compris quand la case est décochée, pour
             # qu'on puisse les préparer avant d'allumer le garde-fou.
@@ -4583,6 +4602,7 @@ class MappingEditor(tk.Tk):
                 # plutôt que d'écraser un réglage valide par une valeur fausse.
                 appconfig.set_cli_stall_minutes(stall_var.get())
                 appconfig.set_cli_stall_max_kills(kills_var.get())
+                appconfig.set_create_thumbnails(thumb_var.get())
                 # Garde-fou de masse : seuils déjà validés dans apply().
                 appconfig.set_mass_delete_guard(guard_var.get())
                 appconfig.set_max_delete_min(gmin_var.get())

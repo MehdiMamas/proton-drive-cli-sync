@@ -15,6 +15,7 @@
   "mass_delete_guard": false,
   "max_delete_min": 20,
   "max_delete_ratio": 0.5,
+  "create_thumbnails": true,
 
   "tray_enabled": false
 }

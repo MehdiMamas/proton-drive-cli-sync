@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.16.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.17.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -991,6 +991,18 @@ def _stall_settings():
     return minutes, max_kills
 
 
+def _skip_thumbnails_setting():
+    """True si l'utilisateur a décoché « Créer les vignettes » : chaque envoi
+    passe alors --skip-thumbnails. Repli sur False (vignettes créées, comme le
+    CLI le fait de lui-même) si config.py est absent ou illisible."""
+    if _HAS_CONFIG:
+        try:
+            return not appconfig.create_thumbnails()
+        except Exception:
+            pass
+    return False
+
+
 def run_cli_watched(args, stall_minutes=None, cwd=None):
     """Comme run_cli, mais coupe le CLI s'il cesse toute activité.
 
@@ -1740,7 +1752,7 @@ def _upload_one(local_path, remote_parent, skip_thumbnails=False,
     cwd, names = _cli_local_args([local_path])
     cmd = ["filesystem", "upload",
            "-f", file_conflict_flag(conflict_mode), "-d", "merge"]
-    if skip_thumbnails:
+    if skip_thumbnails or _skip_thumbnails_setting():
         cmd.append("--skip-thumbnails")
     # « -- » = fin des options : voir upload_batch.
     cmd += ["--"] + names + [remote_parent]
@@ -1848,9 +1860,13 @@ def upload_batch(local_paths, remote_parent, dry_run=False, verbose=False,
     # le CLI refusait l'envoi (« Unknown option »), à chaque passage. Après « -- »,
     # tout est pris pour un chemin. Vérifié sur le CLI 0.8.0, qui recommande
     # lui-même cette forme dans son message d'erreur.
-    cmd = (["filesystem", "upload",
-            "-f", file_conflict_flag(conflict_mode), "-d", "merge", "--"]
-           + names + [remote_parent])
+    cmd = ["filesystem", "upload",
+           "-f", file_conflict_flag(conflict_mode), "-d", "merge"]
+    # Vignettes désactivées dans la Configuration : l'option va AVANT « -- »,
+    # sinon le CLI la prendrait pour un nom de fichier.
+    if _skip_thumbnails_setting():
+        cmd.append("--skip-thumbnails")
+    cmd += ["--"] + names + [remote_parent]
     # Progression (Temps 1) : signaler le lot en cours (nb de fichiers + taille
     # totale) AVANT l'envoi groupé, puis la fin APRÈS. Le GUI affiche un indicateur
     # discret « Envoi en cours — N fichiers, X Go » pendant ce temps.
