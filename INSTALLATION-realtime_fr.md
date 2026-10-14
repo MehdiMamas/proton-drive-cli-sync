@@ -94,10 +94,13 @@ Sur le NAS :
 ```bash
 # Fichiers requis dans /home/nasuser/proton-sync/ (à copier ensemble) :
 #   nas_watcher.py, local_watcher.py (helpers partagés), mount_check.py,
-#   i18n.py + le dossier locale/ (traductions ; sans eux, logs en anglais).
+#   config.py, paths.py, i18n.py + le dossier locale/
+#   (traductions ; sans eux, logs en anglais).
 # pyinotify installé (python3-pyinotify ou pip).
-# Langue des logs : suit LANG du NAS ; pour forcer :
-#   echo '{"language": "fr"}' > /home/nasuser/proton-sync/settings.json
+# « 💾 Installer / Mettre à jour » sur le poste les pousse, et y écrit
+#   settings.json avec la langue de l'interface.
+# Langue des logs : ce settings.json à côté des scripts (jamais ~/.config sur
+#   le NAS) ; sans lui, LANG du NAS.
 sudo cp proton-nas-watch.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now proton-nas-watch.service
