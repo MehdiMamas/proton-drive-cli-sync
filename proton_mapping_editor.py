@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.26.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.27.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -68,6 +68,9 @@ try:
     _HAS_CONFIG = True
 except ImportError:
     _HAS_CONFIG = False
+
+# Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
+from mapping_keys import carry_unknown_keys
 
 # Moteur importé comme MODULE pour réutiliser get_remote_listing (navigateur de
 # destinations Proton) — aucune logique de parsing parallèle. Import tolérant :
@@ -2365,6 +2368,7 @@ class MappingEditor(tk.Tk):
         dlg.minsize(620, 520)
         dlg.transient(self)
         _safe_grab(dlg)
+        dlg_height = [560]   # agrandie par fit_height() si le contenu dépasse
 
         result = {"value": None}
 
@@ -2476,6 +2480,29 @@ class MappingEditor(tk.Tk):
             variable=allow_var, command=lambda: toggle_delete())
         allow_chk.pack(anchor="w")
 
+        # Case opt-in : cochée = conserver sur Proton les noms exclus SUR CE
+        # mapping ("excluded_remote": "keep"). Décochée = clé absente = prune
+        # (la copie déjà envoyée part à la corbeille). Les exclusions globales
+        # nettoient toujours, quelle que soit la case.
+        # Libellé court, la limite est dans la note en dessous. Une Checkbutton
+        # ne se replie pas d'elle-même : le style lui donne la même largeur que
+        # les notes, pour qu'une traduction longue (l'allemand) ne soit pas
+        # coupée au bord du cadre. Grisée avec les autres sous-contrôles par
+        # toggle_delete : sans suppression, la case ne change rien.
+        ttk.Style(dlg).configure("Wrap.TCheckbutton", wraplength=600)
+        keep_excluded_var = tk.BooleanVar(
+            value=bool(is_edit and mapping.get("excluded_remote") == "keep"))
+        keep_excluded_chk = ttk.Checkbutton(
+            del_frame, style="Wrap.TCheckbutton",
+            text=_("Keep already-uploaded files and folders on Proton once they "
+                   "are excluded"),
+            variable=keep_excluded_var)
+        keep_excluded_chk.pack(anchor="w", pady=(6, 0))
+        ttk.Label(del_frame, wraplength=600, foreground="#444466", justify="left",
+                  text=_("Only this mapping's exclusions are concerned; a global "
+                         "exclusion still removes the copy on Proton.")
+                  ).pack(anchor="w", padx=(22, 0))
+
         # Note affichée quand la destination est sous « Partagé avec moi » : la
         # suppression y est impossible (limitation CLI) -> mapping en ajout seul.
         shared_note = ttk.Label(del_frame, text="", wraplength=600,
@@ -2560,7 +2587,7 @@ class MappingEditor(tk.Tk):
         def toggle_delete(probe=True):
             state = "normal" if allow_var.get() else "disabled"
             # rb_perm retiré : le choix « définitif » n'est plus proposé.
-            for w in (rb_trash, rb_nfs, rb_local):
+            for w in (rb_trash, rb_nfs, rb_local, keep_excluded_chk):
                 w.config(state=state)
             if allow_var.get():
                 # probe=False : appel venu d'une TRACE de frappe
@@ -2637,6 +2664,22 @@ class MappingEditor(tk.Tk):
                 allow_chk.config(state="normal")
                 shared_note.config(text="")
             toggle_delete(probe=False)   # (re)synchronise l'état des sous-contrôles, SANS sonde de montage
+            fit_height()
+
+        def fit_height():
+            """Agrandit le dialogue quand son contenu dépasse les 560 px de
+            départ (note « Partagé avec moi » sur plusieurs lignes : le Mode et
+            le type de source passaient sous les boutons). Jamais au-delà de
+            l'écran, jamais de réduction : l'utilisateur garde sa taille."""
+            # winfo_height() vaut 1 tant que la fenêtre n'est pas affichée :
+            # la hauteur courante est suivie ici, pas lue sur la fenêtre.
+            dlg.update_idletasks()
+            need = body.winfo_reqheight() + btns.winfo_reqheight()
+            height = min(need, dlg.winfo_screenheight() - 80)
+            if height > dlg_height[0]:
+                dlg_height[0] = height
+                width = dlg.winfo_width() if dlg.winfo_ismapped() else 680
+                dlg.geometry(f"{width}x{height}")
 
         dest_var.trace_add("write", apply_shared_lock)
         # La note nomme désormais le sous-dossier réel (destination + nom de la
@@ -2783,11 +2826,21 @@ class MappingEditor(tk.Tk):
                             ok_text=_("Add anyway"), cancel_text=_("Cancel")):
                             return
 
+            # Clés que ce dialogue n'édite pas : reportées telles quelles.
+            # excluded_remote EST édité par la case ci-dessus : on l'écrit
+            # APRÈS la copie, sinon une case décochée restaurerait l'ancienne clé.
+            if is_edit:
+                carry_unknown_keys(mapping, new_m)
+            if keep_excluded_var.get():
+                new_m["excluded_remote"] = "keep"
+            else:
+                new_m.pop("excluded_remote", None)
             result["value"] = new_m
             dlg.destroy()
 
         ttk.Button(btns, text=_("Cancel"), command=dlg.destroy).pack(side="right", padx=2)
         ttk.Button(btns, text="OK", command=on_ok).pack(side="right", padx=2)
+        fit_height()   # les boutons comptent dans la hauteur demandée
 
         self.wait_window(dlg)
         return result["value"]

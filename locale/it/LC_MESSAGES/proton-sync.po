@@ -1,4 +1,4 @@
-#
+# 
 msgid ""
 msgstr ""
 "Project-Id-Version: proton-sync 1.0\n"
@@ -4207,3 +4207,23 @@ msgid ""
 msgstr ""
 "  ⚠  [delete-guard] Eliminazioni disabilitate per il resto di questa "
 "mappatura, il controllo del mount è fallito durante il passaggio: {r}"
+
+#, python-brace-format
+msgid "    kept (excluded): {p}"
+msgstr "    conservato (escluso): {p}"
+
+#, python-brace-format
+msgid "  ⚠  Unknown excluded_remote value {v!r} — using \"prune\"."
+msgstr "  ⚠  Valore excluded_remote sconosciuto {v!r} — si usa \"prune\"."
+
+msgid ""
+"Keep already-uploaded files and folders on Proton once they are excluded"
+msgstr ""
+"Conservare su Proton i file e le cartelle già caricati, una volta esclusi"
+
+msgid ""
+"Only this mapping's exclusions are concerned; a global exclusion still "
+"removes the copy on Proton."
+msgstr ""
+"Sono interessate solo le esclusioni di questo mapping; un'esclusione globale "
+"rimuove comunque la copia su Proton."

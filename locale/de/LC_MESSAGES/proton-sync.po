@@ -1,4 +1,4 @@
-#
+# 
 msgid ""
 msgstr ""
 "Project-Id-Version: proton-sync 1.0\n"
@@ -360,9 +360,9 @@ msgid ""
 "   To proceed on the NEW account: run “Prime the cache” (or reset the "
 "mappings). The destinations will be (re)created on the new Drive."
 msgstr ""
-"   Um mit dem NEUEN Konto fortzufahren: führen Sie „Cache "
-"initialisieren“ (oder Zuordnungen zurücksetzen) aus. Die Ziele werden auf "
-"dem neuen Drive (neu) erstellt."
+"   Um mit dem NEUEN Konto fortzufahren: führen Sie „Cache initialisieren“ "
+"(oder Zuordnungen zurücksetzen) aus. Die Ziele werden auf dem neuen Drive "
+"(neu) erstellt."
 
 msgid ""
 "⏹ Interrupted — cache progress saved: resuming will skip what is already "
@@ -4228,3 +4228,25 @@ msgid ""
 msgstr ""
 "  ⚠  [delete-guard] Löschungen für den Rest dieser Zuordnung deaktiviert, "
 "die Einhängeprüfung ist während des Durchlaufs fehlgeschlagen: {r}"
+
+#, python-brace-format
+msgid "    kept (excluded): {p}"
+msgstr "    behalten (ausgeschlossen): {p}"
+
+#, python-brace-format
+msgid "  ⚠  Unknown excluded_remote value {v!r} — using \"prune\"."
+msgstr ""
+"  ⚠  Unbekannter excluded_remote-Wert {v!r} — es wird \"prune\" verwendet."
+
+msgid ""
+"Keep already-uploaded files and folders on Proton once they are excluded"
+msgstr ""
+"Bereits hochgeladene Dateien und Ordner auf Proton behalten, sobald sie "
+"ausgeschlossen sind"
+
+msgid ""
+"Only this mapping's exclusions are concerned; a global exclusion still "
+"removes the copy on Proton."
+msgstr ""
+"Nur die Ausschlüsse dieses Mappings sind betroffen; ein globaler Ausschluss "
+"entfernt die Kopie auf Proton weiterhin."
