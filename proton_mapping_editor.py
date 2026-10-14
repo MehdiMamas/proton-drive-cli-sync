@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.27.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.28.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -816,6 +816,44 @@ CONFIG_HELP = {
         "The launcher opens the mappings editor (empty, or directly on the "
         "current mappings file if you chose that option)."
     ),
+    "mass-delete-guard": _(
+        "Mass-deletion guard\n\n"
+        "Off by default. A file you delete locally is still taken as something "
+        "you meant to delete, and the Proton trash remains the safety net.\n\n"
+        "Turn this on if you want a pass to stop when one remote folder would "
+        "lose too much at once: a folder you emptied, or a folder you deleted. "
+        "A deleted folder counts as itself plus everything under it on Proton. "
+        "Nothing in that folder is trashed.\n\n"
+        "The refusal does not go away by itself. A scheduled pass is refused, "
+        "ends with code 5, and is refused the same way on every later pass. "
+        "Real-time sync retries further and further apart and is refused each "
+        "time. The folder is cleaned only when you allow it: “Allow this run” "
+        "in this window, or proton_sync.py --delete --allow-mass-delete in a "
+        "terminal.\n\n"
+        "So if you turn this on, watch for code 5 and [delete-guard] in the "
+        "log. A cleanup you really want always needs that manual step.\n\n"
+        "When a pass you start from this window is refused, the app lists the "
+        "refused folders and offers to run that same pass once more, with the "
+        "guard lifted for those folders only."
+    ),
+    "max-delete-min": _(
+        "Minimum number of items\n\n"
+        "The guard only steps in when a folder would lose at least this many "
+        "remote items AND more than the share set next to it. Both have to "
+        "be true. A deleted folder counts as itself plus everything it held "
+        "on Proton.\n\n"
+        "20 is a comfortable default: deleting a handful of files still goes "
+        "through. Type a whole number, 0 or more; any other value is refused "
+        "when you save."
+    ),
+    "max-delete-ratio": _(
+        "Share of the folder\n\n"
+        "Together with the minimum count. 0.5 means “more than half of the "
+        "items already on Proton in that one folder”, subfolders included.\n\n"
+        "Type a number from 0 to 1, with a point or a comma (0.5 or 0,5); any "
+        "other value is refused when you save. These two numbers apply to "
+        "every mapping."
+    ),
 }
 
 
@@ -1177,6 +1215,21 @@ def visible_editor_lines(lines, verbose=False, errors_only=False):
         shown.append(pending)
     return shown
 # --- end editor output filter ---
+
+
+def _parse_delete_guard_line(line):
+    """Ligne machine du moteur « @@DELETE-GUARD\tn\tt\tdossier » (dossier
+    refusé par le garde-fou de masse). Retourne (dossier, n, t) — t None si le
+    dossier n'a pas pu être mesuré — ou None si la ligne est illisible."""
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) != 4 or parts[0] != "@@DELETE-GUARD" or not parts[3]:
+        return None
+    try:
+        n = int(parts[1])
+        t = int(parts[2]) if parts[2] else None
+    except ValueError:
+        return None
+    return parts[3], n, t
 
 
 class MappingEditor(tk.Tk):
@@ -4081,6 +4134,29 @@ class MappingEditor(tk.Tk):
             ttk.Label(krow, text=_("  (0 = unlimited)")).pack(side="left")
             help_btn(krow, "cli-stall-max-kills")
 
+            # Garde-fou de masse : éteint par défaut. Les deux seuils sont
+            # toujours éditables, y compris quand la case est décochée, pour
+            # qu'on puisse les préparer avant d'allumer le garde-fou.
+            guard_frame = ttk.LabelFrame(frm, text=_("Mass deletion"), padding=10)
+            guard_frame.pack(fill="x", pady=(0, 10))
+            guard_var = tk.BooleanVar(value=appconfig.mass_delete_guard())
+            grow = ttk.Frame(guard_frame); grow.pack(anchor="w", fill="x")
+            ttk.Checkbutton(grow, text=_("Turn on the mass-deletion guard"),
+                            variable=guard_var).pack(side="left")
+            help_btn(grow, "mass-delete-guard")
+            gmin_row = ttk.Frame(guard_frame); gmin_row.pack(anchor="w", fill="x", pady=(8, 0))
+            ttk.Label(gmin_row, text=_("Minimum items in one folder: ")).pack(side="left")
+            gmin_var = tk.StringVar(value=str(appconfig.max_delete_min()))
+            gmin_entry = ttk.Entry(gmin_row, textvariable=gmin_var, width=6)
+            gmin_entry.pack(side="left")
+            help_btn(gmin_row, "max-delete-min")
+            gratio_row = ttk.Frame(guard_frame); gratio_row.pack(anchor="w", fill="x", pady=(8, 0))
+            ttk.Label(gratio_row, text=_("Share of that folder (0 to 1): ")).pack(side="left")
+            gratio_var = tk.StringVar(value=str(appconfig.max_delete_ratio()))
+            gratio_entry = ttk.Entry(gratio_row, textvariable=gratio_var, width=6)
+            gratio_entry.pack(side="left")
+            help_btn(gratio_row, "max-delete-ratio")
+
         # ---- Section Langue ----
         if _HAS_I18N:
             lang_frame = ttk.LabelFrame(frm, text=_("Interface language"), padding=10)
@@ -4455,6 +4531,10 @@ class MappingEditor(tk.Tk):
                 # plutôt que d'écraser un réglage valide par une valeur fausse.
                 appconfig.set_cli_stall_minutes(stall_var.get())
                 appconfig.set_cli_stall_max_kills(kills_var.get())
+                # Garde-fou de masse : seuils déjà validés dans apply().
+                appconfig.set_mass_delete_guard(guard_var.get())
+                appconfig.set_max_delete_min(gmin_var.get())
+                appconfig.set_max_delete_ratio(gratio_var.get())
                 # Icône de barre des tâches : effet IMMÉDIAT (démarrage à
                 # l'activation ; extinction d'elle-même à la désactivation).
                 appconfig.set_tray_enabled(tray_var.get())
@@ -4546,6 +4626,21 @@ class MappingEditor(tk.Tk):
                     dlg_error(dlg, _("The NAS mount point cannot be empty when a "
                                      "NAS is enabled."), title=_("Configuration"))
                     dlg.grab_set()
+                    return
+                # Seuils du garde-fou : une valeur refusée ne serait pas écrite
+                # (l'ancienne resterait), donc on le dit avant d'enregistrer.
+                if appconfig.parse_min(gmin_var.get()) is None:
+                    dlg_warning(dlg, _("The minimum must be a whole number, 0 or more."),
+                                title=_("Invalid threshold"))
+                    dlg.grab_set()
+                    gmin_entry.focus_set()
+                    return
+                if appconfig.parse_ratio(gratio_var.get()) is None:
+                    dlg_warning(dlg, _("The share must be a number from 0 to 1 "
+                                       "(0.5 or 0,5)."),
+                                title=_("Invalid threshold"))
+                    dlg.grab_set()
+                    gratio_entry.focus_set()
                     return
             # Chemin du CLI : valider ICI, au moment où on le saisit, plutôt
             # qu'au prochain démarrage. Signaler l'erreur une fenêtre plus tard
@@ -4851,6 +4946,8 @@ class MappingEditor(tk.Tk):
         if line.lstrip().startswith("@@PROGRESS"):
             self._handle_progress_line(line.strip())
             return
+        if line.startswith("@@DELETE-GUARD"):
+            return
         self._render_line(line)
 
     def _handle_progress_line(self, line):
@@ -5024,7 +5121,11 @@ class MappingEditor(tk.Tk):
         t = threading.Thread(target=self._run_sync_thread, args=(cmd, env, log_path), daemon=True)
         t.start()
 
-    def _run_sync_thread(self, cmd, env, log_path):
+    def _run_sync_thread(self, cmd, env, log_path, offer_mass_delete=True):
+        # offer_mass_delete : une seule offre. La relance avec
+        # --allow-mass-delete-in passe False, donc un second [delete-guard]
+        # ne rouvre pas le dialogue.
+        refused = []                     # (dossier, n, t) lus sur @@DELETE-GUARD
         try:
             with open(log_path, "w", encoding="utf-8") as logf:
                 self.sync_process = subprocess.Popen(
@@ -5044,11 +5145,15 @@ class MappingEditor(tk.Tk):
                               "account.")))
                     if "[auth-failed]" in line:
                         self._auth_failed_seen = True
+                    if line.startswith("@@DELETE-GUARD"):
+                        item = _parse_delete_guard_line(line)
+                        if item and item[0] not in [r[0] for r in refused]:
+                            refused.append(item)
                     self._feed_output(line)      # affichage (brut ou épuré)
-                    # @@PROGRESS = protocole interne (barre de progression), traité
-                    # à part via _handle_progress_line : jamais au log (sinon
-                    # rejoué à l'écran au re-filtrage, cf. docstring _feed_output).
-                    if not line.startswith("@@PROGRESS"):
+                    # Lignes @@ = protocole interne (@@PROGRESS pour la barre de
+                    # progression, @@DELETE-GUARD pour la relance) : jamais au log
+                    # (sinon rejouées à l'écran au re-filtrage, cf. _feed_output).
+                    if not line.startswith("@@"):
                         logf.write(line)         # log disque : sortie complète
                         logf.flush()
                 self._flush_pending_output()
@@ -5078,10 +5183,71 @@ class MappingEditor(tk.Tk):
         except Exception as e:
             self._append_output("\n" + _("=== Launch error: {e} ===").format(e=e) + "\n\n")
             self._ui(lambda: self.status.set(_("Error: {e}").format(e=e)))
+            refused = []
         finally:
             self.sync_process = None
-            self._ui(lambda: self.run_button.configure(state="normal"))
-            self._ui(lambda: self.stop_button.configure(state="disabled"))
+            # Pas d'offre pour un dry-run, ni pour la relance déjà autorisée.
+            offer = (refused and offer_mass_delete
+                     and "--dry-run" not in cmd
+                     and "--allow-mass-delete" not in cmd)
+            if offer:
+                snapshot = list(cmd)
+                folders = list(refused)
+                self._ui(lambda: self._ask_allow_mass_delete(snapshot, env, folders))
+            else:
+                self._ui(lambda: self.run_button.configure(state="normal"))
+                self._ui(lambda: self.stop_button.configure(state="disabled"))
+
+    def _ask_allow_mass_delete(self, cmd, env, refused):
+        """Propose UNE relance du même passage, garde-fou levé pour les seuls
+        dossiers refusés (--allow-mass-delete-in, un par dossier). Les autres
+        dossiers restent protégés pendant la relance. Le drapeau reste
+        utilisable en ligne de commande : ici il évite d'exiger un terminal
+        pour vider un dossier volontairement."""
+        shown = refused[:10]
+        lines = []
+        for path, n, t in shown:
+            if t is None:
+                lines.append("• " + _("{p}: the folder's size could not be "
+                                      "measured").format(p=path))
+            else:
+                lines.append("• " + _("{p}: {n} of {t} items").format(
+                    p=path, n=n, t=t))
+        if len(refused) > len(shown):
+            lines.append(_("… and {k} more").format(k=len(refused) - len(shown)))
+        allowed = dlg_confirm(
+            self,
+            _("The mass-deletion guard refused to trash items in these folders. "
+              "Those items are still on Proton:") + "\n\n" + "\n".join(lines)
+            + "\n\n" + _(
+                "Run this same pass again with the guard lifted for these "
+                "folders only? It stays on for every other folder, and for "
+                "every later pass."),
+            title=_("Mass deletion refused"),
+            kind="warning",
+            ok_text=_("Allow this run"),
+            cancel_text=_("Keep them"))
+        if not allowed:
+            self.run_button.configure(state="normal")
+            self.stop_button.configure(state="disabled")
+            return
+        rerun = list(cmd)
+        for path, _n, _t in refused:
+            rerun += ["--allow-mass-delete-in", path]
+        log_path = self._log_path()
+        self._current_log_path = log_path
+        self._append_output(
+            _("=== Launch: {c} ===").format(c=" ".join(shlex.quote(c) for c in rerun)) + "\n")
+        self._append_output(_("=== Log: {p} ===").format(p=log_path) + "\n\n")
+        self.status.set(_("Sync in progress…"))
+        self.run_button.configure(state="disabled")
+        self.stop_button.configure(state="normal")
+        threading.Thread(
+            target=self._run_sync_thread,
+            args=(rerun, env, log_path),
+            kwargs={"offer_mass_delete": False},
+            daemon=True,
+        ).start()
 
     def on_stop_sync(self):
         # Casser une éventuelle attente de verrou (amorçage/reset patients).
@@ -5557,8 +5723,8 @@ class MappingEditor(tk.Tk):
                         if _chemin and _chemin not in self._prime_unreadable:
                             self._prime_unreadable.append(_chemin)
                     self._feed_output(line)          # affichage (brut ou épuré)
-                    # @@PROGRESS non écrit au log (protocole interne, cf. B9/site 1).
-                    if not line.startswith("@@PROGRESS"):
+                    # Lignes @@ non écrites au log (protocole interne, cf. B9/site 1).
+                    if not line.startswith("@@"):
                         logf.write(line); logf.flush()   # log disque : sortie complète
                     # Extraire un chemin pour la barre de progression (dossier courant).
                     self._prime_current = self._extract_path(line) or self._prime_current
