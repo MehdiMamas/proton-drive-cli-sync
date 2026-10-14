@@ -2,11 +2,11 @@
 
 config.py and i18n.py both call settings_path(). The CLI order lives only in
 resolve_cli(). On the NAS, nas_watcher.py sets PROTON_SYNC_SETTINGS to the
-settings.json beside it, so the NAS never uses the XDG path. This module imports neither config nor i18n, so those imports
-cannot cycle. Nothing here raises: a missing home, a read-only config
+settings.json beside it, so the NAS never uses the XDG path. This module
+imports neither config nor i18n, so those imports cannot cycle. Nothing here raises: a missing home, a read-only config
 directory, or a failed copy falls back to a path.
 """
-__version__ = "1.0.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.0.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -16,6 +16,10 @@ import sys
 # Posée dans la copie XDG. L'éditeur l'affiche une fois, puis la retire.
 # Un démarrage moteur ultérieur ne la touche pas.
 SETTINGS_MOVE_NOTICE_KEY = "settings_move_notice_pending"
+
+# Dossier sous XDG_CONFIG_HOME : le nom du dépôt. « proton-drive-sync » est déjà
+# pris par un autre projet (DamianB-BitFlipper/proton-drive-sync, config.json).
+SETTINGS_DIR_NAME = "proton-drive-cli-sync"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -42,7 +46,7 @@ def xdg_config_home():
 
 
 def xdg_settings_path():
-    return os.path.join(xdg_config_home(), "proton-drive-sync", "settings.json")
+    return os.path.join(xdg_config_home(), SETTINGS_DIR_NAME, "settings.json")
 
 
 def legacy_settings_path():
@@ -99,7 +103,7 @@ def settings_move_notice_text():
     """Les trois points de l'avis : nouvel emplacement, ancien fichier ignoré,
     dossier à ajouter aux sauvegardes. Sans Tk : l'éditeur affiche ce texte."""
     path = settings_path()
-    folder = os.path.join(xdg_config_home(), "proton-drive-sync")
+    folder = os.path.join(xdg_config_home(), SETTINGS_DIR_NAME)
     return _(
         "Settings now live in {path}.\n\n"
         "The file beside the scripts is no longer read.\n\n"

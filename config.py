@@ -54,7 +54,7 @@ except ImportError:
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Résolution partagée avec i18n (paths.settings_path) : PROTON_SYNC_SETTINGS,
-# sinon ~/.config/proton-drive-sync/settings.json, avec copie unique depuis
+# sinon ~/.config/proton-drive-cli-sync/settings.json, avec copie unique depuis
 # APP_DIR/settings.json s'il existe. _SETTINGS_PATH est l'instantané à
 # l'import ; les lectures repassent par paths.
 _SETTINGS_PATH = paths.settings_path()

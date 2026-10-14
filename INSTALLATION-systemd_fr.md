@@ -52,12 +52,12 @@ le champ de la fenêtre Configuration.
 
 ## Où vivent les réglages
 
-Les réglages sont dans `~/.config/proton-drive-sync/settings.json`
-(`$XDG_CONFIG_HOME/proton-drive-sync/settings.json` si cette variable est définie).
+Les réglages sont dans `~/.config/proton-drive-cli-sync/settings.json`
+(`$XDG_CONFIG_HOME/proton-drive-cli-sync/settings.json` si cette variable est définie).
 Le fichier `settings.json` à côté des scripts n'est plus lu. S'il est le seul,
 le premier lancement le copie une fois (mode 0600) et le laisse en place.
 Une sauvegarde du dossier des scripts n'inclut plus la configuration :
-ajoutez aussi `~/.config/proton-drive-sync`, ou `$XDG_CONFIG_HOME/proton-drive-sync`
+ajoutez aussi `~/.config/proton-drive-cli-sync`, ou `$XDG_CONFIG_HOME/proton-drive-cli-sync`
 si cette variable est définie. L'éditeur le dit une fois, à la première
 ouverture après la copie. `PROTON_SYNC_SETTINGS`, si elle est définie, désigne
 ce fichier à la place et ne lance pas la copie.

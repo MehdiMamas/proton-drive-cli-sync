@@ -30,7 +30,7 @@ def test_settings_path_defaults_when_env_unset(tmp_path):
     code = (
         "import os, config, i18n, paths\n"
         "expect = os.path.join(os.environ['HOME'], '.config', "
-        "'proton-drive-sync', 'settings.json')\n"
+        "'proton-drive-cli-sync', 'settings.json')\n"
         "assert config._SETTINGS_PATH == expect, config._SETTINGS_PATH\n"
         "assert i18n.SETTINGS_PATH == expect, i18n.SETTINGS_PATH\n"
         "assert paths.settings_path() == expect\n"
@@ -47,7 +47,7 @@ def test_settings_path_defaults_when_env_empty(tmp_path):
     code = (
         "import os, config, i18n, paths\n"
         "expect = os.path.join(os.environ['HOME'], '.config', "
-        "'proton-drive-sync', 'settings.json')\n"
+        "'proton-drive-cli-sync', 'settings.json')\n"
         "assert config._SETTINGS_PATH == expect, config._SETTINGS_PATH\n"
         "assert i18n.SETTINGS_PATH == expect, i18n.SETTINGS_PATH\n"
         "assert paths.settings_path() == expect\n"

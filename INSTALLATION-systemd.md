@@ -51,12 +51,12 @@ Configuration field.
 
 ## Where settings live
 
-Settings are `~/.config/proton-drive-sync/settings.json`
-(`$XDG_CONFIG_HOME/proton-drive-sync/settings.json` when that variable is set).
+Settings are `~/.config/proton-drive-cli-sync/settings.json`
+(`$XDG_CONFIG_HOME/proton-drive-cli-sync/settings.json` when that variable is set).
 The `settings.json` file beside the scripts is no longer read. If only that
 old file exists, the first run copies it once (mode 0600) and leaves it in
 place. A backup of the scripts folder no longer includes the configuration:
-also back up `~/.config/proton-drive-sync`, or `$XDG_CONFIG_HOME/proton-drive-sync`
+also back up `~/.config/proton-drive-cli-sync`, or `$XDG_CONFIG_HOME/proton-drive-cli-sync`
 when that variable is set. The editor says this once, the first time it opens
 after the copy. `PROTON_SYNC_SETTINGS`, when set, selects that file instead
 and does not start the copy.

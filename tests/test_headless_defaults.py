@@ -106,7 +106,7 @@ def test_settings_env_override_wins(tmp_path, monkeypatch):
     chosen = tmp_path / "custom-settings.json"
     chosen.write_text("{}\n", encoding="utf-8")
     xdg = tmp_path / "xdg"
-    existing = xdg / "proton-drive-sync" / "settings.json"
+    existing = xdg / "proton-drive-cli-sync" / "settings.json"
     existing.parent.mkdir(parents=True)
     existing.write_text('{"language": "fr"}\n', encoding="utf-8")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
@@ -157,7 +157,7 @@ def test_settings_xdg_preferred_when_both_exist(tmp_path, monkeypatch, capsys):
     legacy = app / "settings.json"
     legacy.write_text('{"from": "legacy"}\n', encoding="utf-8")
     xdg = tmp_path / "xdg"
-    dest = xdg / "proton-drive-sync" / "settings.json"
+    dest = xdg / "proton-drive-cli-sync" / "settings.json"
     dest.parent.mkdir(parents=True)
     dest.write_text('{"from": "xdg"}\n', encoding="utf-8")
     before = dest.stat().st_mtime_ns
@@ -191,7 +191,7 @@ def test_unwritable_xdg_falls_back_to_legacy_read(tmp_path, monkeypatch, capsys)
         xdg.chmod(0o700)
     assert got == str(legacy)
     assert "Could not write settings" in err
-    assert not (xdg / "proton-drive-sync" / "settings.json").exists()
+    assert not (xdg / "proton-drive-cli-sync" / "settings.json").exists()
 
 
 def test_i18n_and_config_agree_on_settings_path(tmp_path, monkeypatch):
@@ -212,7 +212,7 @@ def test_fresh_settings_write_creates_xdg_file_mode_0600(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     import i18n
     assert i18n.write_setting("language", "en") is True
-    dest = tmp_path / "xdg" / "proton-drive-sync" / "settings.json"
+    dest = tmp_path / "xdg" / "proton-drive-cli-sync" / "settings.json"
     assert dest.is_file()
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
     assert not (app / "settings.json").exists()
@@ -280,7 +280,7 @@ def test_env_override_does_not_copy_legacy(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("PROTON_SYNC_SETTINGS", str(chosen))
     assert paths.settings_path() == str(chosen)
-    assert not (tmp_path / "xdg" / "proton-drive-sync" / "settings.json").exists()
+    assert not (tmp_path / "xdg" / "proton-drive-cli-sync" / "settings.json").exists()
     assert legacy.read_text(encoding="utf-8") == '{"language": "fr"}\n'
     assert paths.settings_move_notice_pending() is False
 
@@ -291,7 +291,7 @@ def test_no_legacy_means_no_settings_move_notice(tmp_path, monkeypatch):
     app.mkdir()
     monkeypatch.setattr(paths, "APP_DIR", str(app))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    dest = tmp_path / "xdg" / "proton-drive-sync" / "settings.json"
+    dest = tmp_path / "xdg" / "proton-drive-cli-sync" / "settings.json"
     assert paths.settings_path() == str(dest)
     assert not dest.exists()
     assert paths.settings_move_notice_pending() is False
@@ -312,7 +312,7 @@ def test_editor_clears_settings_move_notice(tmp_path, monkeypatch):
     assert paths.settings_move_notice_pending() is True
     monkeypatch.setattr(paths, "_", lambda message: message)
     text = paths.settings_move_notice_text()
-    folder = os.path.join(str(tmp_path / "xdg"), "proton-drive-sync")
+    folder = os.path.join(str(tmp_path / "xdg"), "proton-drive-cli-sync")
     assert str(chosen) in text
     assert "no longer read" in text
     assert "scripts folder" in text

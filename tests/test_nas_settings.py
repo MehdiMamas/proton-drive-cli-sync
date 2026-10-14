@@ -65,7 +65,7 @@ def test_importing_nas_watcher_keeps_the_desktop_path(tmp_path):
     result = _python("import nas_watcher, paths\nprint(paths.settings_path())\n",
                      copy, home)
     assert result.returncode == 0, result.stderr
-    expect = home / ".config" / "proton-drive-sync" / "settings.json"
+    expect = home / ".config" / "proton-drive-cli-sync" / "settings.json"
     assert result.stdout.strip().splitlines()[-1] == str(expect)
 
 
