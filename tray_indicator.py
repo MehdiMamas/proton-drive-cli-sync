@@ -23,7 +23,7 @@ L'applet se termine de lui-même si le réglage « tray_enabled » passe à Fals
 
 Clic gauche : ouvre l'éditeur de mappings. Clic droit : menu (Ouvrir / Quitter).
 """
-__version__ = "1.3.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.4.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -263,9 +263,22 @@ def main():
         state = decide_state(status, time.time())
         apply_state(state, build_tooltip(status, state))
 
+    # Relance après mise à jour du code. Personne ne surveille l'icône : elle
+    # se relance elle-même, une fois sortie de la boucle GTK. Import tolérant.
+    try:
+        import code_update
+        code_watch = code_update.CodeWatch(code_update.TRAY)
+    except Exception:
+        code_watch = None
+    restart = []
+
     def refresh():
         # L'applet s'éteint de lui-même si le réglage est décoché dans le GUI.
         if _HAS_CONFIG and not appconfig.tray_enabled():
+            Gtk.main_quit()
+            return False
+        if code_watch is not None and code_watch.ready():
+            restart.append(True)
             Gtk.main_quit()
             return False
         _refresh_once()
@@ -274,6 +287,8 @@ def main():
     _refresh_once()
     GLib.timeout_add_seconds(REFRESH_SECONDS, refresh)
     Gtk.main()
+    if restart:
+        code_watch.restart()
 
 
 if __name__ == "__main__":

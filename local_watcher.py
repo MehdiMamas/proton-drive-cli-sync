@@ -30,7 +30,7 @@ La PARTIE LOGIQUE (marker_for_event, classify, ...) est pure et testable sans
 pyinotify. La PARTIE BRANCHEMENT (WatchManager, boucle d'événements) nécessite
 pyinotify et de vrais dossiers — testée sur la machine locale.
 """
-__version__ = "1.1.3"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -302,7 +302,7 @@ def _mount_is_network(path):
 
 
 def run_watcher(config_path, log=None, rescan_interval=30, fast_interval=3,
-                fast_window=120):
+                fast_window=120, code_watch=None):
     """Lance la surveillance inotify des dossiers locaux ET NAS (via les montages
     de la machine locale). Bloquant. À lancer dans la session de l'utilisateur.
 
@@ -318,6 +318,11 @@ def run_watcher(config_path, log=None, rescan_interval=30, fast_interval=3,
         rescan_interval s pour prendre en compte un montage qui APPARAÎT (source
         reprise) ou DISPARAÎT (démontée / retirée du mapping), et recharge les
         mappings au passage. Chaque changement est journalisé (➕ / ➖ / 🔄).
+
+    `code_watch` (code_update.CodeWatch, facultatif) : au même relevé
+    périodique, vérifie si le code de l'application a été mis à jour. Si oui,
+    la boucle se termine et rend "restart" ; main() relance alors le
+    programme. Sinon la fonction ne rend jamais (sauf Ctrl+C).
     """
     import pyinotify
 
@@ -498,6 +503,9 @@ def run_watcher(config_path, log=None, rescan_interval=30, fast_interval=3,
             interval = fast_interval if fast else rescan_interval
             if now - last_rescan >= interval:
                 last_rescan = now
+                if code_watch is not None and code_watch.ready():
+                    log(_("Application updated — restarting with the new code."))
+                    return "restart"
                 # Recharger les mappings (la config a pu changer) ; en cas de
                 # lecture ratée ou vide, on GARDE les précédents pour ne pas
                 # effacer toutes les cibles sur une erreur transitoire.
@@ -523,7 +531,15 @@ def main():
         description="Watcher inotify local (machine locale) pour la synchro Proton Drive")
     parser.add_argument("config", help="Fichier JSON de mappings de cet utilisateur")
     args = parser.parse_args()
-    run_watcher(args.config)
+    # Relance après mise à jour : import tolérant (sans le module, le watcher
+    # tourne comme avant). Le NAS n'exécute jamais ce main().
+    try:
+        import code_update
+        watch = code_update.CodeWatch(code_update.WATCHER)
+    except Exception:
+        watch = None
+    if run_watcher(args.config, code_watch=watch) == "restart":
+        watch.restart()
 
 
 if __name__ == "__main__":

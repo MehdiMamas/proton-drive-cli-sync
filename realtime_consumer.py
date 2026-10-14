@@ -24,7 +24,7 @@ Principes (décidés en conception) :
 
 Un démon par utilisateur (sa session, son trousseau, ses mappings).
 """
-__version__ = "1.8.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.9.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -1397,6 +1397,14 @@ def main():
         pass
     recover_inflight(_startup_queues, log=log)
 
+    # Relance après mise à jour du code : vérifiée entre deux cycles
+    # seulement, jamais pendant un passage du moteur. Import tolérant.
+    try:
+        import code_update
+        _code_watch = code_update.CodeWatch(code_update.CONSUMER)
+    except Exception:
+        _code_watch = None
+
     while True:
         cfg = load_config()  # relu à chaque cycle -> délai modifiable à chaud
         # Charger les mappings frais à chaque cycle (la vérité reste à jour).
@@ -1586,6 +1594,10 @@ def main():
         if args.once:
             hb.stop()
             break
+        if _code_watch is not None and _code_watch.ready():
+            log(_("Application updated — restarting with the new code."))
+            hb.stop()
+            _code_watch.restart()
         time.sleep(cfg["cycle_seconds"])
 
 

@@ -73,6 +73,13 @@ except ImportError:
 # Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
 from mapping_keys import carry_unknown_keys
 
+# Relance après mise à jour du code (import tolérant : sans le module,
+# l'éditeur fonctionne comme avant, sans rappel ni relance).
+try:
+    import code_update
+except ImportError:
+    code_update = None
+
 # Moteur importé comme MODULE pour réutiliser get_remote_listing (navigateur de
 # destinations Proton) — aucune logique de parsing parallèle. Import tolérant :
 # sans lui, le bouton « Parcourir Proton… » affiche simplement une erreur.
@@ -498,6 +505,9 @@ def cli_path():
         return os.path.join(APP_DIR, "proton-drive")
 DEFAULT_ENGINE = os.path.join(APP_DIR, "proton_sync.py")
 DEFAULT_LOG_DIR = os.path.join(APP_DIR, "logs")
+
+# Cadence de vérification d'une mise à jour du code (éditeur ouvert).
+CODE_UPDATE_TICK_MS = 10000
 
 
 # ============================================================
@@ -1348,8 +1358,20 @@ class MappingEditor(tk.Tk):
         # Même motif : le dialogue prend un grab, donc pas dans __init__ avant
         # que la fenêtre puisse s'afficher. Un passage moteur qui a déjà copié
         # le fichier laisse la clé en place ; seul l'éditeur la retire.
-        self.after(450, self._announce_settings_move)
+        self.after(450, self._startup_notices)
         self._start_cli_version_probe()
+
+        # Mise à jour du code pendant que la fenêtre est ouverte : rappel jaune,
+        # puis relance automatique dès que la fenêtre est au repos.
+        self._code_watch = None
+        self._code_update_ready = False
+        if code_update is not None:
+            try:
+                self._code_watch = code_update.CodeWatch(code_update.EDITOR)
+            except Exception:
+                self._code_watch = None
+        if self._code_watch is not None:
+            self.after(CODE_UPDATE_TICK_MS, self._code_update_tick)
 
         # Détection automatique de l'état d'authentification Proton, en arrière-plan
         # (ne bloque pas le démarrage). Met à jour l'étiquette du bouton, et si la
@@ -1447,6 +1469,82 @@ class MappingEditor(tk.Tk):
             except Exception:
                 pass
             return ok
+
+    def _startup_notices(self):
+        """Les avis d'ouverture, l'un APRÈS l'autre : chaque dialogue attend
+        sa fermeture (wait_window), deux after() séparés les empileraient."""
+        self._announce_settings_move()
+        self._announce_restarts()
+
+    def _announce_restarts(self):
+        """Une fois : les programmes relancés d'eux-mêmes après une mise à
+        jour du code, avec l'heure de chaque relance. Le fichier d'état est
+        vidé à la lecture (code_update.take_restarts)."""
+        if code_update is None:
+            return
+        try:
+            items = code_update.take_restarts()
+        except Exception:
+            items = []
+        if not items:
+            return
+        names = {
+            code_update.CONSUMER: _("Real-time sync"),
+            code_update.WATCHER: _("Local file watcher"),
+            code_update.TRAY: _("Status icon"),
+            code_update.EDITOR: _("This window"),
+        }
+        lines = []
+        for item in items:
+            try:
+                hhmm = time.strftime("%H:%M", time.localtime(float(item.get("time"))))
+            except (TypeError, ValueError, OverflowError, OSError):
+                hhmm = "?"
+            lines.append("• " + _("{name}, at {time}").format(
+                name=names.get(item.get("name"), item.get("name")), time=hhmm))
+        dlg_info(self, _("The application was updated. These parts restarted "
+                         "by themselves with the new code:") + "\n\n"
+                 + "\n".join(lines),
+                 title=_("Update applied"))
+
+    def _code_update_tick(self):
+        """Toutes les CODE_UPDATE_TICK_MS : le code a-t-il changé (dépôt
+        terminé et compilable) ? Si oui, rappel jaune ; puis relance dès que la
+        fenêtre est au repos. Ne pose jamais de question, n'interrompt rien."""
+        try:
+            if not self._code_update_ready and self._code_watch.ready():
+                self._code_update_ready = True
+                self._show_update_banner()
+            if self._code_update_ready and self._idle_for_restart():
+                argv = [os.path.abspath(__file__)]
+                if self.config_path:
+                    argv.append(self.config_path)
+                self._code_watch.restart(argv)
+        except Exception:
+            pass
+        self.after(CODE_UPDATE_TICK_MS, self._code_update_tick)
+
+    def _show_update_banner(self):
+        if getattr(self, "_update_banner", None) is not None:
+            return
+        self._update_banner = tk.Label(
+            self._update_banner_slot,
+            text=_("The application was updated: close and reopen this window."),
+            bg="#fde68a", fg="#3f3f46", anchor="w", padx=10, pady=4)
+        self._update_banner.pack(fill="x")
+
+    def _idle_for_restart(self):
+        """Relance permise seulement si rien ne serait perdu ni interrompu :
+        aucun mapping modifié non enregistré, aucun passage en cours (synchro,
+        amorçage, réinitialisation), aucune fenêtre secondaire ouverte."""
+        if self.dirty or self._sync_in_progress():
+            return False
+        if self.grab_current() is not None:
+            return False
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel):
+                return False
+        return True
 
     def _announce_settings_move(self):
         """Une fois : où sont les réglages, l'ancien fichier n'est plus lu,
@@ -1761,6 +1859,10 @@ class MappingEditor(tk.Tk):
         # connexion vit désormais dans « ⚙ Configuration… »).
         statusbar = ttk.Frame(self)
         statusbar.pack(side="bottom", fill="x")
+        # Emplacement du rappel « application mise à jour » : vide (hauteur
+        # nulle) tant qu'il n'y a rien à dire, juste au-dessus de la barre.
+        self._update_banner_slot = tk.Frame(self, height=0)
+        self._update_banner_slot.pack(side="bottom", fill="x")
         self.status = tk.StringVar(value=_("Ready."))
         ttk.Label(statusbar, textvariable=self.status, anchor="w",
                   padding=(8, 4)).pack(side="left", fill="x", expand=True)

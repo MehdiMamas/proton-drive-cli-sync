@@ -4476,3 +4476,35 @@ msgstr ""
 
 msgid "Create thumbnails when sending"
 msgstr "Crea le miniature durante l'invio"
+
+msgid "Application updated — restarting with the new code."
+msgstr "Applicazione aggiornata — riavvio con il nuovo codice."
+
+msgid "Real-time sync"
+msgstr "Sincronizzazione in tempo reale"
+
+msgid "Local file watcher"
+msgstr "Sorveglianza dei file locali"
+
+msgid "Status icon"
+msgstr "Icona di stato"
+
+msgid "This window"
+msgstr "Questa finestra"
+
+msgid "Update applied"
+msgstr "Aggiornamento applicato"
+
+msgid "The application was updated: close and reopen this window."
+msgstr ""
+"L'applicazione è stata aggiornata: chiudete e riaprite questa finestra."
+
+msgid ""
+"The application was updated. These parts restarted by themselves with the "
+"new code:"
+msgstr ""
+"L'applicazione è stata aggiornata. Questi elementi si sono riavviati da soli "
+"con il nuovo codice:"
+
+msgid "{name}, at {time}"
+msgstr "{name}, alle {time}"

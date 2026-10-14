@@ -4441,3 +4441,34 @@ msgstr ""
 
 msgid "Create thumbnails when sending"
 msgstr "Criar miniaturas ao enviar"
+
+msgid "Application updated — restarting with the new code."
+msgstr "Aplicação atualizada — reinício com o novo código."
+
+msgid "Real-time sync"
+msgstr "Sincronização em tempo real"
+
+msgid "Local file watcher"
+msgstr "Vigilância dos ficheiros locais"
+
+msgid "Status icon"
+msgstr "Ícone de estado"
+
+msgid "This window"
+msgstr "Esta janela"
+
+msgid "Update applied"
+msgstr "Atualização aplicada"
+
+msgid "The application was updated: close and reopen this window."
+msgstr "A aplicação foi atualizada: feche e volte a abrir esta janela."
+
+msgid ""
+"The application was updated. These parts restarted by themselves with the "
+"new code:"
+msgstr ""
+"A aplicação foi atualizada. Estes elementos reiniciaram-se sozinhos com o "
+"novo código:"
+
+msgid "{name}, at {time}"
+msgstr "{name}, às {time}"
