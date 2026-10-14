@@ -29,18 +29,17 @@ corruption.
 ## Before you start: where to put the Proton CLI binary
 
 This application does not perform the sync itself: it drives the official
-`proton-drive` binary, which you download separately. It resolves the binary
+`proton-drive` binary, which you download separately. It looks for the binary
 in this order:
 
 1. the `PROTON_DRIVE_CLI` environment variable, if set;
 2. the **"Proton CLI binary path"** field in the GUI's **Configuration** window;
-3. `<scripts folder>/proton-drive`, when that file is executable;
-4. `proton-drive` on `PATH`;
-5. otherwise the path in step 3, so an error can name it.
+3. `<application folder>/proton-drive`, if that file is executable;
+4. the `proton-drive` command, if it is installed on the system (`PATH`).
 
-**Simplest option**: install `proton-drive` on `PATH`, or drop the binary
-**next to the scripts** (step 3). To keep it elsewhere, fill in the
-Configuration field.
+**Simplest option**: drop the binary **next to the application** (step 3), or
+install it on the system (`PATH`). To keep it elsewhere, fill in the
+Configuration window field.
 
 > **If you change this path AFTER installing the services**, reinstall them
 > ("Install / Update" button, or by regenerating the units by hand): systemd units
@@ -53,9 +52,9 @@ Configuration field.
 
 Settings are `~/.config/proton-drive-cli-sync/settings.json`
 (`$XDG_CONFIG_HOME/proton-drive-cli-sync/settings.json` when that variable is set).
-The `settings.json` file beside the scripts is no longer read. If only that
+The `settings.json` file in the application folder is no longer read. If only that
 old file exists, the first run copies it once (mode 0600) and leaves it in
-place. A backup of the scripts folder no longer includes the configuration:
+place. A backup of the application folder no longer includes the settings:
 also back up `~/.config/proton-drive-cli-sync`, or `$XDG_CONFIG_HOME/proton-drive-cli-sync`
 when that variable is set. The editor says this once, the first time it opens
 after the copy. `PROTON_SYNC_SETTINGS`, when set, selects that file instead

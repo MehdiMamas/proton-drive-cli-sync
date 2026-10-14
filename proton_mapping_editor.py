@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.29.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.30.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -210,13 +210,20 @@ class StyledDialog(tk.Toplevel):
         self.transient(parent)
 
         # Bande d'accent supérieure avec pictogramme + titre.
-        band = tk.Frame(self, bg=spec["accent"], height=54)
+        # Hauteur NON figée : le titre passe à la ligne au lieu d'être rogné.
+        # Les aides prennent pour titre le libellé de leur réglage (« Aide —
+        # Nombre minimal d'éléments dans un dossier ») : avec une bande de
+        # hauteur fixe, le texte débordait de la largeur de la boîte et Tk en
+        # coupait les deux bouts. La largeur de retour (400 px) tient dans
+        # celle du corps (420 px + marges), donc la boîte ne s'élargit pas.
+        band = tk.Frame(self, bg=spec["accent"])
         band.pack(side="top", fill="x")
-        band.pack_propagate(False)
         tk.Label(band, text=spec["glyph"], bg=spec["accent"], fg="white",
-                 font=("DejaVu Sans", 20, "bold")).pack(side="left", padx=(16, 8))
+                 font=("DejaVu Sans", 20, "bold")).pack(
+                     side="left", anchor="n", padx=(16, 8), pady=(8, 8))
         tk.Label(band, text=title or spec["title"], bg=spec["accent"], fg="white",
-                 font=("DejaVu Sans", 13)).pack(side="left")
+                 font=("DejaVu Sans", 13), justify="left", wraplength=400,
+                 anchor="w").pack(side="left", fill="x", pady=(13, 13))
 
         def on_ok():
             self.result = True
@@ -822,41 +829,35 @@ CONFIG_HELP = {
     ),
     "mass-delete-guard": _(
         "Mass-deletion guard\n\n"
-        "Off by default. A file you delete locally is still taken as something "
-        "you meant to delete, and the Proton trash remains the safety net.\n\n"
-        "Turn this on if you want a pass to stop when one remote folder would "
-        "lose too much at once: a folder you emptied, or a folder you deleted. "
-        "A deleted folder counts as itself plus everything under it on Proton. "
-        "Nothing in that folder is trashed.\n\n"
-        "The refusal does not go away by itself. A scheduled pass is refused, "
-        "ends with code 5, and is refused the same way on every later pass. "
-        "Real-time sync retries further and further apart and is refused each "
-        "time. The folder is cleaned only when you allow it: “Allow this run” "
-        "in this window, or proton_sync.py --delete --allow-mass-delete in a "
-        "terminal.\n\n"
-        "So if you turn this on, watch for code 5 and [delete-guard] in the "
-        "log. A cleanup you really want always needs that manual step.\n\n"
-        "When a pass you start from this window is refused, the app lists the "
-        "refused folders and offers to run that same pass once more, with the "
-        "guard lifted for those folders only."
+        "Off by default: a file you delete on this computer goes to the Proton "
+        "trash on the next pass, as usual.\n\n"
+        "When on, it blocks too many deletions at once in a single folder — for "
+        "example a folder emptied or deleted by mistake. Nothing is sent to the "
+        "trash in that folder.\n\n"
+        "Note: the block does not lift by itself, even when the deletion was "
+        "intended. Scheduled sync and real-time sync run into it on every pass. "
+        "To empty that folder on purpose, start the sync from the main window "
+        "(“▶ Run sync”, with “Propagate deletions” checked): when it is blocked, "
+        "a window lists the folders concerned and offers “Allow this run”.\n\n"
+        "If you turn this on, keep an eye on syncs that end with failures: a "
+        "blocked folder is one of them."
     ),
     "max-delete-min": _(
-        "Minimum number of items\n\n"
+        "Minimum items in one folder\n\n"
         "The guard only steps in when a folder would lose at least this many "
-        "remote items AND more than the share set next to it. Both have to "
-        "be true. A deleted folder counts as itself plus everything it held "
-        "on Proton.\n\n"
-        "20 is a comfortable default: deleting a handful of files still goes "
-        "through. Type a whole number, 0 or more; any other value is refused "
-        "when you save."
+        "items on Proton AND more than the share set below. Both have to be "
+        "true. A deleted folder counts as itself plus everything it held on "
+        "Proton.\n\n"
+        "With 20, deleting a few files always goes through. Type a whole number, "
+        "0 or more; any other value is refused when you save."
     ),
     "max-delete-ratio": _(
-        "Share of the folder\n\n"
-        "Together with the minimum count. 0.5 means “more than half of the "
-        "items already on Proton in that one folder”, subfolders included.\n\n"
-        "Type a number from 0 to 1, with a point or a comma (0.5 or 0,5); any "
-        "other value is refused when you save. These two numbers apply to "
-        "every mapping."
+        "Share of one folder (%)\n\n"
+        "Works with the minimum number: both conditions have to be true. 50 "
+        "means “more than half of the items already on Proton in that folder”, "
+        "subfolders included.\n\n"
+        "Type a whole number from 0 to 100; any other value is refused when you "
+        "save. These two numbers apply to every mapping."
     ),
 }
 
@@ -2046,7 +2047,14 @@ class MappingEditor(tk.Tk):
         (grab_set), sinon la boîte, transient de la fenêtre principale, s'empile
         SOUS le dialogue (bug constaté dans Configuration)."""
         text = OPTION_HELP.get(help_key) or CONFIG_HELP.get(help_key) or _("(no help)")
-        dlg_info(parent or self, text, title=_("Help — ") + help_key)
+        # Chaque aide commence par son titre lisible, suivi d'une ligne vide :
+        # il devient le titre de la fenêtre (au lieu de la clé interne) et
+        # n'est plus répété en tête du texte.
+        head, sep, body = text.partition("\n\n")
+        if sep and head.strip() and "\n" not in head:
+            dlg_info(parent or self, body, title=_("Help — ") + head.strip())
+        else:
+            dlg_info(parent or self, text, title=_("Help"))
 
     def _update_title(self):
         name = os.path.basename(self.config_path) if self.config_path else _("(new file)")
@@ -4183,7 +4191,7 @@ class MappingEditor(tk.Tk):
             guard_frame.pack(fill="x", pady=(0, 10))
             guard_var = tk.BooleanVar(value=appconfig.mass_delete_guard())
             grow = ttk.Frame(guard_frame); grow.pack(anchor="w", fill="x")
-            ttk.Checkbutton(grow, text=_("Turn on the mass-deletion guard"),
+            ttk.Checkbutton(grow, text=_("Enable the mass-deletion guard"),
                             variable=guard_var).pack(side="left")
             help_btn(grow, "mass-delete-guard")
             gmin_row = ttk.Frame(guard_frame); gmin_row.pack(anchor="w", fill="x", pady=(8, 0))
@@ -4193,8 +4201,10 @@ class MappingEditor(tk.Tk):
             gmin_entry.pack(side="left")
             help_btn(gmin_row, "max-delete-min")
             gratio_row = ttk.Frame(guard_frame); gratio_row.pack(anchor="w", fill="x", pady=(8, 0))
-            ttk.Label(gratio_row, text=_("Share of that folder (0 to 1): ")).pack(side="left")
-            gratio_var = tk.StringVar(value=str(appconfig.max_delete_ratio()))
+            ttk.Label(gratio_row, text=_("Share of one folder (%): ")).pack(side="left")
+            # Saisie en pour cent ; settings.json garde la fraction (0.5).
+            gratio_shown = appconfig.max_delete_percent()
+            gratio_var = tk.StringVar(value=str(gratio_shown))
             gratio_entry = ttk.Entry(gratio_row, textvariable=gratio_var, width=6)
             gratio_entry.pack(side="left")
             help_btn(gratio_row, "max-delete-ratio")
@@ -4576,7 +4586,10 @@ class MappingEditor(tk.Tk):
                 # Garde-fou de masse : seuils déjà validés dans apply().
                 appconfig.set_mass_delete_guard(guard_var.get())
                 appconfig.set_max_delete_min(gmin_var.get())
-                appconfig.set_max_delete_ratio(gratio_var.get())
+                # Pour cent : n'écrit que si la valeur affichée a changé, pour ne
+                # pas arrondir une fraction fine (0.333) à un simple « OK ».
+                if appconfig.parse_percent(gratio_var.get()) != gratio_shown:
+                    appconfig.set_max_delete_percent(gratio_var.get())
                 # Icône de barre des tâches : effet IMMÉDIAT (démarrage à
                 # l'activation ; extinction d'elle-même à la désactivation).
                 appconfig.set_tray_enabled(tray_var.get())
@@ -4677,9 +4690,9 @@ class MappingEditor(tk.Tk):
                     dlg.grab_set()
                     gmin_entry.focus_set()
                     return
-                if appconfig.parse_ratio(gratio_var.get()) is None:
-                    dlg_warning(dlg, _("The share must be a number from 0 to 1 "
-                                       "(0.5 or 0,5)."),
+                if appconfig.parse_percent(gratio_var.get()) is None:
+                    dlg_warning(dlg, _("The share must be a whole number "
+                                       "from 0 to 100."),
                                 title=_("Invalid threshold"))
                     dlg.grab_set()
                     gratio_entry.focus_set()
@@ -5268,7 +5281,7 @@ class MappingEditor(tk.Tk):
             title=_("Mass deletion refused"),
             kind="warning",
             ok_text=_("Allow this run"),
-            cancel_text=_("Keep them"))
+            cancel_text=_("Delete nothing"))
         if not allowed:
             self.run_button.configure(state="normal")
             self.stop_button.configure(state="disabled")

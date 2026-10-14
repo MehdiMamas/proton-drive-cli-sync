@@ -36,7 +36,7 @@ from a deployment):
     except ImportError:
         appconfig = None   # callers fall back to their own built-in defaults
 """
-__version__ = "1.9.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.10.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -553,6 +553,7 @@ def set_mass_delete_guard(value):
     return _put("mass_delete_guard", bool(value))
 
 
+
 def parse_min(value):
     """Nombre entier, 0 ou plus. Retourne l'int, ou None si la valeur est
     illisible ou négative."""
@@ -609,6 +610,36 @@ def set_max_delete_ratio(value):
     if r is None:
         return False
     return _put("max_delete_ratio", r)
+
+
+def parse_percent(value):
+    """Pourcentage saisi dans l'interface : nombre ENTIER de 0 à 100.
+    Retourne l'entier, ou None si la valeur est illisible ou hors [0, 100].
+    settings.json garde la FRACTION (max_delete_ratio) : seule la saisie
+    et l'affichage parlent en pourcentage."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 <= n <= 100 else None
+
+
+def max_delete_percent():
+    """Part du garde-fou exprimée en pourcentage entier, pour l'affichage."""
+    return int(round(max_delete_ratio() * 100))
+
+
+def set_max_delete_percent(value):
+    """False si la valeur est refusée (rien n'est écrit) : l'appelant prévient.
+    Stocke la fraction correspondante (50 -> 0.5)."""
+    n = parse_percent(value)
+    if n is None:
+        return False
+    return _put("max_delete_ratio", n / 100)
 
 
 def resolve_proton_cli():
@@ -696,18 +727,18 @@ def cli_missing_explanation():
         "",
         _("This application does not perform the sync itself: it drives the "
           "official `proton-drive` binary, which you download separately. "
-          "It looks in this order:"),
+          "It looks for it in this order:"),
         "",
         _("  1. the PROTON_DRIVE_CLI environment variable, if set;"),
         _("  2. the “Proton CLI binary path” field in the Configuration window;"),
-        _("  3. {p}, when that file is executable;").format(
+        _("  3. {p}, if that file is executable;").format(
             p=os.path.join(APP_DIR, "proton-drive")),
-        _("  4. `proton-drive` on PATH;"),
-        _("  5. otherwise the path in step 3, so the error can name it."),
+        _("  4. the `proton-drive` command, if it is installed on the system "
+          "(PATH)."),
         "",
-        _("Simplest fix: install the `proton-drive` binary on PATH, or place "
-          "it next to the scripts (step 3). To keep it elsewhere, fill in "
-          "the Configuration field."),
+        _("Simplest fix: place the binary next to the application (step 3), "
+          "or install it on the system (PATH). To keep it elsewhere, fill in "
+          "the Configuration window field."),
         "",
         _("If you change this path AFTER installing the services, reinstall "
           "them: generated systemd units embed the path when created, and "

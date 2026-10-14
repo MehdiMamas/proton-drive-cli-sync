@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.16.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.16.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -2148,14 +2148,16 @@ def delete_orphans(local_dir, remote_folder, remote_items, local_names,
             if t is None:
                 print("  ⚠  [delete-guard] " + _(
                     "refusing to trash in {p}: the size of an orphan folder could "
-                    "not be measured; nothing deleted there. Use "
-                    "--allow-mass-delete for a deliberate cleanup.").format(
+                    "not be measured; nothing deleted there. To empty it on "
+                    "purpose: “▶ Run sync” with “Propagate deletions”, then "
+                    "“Allow this run”.").format(
                         p=remote_folder))
             else:
                 print("  ⚠  [delete-guard] " + _(
                     "refusing to trash {n} of {t} remote item(s) in {p} "
                     "(limit: at least {m} and more than {r:.0%}); nothing deleted there. "
-                    "Use --allow-mass-delete for a deliberate cleanup.").format(
+                    "To empty it on purpose: “▶ Run sync” with “Propagate "
+                    "deletions”, then “Allow this run”.").format(
                         n=n, t=t, p=remote_folder, m=max_min, r=max_ratio))
             # Ligne machine (non traduite, comme @@PROGRESS) : l'éditeur y lit
             # le dossier refusé pour proposer une relance limitée à ce dossier.

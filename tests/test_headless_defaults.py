@@ -315,7 +315,7 @@ def test_editor_clears_settings_move_notice(tmp_path, monkeypatch):
     folder = os.path.join(str(tmp_path / "xdg"), "proton-drive-cli-sync")
     assert str(chosen) in text
     assert "no longer read" in text
-    assert "scripts folder" in text
+    assert "application folder" in text
     assert folder in text
     assert paths.clear_settings_move_notice() is True
     data = json.loads(chosen.read_text(encoding="utf-8"))

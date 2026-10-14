@@ -6,7 +6,7 @@ settings.json beside it, so the NAS never uses the XDG path. This module
 imports neither config nor i18n, so those imports cannot cycle. Nothing here raises: a missing home, a read-only config
 directory, or a failed copy falls back to a path.
 """
-__version__ = "1.0.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.0.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -106,8 +106,8 @@ def settings_move_notice_text():
     folder = os.path.join(xdg_config_home(), SETTINGS_DIR_NAME)
     return _(
         "Settings now live in {path}.\n\n"
-        "The file beside the scripts is no longer read.\n\n"
-        "A backup of the scripts folder no longer includes the configuration. "
+        "The settings file in the application folder is no longer read.\n\n"
+        "A backup of the application folder no longer includes the settings. "
         "Add this folder to your backups: {folder}."
     ).format(path=path, folder=folder)
 

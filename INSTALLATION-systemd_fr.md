@@ -29,18 +29,17 @@ lendemain — aucun blocage, aucune corruption.
 ## Avant de commencer : où placer le binaire du CLI Proton
 
 L'application n'exécute pas la synchro elle-même : elle pilote le binaire officiel
-`proton-drive`, que vous téléchargez séparément. Elle résout le binaire dans
+`proton-drive`, que vous téléchargez séparément. Elle cherche le binaire dans
 cet ordre :
 
 1. la variable d'environnement `PROTON_DRIVE_CLI`, si elle est définie ;
 2. le champ **« Chemin du binaire proton-drive »** de la fenêtre **Configuration**
    du GUI ;
-3. `<dossier des scripts>/proton-drive`, lorsque ce fichier est exécutable ;
-4. `proton-drive` sur le `PATH` ;
-5. sinon le chemin de l'étape 3, pour que l'erreur puisse le nommer.
+3. `<dossier de l'application>/proton-drive`, si ce fichier est exécutable ;
+4. la commande `proton-drive`, si elle est installée sur le système (`PATH`).
 
-**Le plus simple** : installer `proton-drive` sur le `PATH`, ou déposer le
-binaire **à côté des scripts** (étape 3). Pour le garder ailleurs, renseignez
+**Le plus simple** : déposez le binaire **à côté de l'application** (étape 3),
+ou installez-le sur le système (`PATH`). Pour le garder ailleurs, renseignez
 le champ de la fenêtre Configuration.
 
 > **Si vous changez ce chemin APRÈS avoir installé les services**, réinstallez-les
@@ -54,9 +53,9 @@ le champ de la fenêtre Configuration.
 
 Les réglages sont dans `~/.config/proton-drive-cli-sync/settings.json`
 (`$XDG_CONFIG_HOME/proton-drive-cli-sync/settings.json` si cette variable est définie).
-Le fichier `settings.json` à côté des scripts n'est plus lu. S'il est le seul,
+Le fichier `settings.json` du dossier de l'application n'est plus lu. S'il est le seul,
 le premier lancement le copie une fois (mode 0600) et le laisse en place.
-Une sauvegarde du dossier des scripts n'inclut plus la configuration :
+Une sauvegarde du dossier de l'application n'inclut plus les réglages :
 ajoutez aussi `~/.config/proton-drive-cli-sync`, ou `$XDG_CONFIG_HOME/proton-drive-cli-sync`
 si cette variable est définie. L'éditeur le dit une fois, à la première
 ouverture après la copie. `PROTON_SYNC_SETTINGS`, si elle est définie, désigne

@@ -255,6 +255,8 @@ def test_guard_on_refuses_twenty_and_half(fake_drive, local_tree, write_mappings
     assert result.returncode == 5, result.stdout + result.stderr
     assert "[delete-guard]" in result.stdout
     assert "refusing to trash 30 of 30" in result.stdout
+    # The line names the way out in the window, not a command-line flag.
+    assert "“Allow this run”" in result.stdout
     refusal = [line + "\n" for line in result.stdout.splitlines()
                if "refusing to trash" in line]
     show = _editor_lines()
@@ -464,6 +466,24 @@ def test_threshold_setters_accept_a_comma_and_refuse_bad_values():
     assert config.set_max_delete_min("-4") is False
     assert config.max_delete_ratio() == 0.3
     assert config.max_delete_min() == 12
+
+
+def test_configuration_takes_the_share_as_a_whole_percentage():
+    """The window shows and takes a whole percentage; settings.json keeps the
+    fraction the engine reads, so existing files need no conversion."""
+    import config
+    assert config.parse_percent(" 50 ") == 50
+    assert config.parse_percent("0") == 0
+    assert config.parse_percent("100") == 100
+    for bad in ("0,5", "0.5", "50%", "101", "-1", "", "half", True, None):
+        assert config.parse_percent(bad) is None, bad
+
+    assert config.max_delete_percent() == 50            # default 0.5
+    assert config.set_max_delete_percent("30") is True
+    assert config.max_delete_ratio() == 0.3             # stored as a fraction
+    assert config.max_delete_percent() == 30
+    assert config.set_max_delete_percent("0,3") is False  # refused, nothing written
+    assert config.max_delete_ratio() == 0.3
 
 
 def test_kept_excluded_names_do_not_count_toward_the_guard(
