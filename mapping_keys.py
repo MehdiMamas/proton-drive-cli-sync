@@ -1,5 +1,5 @@
 """Pure helpers for mapping dictionaries (no GUI imports, testable without a display)."""
-__version__ = "1.0.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.0.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 # Keys the mapping dialog builds itself on every save. A key in this set that the
 # dialog leaves out was deliberately switched off by the user and must NOT come back.

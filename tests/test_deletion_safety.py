@@ -65,6 +65,19 @@ def test_keep_preserves_mapping_only_exclusion(
     assert not fake_drive.trashed(REMOTE + "/secret.txt")
 
 
+def test_unchecking_keep_prunes_on_next_full_pass(
+        fake_drive, local_tree, write_mappings, engine):
+    src = _upload_secret(local_tree, write_mappings, engine)
+    keep = write_mappings([_mapping(src / "Docs", excluded_remote="keep",
+                                    exclusions=_exclude("secret.txt"))])
+    assert engine(keep, "--delete").returncode == 0
+    assert not fake_drive.trashed(REMOTE + "/secret.txt")
+    prune = write_mappings([_mapping(src / "Docs", exclusions=_exclude("secret.txt"))])
+    result = engine(prune, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.trashed(REMOTE + "/secret.txt")
+
+
 def test_global_only_exclusion_trashed_even_when_keep(
         fake_drive, local_tree, write_mappings, engine):
     src = _upload_secret(local_tree, write_mappings, engine)

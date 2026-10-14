@@ -2403,10 +2403,18 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
     #     des NOUVEAUX uploads, lui, reste immédiat (il ne dépend pas du cache mais
     #     de is_excluded, évalué à chaque passage). Une vraie suppression locale
     #     change le CONTENU de l'empreinte et reste donc propagée normalement.
+    #   Le mode "keep" entre dans l'empreinte : décocher la case doit périmer
+    #   delete_synced comme un changement d'exclusions, sinon la copie gardée
+    #   n'est nettoyée qu'au prochain changement local du dossier. "prune"
+    #   (clé absente) laisse l'empreinte inchangée : pas de re-listage à la mise
+    #   à jour.
+    current_fp = exclusions.fingerprint() if exclusions else None
+    if (delete_opts or {}).get("excluded_remote") == "keep":
+        current_fp = (current_fp or "") + ":keep"
     if realtime and cache is not None:
         excl_fp = cache.cached_excl(local_dir)
     else:
-        excl_fp = exclusions.fingerprint() if exclusions else None
+        excl_fp = current_fp
     signature = (_local_signature(local_dir, remote_folder, excl_fp)
                  if cache is not None else None)
     if delete:
@@ -2526,9 +2534,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
     # note : plus lent pour ce dossier, jamais faux.
     baseline = None
     if cache is not None and not ignore_cache:
-        baseline = cache.file_baseline(
-            local_dir, remote_folder,
-            exclusions.fingerprint() if exclusions else None)
+        baseline = cache.file_baseline(local_dir, remote_folder, current_fp)
     for entry in entries:
         if exclusions and exclusions.is_excluded(entry.name):
             if verbose:

@@ -3388,6 +3388,10 @@ msgid "  ⚠  Unknown excluded_remote value {v!r} — using \"prune\"."
 msgstr ""
 
 msgid ""
-"Keep on Proton the remote copy of names excluded on this mapping. Global "
-"exclusions still remove the remote copy."
+"Keep already-uploaded files and folders on Proton once they are excluded"
+msgstr ""
+
+msgid ""
+"Only this mapping's exclusions are concerned; a global exclusion still "
+"removes the copy on Proton."
 msgstr ""
