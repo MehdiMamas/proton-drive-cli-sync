@@ -518,44 +518,60 @@ def set_mass_delete_guard(value):
     return _put("mass_delete_guard", bool(value))
 
 
-def max_delete_min():
-    """Nombre minimal d'orphelins (dans un dossier) pour armer le garde-fou.
-    Valeur illisible ou négative -> défaut."""
-    v = get("max_delete_min")
-    try:
-        n = int(v)
-    except (TypeError, ValueError):
-        return DEFAULTS["max_delete_min"]
-    return n if n >= 0 else DEFAULTS["max_delete_min"]
-
-
-def set_max_delete_min(value):
+def parse_min(value):
+    """Nombre entier, 0 ou plus. Retourne l'int, ou None si la valeur est
+    illisible ou négative."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
     try:
         n = int(value)
     except (TypeError, ValueError):
-        return False
-    if n < 0:
+        return None
+    return n if n >= 0 else None
+
+
+def max_delete_min():
+    """Nombre minimal d'éléments (dans un dossier) pour armer le garde-fou.
+    Valeur illisible ou négative -> défaut."""
+    n = parse_min(get("max_delete_min"))
+    return DEFAULTS["max_delete_min"] if n is None else n
+
+
+def set_max_delete_min(value):
+    """False si la valeur est refusée (rien n'est écrit) : l'appelant prévient."""
+    n = parse_min(value)
+    if n is None:
         return False
     return _put("max_delete_min", n)
+
+
+def parse_ratio(value):
+    """Part de 0 à 1, virgule décimale acceptée (« 0,5 » comme « 0.5 »).
+    Retourne le float, ou None si la valeur est illisible ou hors [0, 1]."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", ".")
+    try:
+        r = float(value)
+    except (TypeError, ValueError):
+        return None
+    return r if 0.0 <= r <= 1.0 else None
 
 
 def max_delete_ratio():
     """Part (0..1) des enfants distants d'un dossier au-delà de laquelle le
     garde-fou refuse. Valeur illisible ou hors [0, 1] -> défaut."""
-    v = get("max_delete_ratio")
-    try:
-        r = float(v)
-    except (TypeError, ValueError):
-        return DEFAULTS["max_delete_ratio"]
-    return r if 0.0 <= r <= 1.0 else DEFAULTS["max_delete_ratio"]
+    r = parse_ratio(get("max_delete_ratio"))
+    return DEFAULTS["max_delete_ratio"] if r is None else r
 
 
 def set_max_delete_ratio(value):
-    try:
-        r = float(value)
-    except (TypeError, ValueError):
-        return False
-    if not 0.0 <= r <= 1.0:
+    """False si la valeur est refusée (rien n'est écrit) : l'appelant prévient."""
+    r = parse_ratio(value)
+    if r is None:
         return False
     return _put("max_delete_ratio", r)
 

@@ -2016,10 +2016,12 @@ def remote_trash(remote_path, permanent=False, dry_run=False):
     return True
 
 
-def _count_remote_recursive(remote_path):
+def _count_remote_recursive(remote_path, limit=None):
     """Compte récursivement le nombre d'éléments (fichiers + dossiers) sous un
     dossier distant. Sert à journaliser l'ampleur d'une suppression de dossier
-    orphelin. Best-effort : en cas d'erreur, retourne ce qui a pu être compté."""
+    orphelin, et au garde-fou de masse. `limit` : on s'arrête dès que le total
+    l'atteint (le garde-fou n'a pas besoin du compte exact au-delà) ; le
+    résultat vaut alors au moins `limit`."""
     listing = get_remote_listing(remote_path)
     if not listing.ok:
         # Lecture impossible : on NE PEUT PAS annoncer « 0 élément » — ce serait
@@ -2033,11 +2035,55 @@ def _count_remote_recursive(remote_path):
     for name, info in listing.items():
         total += 1
         if info.get("type") == "folder":
-            sub = _count_remote_recursive(remote_path.rstrip("/") + "/" + name)
+            sub = _count_remote_recursive(
+                remote_path.rstrip("/") + "/" + name,
+                None if limit is None else limit - total)
             if sub is None:
                 return None      # une branche non mesurée rend le total faux
             total += sub
+        if limit is not None and total >= limit:
+            break
     return total
+
+
+def _mass_delete_refusal(remote_folder, remote_items, orphans, max_min, max_ratio):
+    """Garde-fou de masse pour UN dossier distant. Retourne None si les
+    suppressions passent, sinon (n, t) : n éléments partiraient à la corbeille
+    sur t présents sous ce dossier sur Proton (t None : non mesuré).
+
+    Un dossier orphelin pèse lui-même PLUS tout ce qu'il contient sur Proton,
+    des deux côtés du ratio : sinon un dossier supprimé localement (200 photos)
+    ne comptait que pour 1 et passait, alors qu'un dossier vidé était arrêté.
+    Un dossier orphelin qu'on ne peut pas mesurer est refusé : on ne sait pas
+    ce qu'il emporterait. Les dossiers conservés ne sont comptés que tant que
+    le total peut encore changer le verdict."""
+    def weight(name, info, limit=None):
+        if info.get("type") != "folder":
+            return 1
+        sub = _count_remote_recursive(remote_folder.rstrip("/") + "/" + name, limit)
+        return None if sub is None else 1 + sub
+
+    n = 0
+    for name, info in orphans:
+        w = weight(name, info)
+        if w is None:
+            return n + 1, None
+        n += w
+    if n == 0 or n < max_min:
+        return None
+    # Refus tant que n / t > ratio, soit t < n / ratio : au-delà, inutile de
+    # compter davantage (un gros dossier voisin n'est pas listé en entier).
+    stop = None if max_ratio <= 0 else int(n / max_ratio) + 1
+    t = n
+    orphan_names = {name for name, _info in orphans}
+    for name, info in remote_items.items():
+        if name in orphan_names:
+            continue
+        w = weight(name, info, None if stop is None else max(stop - t, 1))
+        t += 1 if w is None else w      # non mesuré : compte pour lui seul (prudent)
+        if stop is not None and t >= stop:
+            return None
+    return (n, t) if n / t > max_ratio else None
 
 
 def delete_orphans(local_dir, remote_folder, remote_items, local_names,
@@ -2081,17 +2127,32 @@ def delete_orphans(local_dir, remote_folder, remote_items, local_names,
     # Allumé : trop d'orphelins d'un coup dans CE dossier -> on n'envoie rien à
     # la corbeille ici. Compté dans deletions_refused (code 5), et n_échecs > 0
     # empêche delete_synced : le passage suivant regarde de nouveau.
-    if opts.get("mass_delete_guard") and orphans:
-        n_remote = len(remote_items)
+    # Un dossier autorisé par --allow-mass-delete-in (relance proposée par
+    # l'éditeur après un refus) n'est pas vérifié ; les autres le restent.
+    if (opts.get("mass_delete_guard") and orphans
+            and remote_folder.rstrip("/") not in opts.get("mass_delete_allowed_in", ())):
         max_min = opts.get("max_delete_min", 20)
         max_ratio = opts.get("max_delete_ratio", 0.5)
-        if len(orphans) >= max_min and len(orphans) / n_remote > max_ratio:
-            print("  ⚠  [delete-guard] " + _(
-                "refusing to trash {n} of {t} remote item(s) in {p} "
-                "(limit: at least {m} and more than {r:.0%}); nothing deleted there. "
-                "Use --allow-mass-delete for a deliberate cleanup.").format(
-                    n=len(orphans), t=n_remote, p=remote_folder,
-                    m=max_min, r=max_ratio))
+        refused = _mass_delete_refusal(remote_folder, remote_items, orphans,
+                                       max_min, max_ratio)
+        if refused is not None:
+            n, t = refused
+            if t is None:
+                print("  ⚠  [delete-guard] " + _(
+                    "refusing to trash in {p}: the size of an orphan folder could "
+                    "not be measured; nothing deleted there. Use "
+                    "--allow-mass-delete for a deliberate cleanup.").format(
+                        p=remote_folder))
+            else:
+                print("  ⚠  [delete-guard] " + _(
+                    "refusing to trash {n} of {t} remote item(s) in {p} "
+                    "(limit: at least {m} and more than {r:.0%}); nothing deleted there. "
+                    "Use --allow-mass-delete for a deliberate cleanup.").format(
+                        n=n, t=t, p=remote_folder, m=max_min, r=max_ratio))
+            # Ligne machine (non traduite, comme @@PROGRESS) : l'éditeur y lit
+            # le dossier refusé pour proposer une relance limitée à ce dossier.
+            print(f"@@DELETE-GUARD\t{n}\t{'' if t is None else t}\t"
+                  f"{remote_folder.rstrip('/')}", flush=True)
             _RUN.add("deletions_refused")
             return 0, len(orphans)
 
@@ -2147,9 +2208,10 @@ def build_delete_opts(mapping, guard_path, global_ex=None, allow_mass_delete=Fal
     exclusions globales sont transmises à part : un nom qu'elles couvrent est
     toujours envoyé à la corbeille. Une valeur inconnue vaut "prune" et prévient.
 
-    Garde-fou de masse (`mass_delete_guard`) : éteint par défaut, ou coupé
-    pour ce passage par --allow-mass-delete. Seuils de mapping illisibles ->
-    réglage global -> défaut.
+    Garde-fou de masse (`mass_delete_guard`) : éteint par défaut. Seuils
+    globaux seulement (Configuration). `allow_mass_delete` : True le coupe pour
+    tout le passage (--allow-mass-delete) ; un ensemble de dossiers distants le
+    coupe pour ces dossiers seulement (--allow-mass-delete-in).
     """
     source_kind = mapping.get("source_kind")
     cache_state = {"ok_until": 0.0}
@@ -2176,21 +2238,14 @@ def build_delete_opts(mapping, guard_path, global_ex=None, allow_mass_delete=Fal
         "global_exclusions": global_ex if global_ex is not None else Exclusions(),
         "mass_delete_guard": False,
     }
-    if allow_mass_delete or not _HAS_CONFIG or not appconfig.mass_delete_guard():
+    if allow_mass_delete is True or not _HAS_CONFIG or not appconfig.mass_delete_guard():
         return opts
-    max_min = appconfig.max_delete_min()
-    max_ratio = appconfig.max_delete_ratio()
-    raw_min = mapping.get("max_delete_min")
-    if isinstance(raw_min, int) and not isinstance(raw_min, bool) and raw_min >= 0:
-        max_min = raw_min
-    raw_ratio = mapping.get("max_delete_ratio")
-    if (isinstance(raw_ratio, (int, float)) and not isinstance(raw_ratio, bool)
-            and 0.0 <= float(raw_ratio) <= 1.0):
-        max_ratio = float(raw_ratio)
     opts.update({
         "mass_delete_guard": True,
-        "max_delete_min": max_min,
-        "max_delete_ratio": max_ratio,
+        "max_delete_min": appconfig.max_delete_min(),
+        "max_delete_ratio": appconfig.max_delete_ratio(),
+        "mass_delete_allowed_in": frozenset(
+            p.rstrip("/") for p in (allow_mass_delete or ())),
     })
     return opts
 
@@ -3140,6 +3195,13 @@ def main():
              "Sans effet si le garde-fou est éteint, et sans effet sans --delete.",
     )
     parser.add_argument(
+        "--allow-mass-delete-in", action="append", metavar="DOSSIER_DISTANT",
+        help="Comme --allow-mass-delete, mais pour CE dossier distant seulement "
+             "(chemin Proton, tel qu'affiché par [delete-guard]) ; répétable. "
+             "Les autres dossiers restent sous le garde-fou. C'est ce que passe "
+             "l'éditeur quand vous autorisez la relance après un refus.",
+    )
+    parser.add_argument(
         "--subpath", metavar="CHEMIN",
         help="Mode TEMPS RÉEL : synchronise uniquement ce sous-dossier (et son "
              "sous-arbre) au lieu de tous les mappings. Nécessite --mapping-source "
@@ -3226,6 +3288,9 @@ def main():
              "tient le verrou.",
     )
     args = parser.parse_args()
+    # True : garde-fou coupé partout ; sinon les dossiers distants autorisés.
+    allow_mass = (True if args.allow_mass_delete
+                  else frozenset(args.allow_mass_delete_in or ()))
 
     # --wipe-remote n'a de sens qu'avec --reset-source (il vide le distant AVANT la
     # reconstruction). Le refuser seul évite un effacement distant hors du cadre
@@ -3557,7 +3622,7 @@ def main():
                      cache=cache, ignore_cache=args.ignore_cache, exclusions=eff_ex,
                      delete=args.delete, rename_ext=effective_rename_ext,
                      collision_suffix=effective_collision_suffix,
-                     global_ex=global_ex, allow_mass_delete=args.allow_mass_delete)
+                     global_ex=global_ex, allow_mass_delete=allow_mass)
         cache.save()
         if result == "cold":
             # Sous-dossier froid : rien n'a été traité, la planification prendra
@@ -3640,7 +3705,7 @@ def main():
                                 delete=args.delete, rename_ext=effective_rename_ext,
                                 collision_suffix=effective_collision_suffix,
                                 global_ex=global_ex,
-                                allow_mass_delete=args.allow_mass_delete)
+                                allow_mass_delete=allow_mass)
             if complete:
                 _RUN.add("mappings_complete")
             health.append((m["source"], bool(complete), _take_unreadable()))
