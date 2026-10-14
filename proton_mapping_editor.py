@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.30.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.31.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -645,7 +645,13 @@ OPTION_HELP = {
         "tag).\n\n"
         "SLOWER: reads every file in full. Also ignores the cache.\n"
         "Run it once after updating from an older version, then keep it for "
-        "an occasional check (e.g. once a month), not for daily use."
+        "an occasional check (e.g. once a month), not for daily use.\n\n"
+        "In the mapping table, the “Ready” column shows ✅✅ once a mapping's "
+        "content has been checked by SHA1; select its row to see the date in "
+        "the status bar. A new mapping gets it after its first pass, which "
+        "already compares the content. A single ✅ means no check is on "
+        "record: on a mapping created before version 1.17.0, run this option "
+        "once to be sure that every file on Proton matches."
     ),
     "verbose": _(
         "Detailed mode\n\n"
@@ -1108,7 +1114,10 @@ def mapping_remote_path(dest_parent, source):
 # --- editor output filter (no Tk) ---
 _EDITOR_STATUS_PREFIXES = ("===", "▶", "⏸", "✓", "✗", "❌", "⚠", "🔑", "🌱", "⟳",
                            "♻", "🗑", "⛔", "📂", "==", "Terminé", "Done", "Erreur",
-                           "Error", "Cache", "Global", "▶ Mapping", "  ↪")
+                           "Error", "Cache", "Global", "▶ Mapping", "  ↪",
+                           # 🔍 : en-tête d'une vérification SHA1 (passage long)
+                           # et reprise des vérifications d'après les journaux.
+                           "🔍")
 
 _EDITOR_FAILURE_COUNTERS = (
     "files_failed",
@@ -1992,6 +2001,7 @@ class MappingEditor(tk.Tk):
         vsb.pack(side="right", fill="y")
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<Double-1>", lambda e: self.on_edit_mapping())
+        self.tree.bind("<<TreeviewSelect>>", self._on_mapping_select)
         self.tree.bind("<Control-a>", self._select_all_rows)
         self.tree.bind("<Control-A>", self._select_all_rows)
         paned.add(tree_frame, minsize=96, stretch="always")
@@ -2084,7 +2094,8 @@ class MappingEditor(tk.Tk):
         # (deux capitales), toujours >= la largeur rendue d'un seul glyphe.
         GLYPH = cfont.measure("MM")
 
-        def fit(col, samples, header_is_glyph=False, values_are_glyph=False):
+        def fit(col, samples, header_is_glyph=False, values_are_glyph=False,
+                glyph_count=1):
             """Largeur = max(en-tête, échantillons TEXTE, réserve glyphe).
             `samples` ne doit contenir que du texte garanti sans emoji.
             header_is_glyph / values_are_glyph : réservent GLYPH au lieu de
@@ -2095,14 +2106,15 @@ class MappingEditor(tk.Tk):
             else:
                 w = max(w, hfont.measure(self.tree.heading(col)["text"]))
             if values_are_glyph:
-                w = max(w, GLYPH)   # valeurs emoji : jamais mesurées
+                # valeurs emoji : jamais mesurées ; « ✅✅ » en compte deux.
+                w = max(w, GLYPH * glyph_count)
             for s in samples:
                 if s:
                     w = max(w, cfont.measure(s))
             self.tree.column(col, width=w + PAD, stretch=False)
 
         # Prêt : en-tête texte traduit (mesuré), valeurs = glyphes (proxy).
-        fit("state", [], values_are_glyph=True)
+        fit("state", [], values_are_glyph=True, glyph_count=2)
         # Type : en-tête + valeurs = texte traduit, mesuré normalement.
         fit("type",  [_("Folder"), _("File")])
         # Corbeille : en-tête ET valeurs = glyphes (aucune mesure d'emoji).
@@ -2285,10 +2297,42 @@ class MappingEditor(tk.Tk):
         except Exception:
             return False
 
+    def _sha1_verified_at(self, mapping, cache_data=None):
+        """Horodatage de la dernière vérification SHA1 notée par le moteur pour
+        ce mapping (clé __meta__/sha1_verified du cache), ou None."""
+        data = cache_data if cache_data is not None else self._read_cache_data()
+        meta = data.get("__meta__")
+        verified = meta.get("sha1_verified") if isinstance(meta, dict) else None
+        if not isinstance(verified, dict):
+            return None
+        when = verified.get(os.path.normpath(mapping.get("source", "")))
+        return when if isinstance(when, (int, float)) else None
+
+    def _on_mapping_select(self, _event=None):
+        """Une seule ligne choisie : dire dans la barre d'état si son contenu a
+        été vérifié par SHA1, et quand. Rien pour un mapping pas encore prêt
+        (⏳) ni pour un mapping de type fichier (—)."""
+        sel = self.tree.selection()
+        if len(sel) != 1:
+            return
+        try:
+            m = self.mappings[int(sel[0])]
+        except (ValueError, IndexError):
+            return
+        data = self._read_cache_data()
+        symbol = self._mapping_state_symbol(m, data)
+        if symbol == "✅✅":
+            when = self._sha1_verified_at(m, data)
+            self.status.set(_("Content checked by SHA1 on {date}.").format(
+                date=time.strftime("%Y-%m-%d %H:%M", time.localtime(when))))
+        elif symbol == "✅":
+            self.status.set(_("No SHA1 content check on record for this mapping."))
+
     def _mapping_state_symbol(self, mapping, cache_data=None):
         """✅ si le mapping est PRÊT pour le temps réel (racine subtree_complete ET
-        empreinte d'exclusions courante == celle stockée), sinon ⏳. Les mappings de
-        type 'file' n'ont pas d'arbre à analyser -> pas d'indicateur (—)."""
+        empreinte d'exclusions courante == celle stockée), sinon ⏳ ; ✅✅ quand,
+        en plus, son contenu a été vérifié par SHA1 (noté par le moteur). Les
+        mappings de type 'file' n'ont pas d'arbre à analyser -> pas d'indicateur (—)."""
         if mapping.get("type") != "folder":
             return "—"
         data = cache_data if cache_data is not None else self._read_cache_data()
@@ -2299,7 +2343,9 @@ class MappingEditor(tk.Tk):
         # (b) l'empreinte d'exclusions courante correspond-elle à celle consolidée ?
         sig = entry.get("sig")
         cached_fp = sig.get("excl") if isinstance(sig, dict) else None
-        return "✅" if self._effective_excl_fingerprint(mapping) == cached_fp else "⏳"
+        if self._effective_excl_fingerprint(mapping) != cached_fp:
+            return "⏳"
+        return "✅✅" if self._sha1_verified_at(mapping, data) is not None else "✅"
 
     def _refresh_state_column(self):
         """Recalcule et met à jour la seule colonne d'état de chaque ligne (léger :
@@ -3147,7 +3193,7 @@ class MappingEditor(tk.Tk):
         old_mirror = bool(old.get("allow_delete"))
         # Le mapping est-il DÉJÀ amorcé (prêt pour le temps réel) ?
         was_primed = (old.get("type") == "folder"
-                      and self._mapping_state_symbol(old) == "✅")
+                      and self._mapping_state_symbol(old) in ("✅", "✅✅"))
 
         updated = self._mapping_dialog(old["type"], mapping=old)
         if updated is None:
@@ -5366,6 +5412,11 @@ class MappingEditor(tk.Tk):
             refused = []
         finally:
             self.sync_process = None
+            # La colonne « Prêt » tout de suite, sans attendre le rafraîchissement
+            # périodique (30 s) : un passage a pu amorcer un mapping (⏳ → ✅) ou
+            # noter une vérification SHA1 (✅ → ✅✅). Constaté en production :
+            # ~20 s d'attente après la fin du passage.
+            self._ui(self._refresh_state_column)
             # Pas d'offre pour un dry-run, ni pour la relance déjà autorisée.
             offer = (refused and offer_mass_delete
                      and "--dry-run" not in cmd

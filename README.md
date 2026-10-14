@@ -313,7 +313,7 @@ So the SHA1 is computed only for files whose date changed while their size did n
 
 `--verify-hash` extends the SHA1 comparison to **all** files of equal size, without trusting the last pass — the only way to catch a change that kept both the size and the date (a rewritten music tag, for instance; equivalent of robocopy's monthly `/MIR /IS`). It reads every file in full and bypasses the cache: reserve it for a periodic check, not daily use. Reading stays much shorter than listing the remote folders (in the order of 100 MiB/s from a NAS over gigabit).
 
-⚠ **After updating from a version older than v1.17.0, run one `--verify-hash` pass over all mappings** (in the interface: "SHA1 check" ticked, "Test (dry-run)" unticked). Earlier versions stopped at the size: a file modified at equal size was not sent, and its folder was still recorded in the cache as synced. Those stale copies stay on Proton until the file changes again; only this pass finds them.
+⚠ **After updating from a version older than v1.17.0, run one `--verify-hash` pass over all mappings** (in the interface: "SHA1 check" ticked, "Test (dry-run)" unticked). Earlier versions stopped at the size: a file modified at equal size was not sent, and its folder was still recorded in the cache as synced. Those stale copies stay on Proton until the file changes again; only this pass finds them. Once it has run, the mapping shows ✅✅ in the "Ready" column; a single ✅ on an older mapping means no such check is on record.
 
 ### Local cache (major optimization)
 
@@ -578,6 +578,7 @@ With no selection, priming covers all mappings. Multiple selection is done with 
 The mappings table shows a status column:
 
 - **✅**: folder mapping ready for real-time (root `subtree_complete` AND current exclusion fingerprint identical to the one stored in the cache);
+- **✅✅**: ready, and its content has been checked by SHA1 (selecting the row shows the date in the status bar). The engine notes it when a full pass ends the mapping without failure after comparing its content at equal size: a "SHA1 check" pass, a `--ignore-cache` pass (command line), or the first pass of a mapping the cache did not know yet. Checks made before this note existed are taken once from the window's logs (`logs/`, passes from October 3, 2026 on, finished without failure). It is only shown, the engine's decisions do not depend on it;
 - **⏳**: to be primed (never analyzed, OR exclusions changed since consolidation — see below);
 - **—**: file-type mapping (no tree to analyze, handled directly in real-time, no priming needed).
 

@@ -315,7 +315,7 @@ Le SHA1 ne se calcule donc que pour les fichiers dont la date a changé sans que
 
 `--verify-hash` étend la comparaison SHA1 à **tous** les fichiers de même taille, sans se fier au dernier passage — le seul moyen de repérer une modification qui a conservé la taille et la date (un tag musical réécrit, par exemple ; équivalent du `/MIR /IS` mensuel de robocopy). Il lit chaque fichier en entier et ignore le cache : à réserver à une vérification périodique, pas au quotidien. La lecture reste bien plus courte que le listing des dossiers distants (de l'ordre de 100 Mio/s depuis un NAS en gigabit).
 
-⚠ **Après une mise à jour depuis une version antérieure à la v1.17.0, lancer une fois un passage `--verify-hash` sur l'ensemble des mappings** (dans l'interface : case « Vérif. SHA1 » cochée, « Test (dry-run) » décochée). Les versions précédentes s'arrêtaient à la taille : un fichier modifié à taille égale n'était pas envoyé, et son dossier était quand même inscrit au cache comme synchronisé. Ces copies périmées restent sur Proton tant que le fichier ne change pas de nouveau ; seul ce passage les retrouve.
+⚠ **Après une mise à jour depuis une version antérieure à la v1.17.0, lancer une fois un passage `--verify-hash` sur l'ensemble des mappings** (dans l'interface : case « Vérif. SHA1 » cochée, « Test (dry-run) » décochée). Les versions précédentes s'arrêtaient à la taille : un fichier modifié à taille égale n'était pas envoyé, et son dossier était quand même inscrit au cache comme synchronisé. Ces copies périmées restent sur Proton tant que le fichier ne change pas de nouveau ; seul ce passage les retrouve. Une fois ce passage fait, le mapping affiche ✅✅ dans la colonne « Prêt » ; un ✅ simple sur un ancien mapping veut dire qu'aucune vérification de ce genre n'est notée.
 
 ### Cache local (optimisation majeure)
 
@@ -583,6 +583,7 @@ Sans sélection, l'amorçage porte sur tous les mappings. La sélection multiple
 Le tableau des mappings affiche une colonne d'état :
 
 - **✅** : mapping dossier prêt pour le temps réel (racine `subtree_complete` ET empreinte d'exclusions courante identique à celle stockée dans le cache) ;
+- **✅✅** : prêt, et son contenu a été vérifié par SHA1 (sélectionner la ligne affiche la date dans la barre d'état). Le moteur le note quand un passage complet termine le mapping sans échec après en avoir comparé le contenu à taille égale : un passage « Vérif. SHA1 », un passage `--ignore-cache` (ligne de commande), ou le premier passage d'un mapping que le cache ne connaissait pas encore. Les vérifications faites avant que cette note existe sont reprises une fois dans les journaux de la fenêtre (`logs/`, passages du 3 octobre 2026 ou après, terminés sans échec). C'est un affichage seulement : les décisions du moteur n'en dépendent pas ;
 - **⏳** : à amorcer (jamais analysé, OU exclusions changées depuis la consolidation — voir ci-dessous) ;
 - **—** : mapping de type fichier (pas d'arbre à analyser, géré directement en temps réel, aucun amorçage requis).
 

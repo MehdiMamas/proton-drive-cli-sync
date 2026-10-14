@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.17.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.18.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -555,7 +555,9 @@ class Cache:
             if nk == base or (nk + "/").startswith(prefix):
                 del self.data[k]
                 removed += 1
-        if removed:
+        if self.clear_sha1_verified(base):
+            self.dirty = True
+        if removed or self.dirty:
             self.dirty = True
             self.save()
         return removed
@@ -567,6 +569,77 @@ class Cache:
         cache jamais estampillé — anciens caches, ou compte inconnu)."""
         m = self.data.get(self.META_KEY)
         return m.get("account") if isinstance(m, dict) else None
+
+    # ── Vérification SHA1 par mapping ────────────────────────────────────
+    # Rangée dans __meta__, pas dans l'entrée du dossier : update() reconstruit
+    # l'entrée d'un dossier avec ses seuls champs, une donnée de plus y serait
+    # perdue au premier passage. __meta__ n'est jamais touchée par update() ;
+    # elle est vidée au changement de compte (cache jeté), et purge_subtree()
+    # retire la date du mapping réinitialisé.
+    #
+    # Sens : « le contenu de ce mapping a été comparé par SHA1 avec un moteur
+    # corrigé (taille égale) ». Ne sert qu'à l'affichage (✅✅) — aucune
+    # décision d'envoi n'en dépend.
+
+    def _meta(self, create=False):
+        m = self.data.get(self.META_KEY)
+        if not isinstance(m, dict):
+            if not create:
+                return {}
+            m = {}
+            self.data[self.META_KEY] = m
+        return m
+
+    def sha1_verified(self):
+        """{source normalisée: horodatage} des mappings vérifiés."""
+        v = self._meta().get("sha1_verified")
+        return dict(v) if isinstance(v, dict) else {}
+
+    def mark_sha1_verified(self, source, when):
+        m = self._meta(create=True)
+        v = m.get("sha1_verified")
+        if not isinstance(v, dict):
+            v = {}
+            m["sha1_verified"] = v
+        key = os.path.normpath(source)
+        if v.get(key) != when:
+            v[key] = when
+            self.dirty = True
+
+    def clear_sha1_verified(self, source):
+        """Retire la date d'un mapping. True si quelque chose a changé."""
+        v = self._meta().get("sha1_verified")
+        key = os.path.normpath(source)
+        if isinstance(v, dict) and key in v:
+            del v[key]
+            return True
+        return False
+
+    def has_entries_under(self, local_dir):
+        """True si le cache connaît `local_dir` ou un dossier situé dessous."""
+        base = os.path.normpath(local_dir)
+        prefix = base.rstrip("/") + "/"
+        for k in self.data:
+            if k == self.META_KEY:
+                continue
+            nk = os.path.normpath(k)
+            if nk == base or (nk + "/").startswith(prefix):
+                return True
+        return False
+
+    # Valeur du drapeau « journaux lus ». Un ENTIER, pas un booléen : un essai
+    # en production a écrit True avec une lecture limitée aux mappings du
+    # passage (défaut corrigé) ; la valeur 2 fait relire une fois ces caches-là.
+    SHA1_LOGS_READ = 2
+
+    def sha1_logs_read(self):
+        return self._meta().get("sha1_logs_read") == self.SHA1_LOGS_READ
+
+    def set_sha1_logs_read(self):
+        m = self._meta(create=True)
+        if m.get("sha1_logs_read") != self.SHA1_LOGS_READ:
+            m["sha1_logs_read"] = self.SHA1_LOGS_READ
+            self.dirty = True
 
     def set_account(self, email):
         """Estampille le cache avec l'adresse du compte connecté."""
@@ -3111,6 +3184,100 @@ def _summary_line():
              "mappings {mappings_complete}/{mappings_total}.").format(**_RUN.to_dict())
 
 
+# ── Reprise des vérifications SHA1 déjà faites, d'après les journaux ─────────
+# Une seule fois par cache. Avant la v1.19, une vérification SHA1 ne laissait
+# aucune trace dans le cache : la preuve n'existe que dans les journaux que
+# l'interface écrit (APP_DIR/logs/sync-AAAAMMJJ-HHMM.log). Un passage compte si :
+#   - il date du jour où le moteur corrigé (taille égale) a tourné pour la
+#     première fois, ou après — un passage plus ancien a été fait avec un
+#     moteur qui concluait « inchangé » à taille égale ;
+#   - sa première ligne porte [verify-hash ou ignore-cache (les deux comparent
+#     le contenu à taille égale) ;
+#   - il parle de CE cache (ligne « Cache : …/<nom>.cache ») ;
+#   - il est allé au bout (« Done. » dans l'une des six langues), sans ligne ❌,
+#     et sa ligne [run-result], quand elle existe, dit exit 0.
+# Chaque mapping qui y a sa ligne « ▶ … i/n : <source>  =>  … » est noté
+# vérifié à la date du journal.
+SHA1_LOG_MIN_DATE = "20261003"
+_DONE_WORDS = {"Done.", "Terminé.", "Fertig.", "Hecho.", "Fatto.", "Concluído."}
+_LOG_NAME_RE = re.compile(r"^sync-(\d{8})-(\d{4})\.log$")
+_MAPPING_LINE_RE = re.compile(r"^▶ \S+ \d+/\d+ : (.+?)  =>  ")
+
+
+def _sha1_log_verdict(path, cache_basename):
+    """Sources vérifiées par ce journal (set), ou None s'il ne compte pas."""
+    try:
+        fh = open(path, "r", encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    sources, done, first, cache_ok, n = set(), False, None, False, 0
+    run_exit = None
+    with fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            n += 1
+            stripped = line.strip()
+            if first is None and stripped:
+                first = stripped
+                # « DRY-RUN » n'est traduit dans aucune langue : un essai à
+                # blanc ne vérifie rien sur Proton.
+                if "DRY-RUN" in first or not ("[verify-hash" in first
+                                              or "ignore-cache" in first):
+                    return None
+                continue
+            if n <= 12 and cache_basename and stripped.endswith(")") \
+                    and ("/" + cache_basename + " (") in stripped:
+                cache_ok = True
+            if "❌" in line:
+                return None
+            m = _MAPPING_LINE_RE.match(stripped)
+            if m:
+                sources.add(os.path.normpath(m.group(1)))
+                continue
+            if stripped in _DONE_WORDS:
+                done = True
+            elif stripped.startswith("[run-result] "):
+                try:
+                    run_exit = json.loads(stripped[len("[run-result] "):]).get("exit")
+                except (ValueError, AttributeError):
+                    run_exit = -1
+    if not (first and cache_ok and done and sources):
+        return None
+    if run_exit is not None and run_exit != 0:
+        return None
+    return sources
+
+
+def import_sha1_from_logs(cache, cache_basename, mappings, log_dir):
+    """Note dans le cache les mappings déjà vérifiés d'après les journaux,
+    puis retient que la lecture est faite. Retourne le nombre de mappings
+    notés. Ne lève jamais : un journal illisible est simplement ignoré."""
+    folders = {os.path.normpath(m.get("source", "")) for m in mappings
+               if m.get("type") == "folder"}
+    marked = set()
+    try:
+        names = sorted(os.listdir(log_dir))
+    except OSError:
+        names = []
+    for name in names:
+        mt = _LOG_NAME_RE.match(name)
+        if not mt or mt.group(1) < SHA1_LOG_MIN_DATE:
+            continue
+        sources = _sha1_log_verdict(os.path.join(log_dir, name), cache_basename)
+        if not sources:
+            continue
+        try:
+            when = time.mktime(time.strptime(mt.group(1) + mt.group(2), "%Y%m%d%H%M"))
+        except (ValueError, OverflowError):
+            continue
+        for src in sources & folders:
+            # Journaux triés par nom, donc par date : le plus récent l'emporte.
+            cache.mark_sha1_verified(src, when)
+            marked.add(src)
+    cache.set_sha1_logs_read()
+    return len(marked)
+
+
 def _emit_run_result(exit_code, mode):
     """Dernière ligne du passage. Non traduite : le consommateur la parse."""
     payload = {"exit": exit_code, "mode": mode}
@@ -3443,6 +3610,10 @@ def main():
         _finish_pass(2, _pass_mode(args), args.dry_run, completed=False)
 
     mappings, global_ex = load_config(args.config)
+    # Liste COMPLÈTE, avant toute restriction (--only-source, --reset-source) :
+    # la reprise des vérifications d'après les journaux porte sur tous les
+    # mappings du fichier, pas seulement sur ceux de ce passage.
+    all_mappings = list(mappings)
 
     # Le cache est indexé par le nom du fichier de mappings (sans son chemin).
     # Comme ça, déplacer le JSON ne casse pas le cache.
@@ -3473,7 +3644,10 @@ def main():
                   "({a} → {b}) — the previous cache is discarded and will be "
                   "rebuilt for the new account.").format(
                   a=stamped_account, b=current_account))
-            cache.data = {Cache.META_KEY: {"account": current_account}}
+            # Les journaux de vérification parlent de l'ANCIEN compte : on ne
+            # les relira pas pour ce cache-ci (sha1_logs_read).
+            cache.data = {Cache.META_KEY: {"account": current_account,
+                                           "sha1_logs_read": Cache.SHA1_LOGS_READ}}
             cache.dirty = True
         else:
             print("⚠ [account-changed] " + _("The connected Proton account has "
@@ -3569,7 +3743,12 @@ def main():
 
     n_known = sum(1 for k in cache.data if k != Cache.META_KEY)
     print(_("   Cache: {p} ({n} known folder(s))").format(p=cache_path, n=n_known))
-    if n_known > 0 and not args.ignore_cache and not args.dry_run and not args.reset_source:
+    if args.verify_hash and not args.dry_run:
+        # En vérification SHA1, aucun dossier n'est sauté : annoncer un passage
+        # long plutôt que la « reprise » rassurante d'un passage ordinaire.
+        print(_("   🔍 SHA1 check: every folder is examined again and every "
+                "file of the same size is read in full — a long pass."))
+    elif n_known > 0 and not args.ignore_cache and not args.dry_run and not args.reset_source:
         # Cache déjà peuplé : rassurer que le travail enregistré ne sera pas refait
         # (le moteur SAUTE les dossiers connus/inchangés — il ne reprend pas à un
         # curseur). Couvre notamment le cas d'une coupure de courant, où le message
@@ -3716,12 +3895,36 @@ def main():
     _take_unreadable()   # repart d'une ardoise propre pour le 1er mapping
     _RUN.mappings_total = len(mappings)
 
+    # Reprise, une seule fois par cache, des vérifications SHA1 attestées par
+    # les journaux de l'interface (voir import_sha1_from_logs). Seulement dans
+    # un vrai passage complet : jamais en essai à blanc, ni en temps réel
+    # (--subpath, traité plus haut).
+    if not args.dry_run and not cache.sha1_logs_read():
+        _n_logs = import_sha1_from_logs(
+            cache, os.path.basename(cache_path), all_mappings,
+            os.path.join(appconfig.APP_DIR if _HAS_CONFIG
+                         else os.path.dirname(os.path.abspath(__file__)), "logs"))
+        if _n_logs:
+            print(_("   🔍 {n} mapping(s) already checked by SHA1, according to "
+                    "earlier logs.").format(n=_n_logs))
+        cache.save()
+
     for i, m in enumerate(mappings, 1):
         # En-tête par mapping : indique l'entrée en cours (source => destination).
         # Rétabli ici — la boucle normale ne l'affichait plus, contrairement au
         # mode --subpath (qui imprime « Mapping : ... »). Le compteur i/n aide à
         # suivre la progression sur un long passage.
-        print(_("\n▶ Mapping {i}/{n} : {s}  =>  {d}").format(i=i, n=len(mappings), s=m["source"], d=m["dest_parent"]))
+        # En vérification SHA1, la mention est AJOUTÉE après la ligne d'origine,
+        # sans la changer : la lecture des journaux s'appuie sur sa forme.
+        _head = _("\n▶ Mapping {i}/{n} : {s}  =>  {d}").format(
+            i=i, n=len(mappings), s=m["source"], d=m["dest_parent"])
+        if args.verify_hash:
+            _head += _("  — SHA1 check of all content")
+        print(_head)
+        # Mapping neuf ou réinitialisé : aucune note dans le cache, donc le
+        # premier passage compare déjà par SHA1 à taille égale.
+        _fresh = (m.get("type") == "folder" and not args.dry_run
+                  and not cache.has_entries_under(m["source"]))
         if not os.path.exists(m["source"]):
             print(_("  ❌ Source not found, skipped: {s}").format(s=m["source"]))
             _RUN.add("sources_missing")
@@ -3742,6 +3945,8 @@ def main():
                                 allow_mass_delete=allow_mass)
             if complete:
                 _RUN.add("mappings_complete")
+                if not args.dry_run and (args.verify_hash or args.ignore_cache or _fresh):
+                    cache.mark_sha1_verified(m["source"], time.time())
             health.append((m["source"], bool(complete), _take_unreadable()))
         else:
             file_ok = sync_file(m["source"], m["dest_parent"], dry_run=args.dry_run, verbose=args.verbose,

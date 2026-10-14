@@ -3333,7 +3333,14 @@ msgid ""
 "\n"
 "SLOWER: reads every file in full. Also ignores the cache.\n"
 "Run it once after updating from an older version, then keep it for an "
-"occasional check (e.g. once a month), not for daily use."
+"occasional check (e.g. once a month), not for daily use.\n"
+"\n"
+"In the mapping table, the “Ready” column shows ✅✅ once a mapping's content "
+"has been checked by SHA1; select its row to see the date in the status bar. "
+"A new mapping gets it after its first pass, which already compares the "
+"content. A single ✅ means no check is on record: on a mapping created "
+"before version 1.17.0, run this option once to be sure that every file on "
+"Proton matches."
 msgstr ""
 
 msgid ""
@@ -3593,4 +3600,22 @@ msgid ""
 msgstr ""
 
 msgid "{name}, at {time}"
+msgstr ""
+
+msgid ""
+"   🔍 SHA1 check: every folder is examined again and every file of the same "
+"size is read in full — a long pass."
+msgstr ""
+
+msgid "  — SHA1 check of all content"
+msgstr ""
+
+msgid ""
+"   🔍 {n} mapping(s) already checked by SHA1, according to earlier logs."
+msgstr ""
+
+msgid "Content checked by SHA1 on {date}."
+msgstr ""
+
+msgid "No SHA1 content check on record for this mapping."
 msgstr ""
