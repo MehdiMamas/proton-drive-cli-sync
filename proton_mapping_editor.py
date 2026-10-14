@@ -12,11 +12,12 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.27.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.27.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
 import queue
+import re
 import sys
 import socket
 import threading
@@ -2362,13 +2363,20 @@ class MappingEditor(tk.Tk):
         m_type = mapping["type"] if is_edit else kind
 
         dlg = tk.Toplevel(self)
+        # Règle « fenêtres sans saut » : le dialogue est construit CACHÉ, puis
+        # affiché une seule fois, taille ET position posées ensemble (voir
+        # show_dialog en fin de méthode). Affiché d'emblée, il était peint à
+        # moitié construit, puis redimensionné une fois visible — et le
+        # gestionnaire de fenêtres (Cinnamon) le replaçait alors dans le coin.
+        dlg.withdraw()
         dlg.title(_("Edit mapping") if is_edit else
                   (_("Add a folder") if m_type == "folder" else _("Add a file")))
-        dlg.geometry("680x560")
         dlg.minsize(620, 520)
         dlg.transient(self)
-        _safe_grab(dlg)
-        dlg_height = [560]   # agrandie par fit_height() si le contenu dépasse
+        # Taille suivie ici : winfo_width()/winfo_height() valent 1 tant que la
+        # fenêtre est cachée. 680 × 560 = taille d'origine ; fit_height() ne fait
+        # que l'agrandir.
+        dlg_size = [680, 560]
 
         result = {"value": None}
 
@@ -2667,19 +2675,37 @@ class MappingEditor(tk.Tk):
             fit_height()
 
         def fit_height():
-            """Agrandit le dialogue quand son contenu dépasse les 560 px de
-            départ (note « Partagé avec moi » sur plusieurs lignes : le Mode et
-            le type de source passaient sous les boutons). Jamais au-delà de
-            l'écran, jamais de réduction : l'utilisateur garde sa taille."""
-            # winfo_height() vaut 1 tant que la fenêtre n'est pas affichée :
-            # la hauteur courante est suivie ici, pas lue sur la fenêtre.
+            """Agrandit le dialogue quand son contenu dépasse la hauteur courante
+            (note « Partagé avec moi » sur plusieurs lignes : le Mode et le type
+            de source passaient sous les boutons). Plafond : 90 % de l'écran.
+            Jamais de réduction : l'utilisateur garde sa taille.
+
+            Fenêtre encore cachée (construction) : on ne fait que NOTER la
+            taille, show_dialog() la posera avec la position. Fenêtre déjà
+            affichée (la note apparaît quand on change la destination) : on
+            agrandit SANS déplacer — la position courante est reprise dans la
+            même géométrie, sinon le gestionnaire de fenêtres replace la
+            fenêtre."""
+            # Fenêtre cachée : update_idletasks calcule les tailles demandées
+            # sans rien peindre.
             dlg.update_idletasks()
             need = body.winfo_reqheight() + btns.winfo_reqheight()
-            height = min(need, dlg.winfo_screenheight() - 80)
-            if height > dlg_height[0]:
-                dlg_height[0] = height
-                width = dlg.winfo_width() if dlg.winfo_ismapped() else 680
-                dlg.geometry(f"{width}x{height}")
+            height = min(need, int(dlg.winfo_screenheight() * 0.90))
+            if height <= dlg_size[1]:
+                return
+            dlg_size[1] = height
+            if not dlg.winfo_ismapped():
+                return
+            m = re.match(r"(\d+)x(\d+)([+-]-?\d+)([+-]-?\d+)", dlg.geometry())
+            if not m:
+                return
+            # Tk peut écrire « +-5 » pour une coordonnée négative.
+            def _coord(txt):
+                return int(txt.replace("+-", "-").lstrip("+"))
+            width = int(m.group(1))
+            x = _coord(m.group(3))
+            y = max(0, min(_coord(m.group(4)), dlg.winfo_screenheight() - height))
+            dlg.geometry(f"{width}x{height}+{x}+{y}")
 
         dest_var.trace_add("write", apply_shared_lock)
         # La note nomme désormais le sous-dossier réel (destination + nom de la
@@ -2842,6 +2868,25 @@ class MappingEditor(tk.Tk):
         ttk.Button(btns, text="OK", command=on_ok).pack(side="right", padx=2)
         fit_height()   # les boutons comptent dans la hauteur demandée
 
+        def show_dialog():
+            """Affichage UNIQUE : taille et position posées ensemble, puis un
+            seul deiconify(), puis le grab (une fenêtre cachée ne peut pas le
+            recevoir). Position : centrée horizontalement sur la fenêtre
+            principale, au tiers vertical, bornée aux deux bouts pour rester
+            entièrement visible."""
+            sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+            w = min(max(dlg_size[0], body.winfo_reqwidth()), int(sw * 0.95))
+            h = min(dlg_size[1], int(sh * 0.90))
+            dlg_size[0], dlg_size[1] = w, h
+            x = self.winfo_rootx() + (self.winfo_width() - w) // 2
+            y = self.winfo_rooty() + (self.winfo_height() - h) // 3
+            x = max(0, min(x, sw - w))
+            y = max(0, min(y, sh - h))
+            dlg.geometry(f"{w}x{h}+{x}+{y}")
+            dlg.deiconify()
+            _safe_grab(dlg)
+
+        show_dialog()
         self.wait_window(dlg)
         return result["value"]
 
