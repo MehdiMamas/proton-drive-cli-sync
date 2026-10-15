@@ -110,7 +110,7 @@ def test_version_text_matches_engine_regex(fake_drive):
     assert result.returncode == 0
     match = re.search(r"cli-drive@(\d+\.\d+\.\d+)", result.stdout)
     assert match is not None
-    assert match.group(1) == "0.8.0"
+    assert match.group(1) == "0.9.0"
 
 
 def test_unknown_command_exits_2(fake_drive):

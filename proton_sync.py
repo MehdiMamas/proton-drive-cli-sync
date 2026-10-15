@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.18.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.18.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -1168,7 +1168,7 @@ def run_cli_watched(args, stall_minutes=None, cwd=None):
 # possible dans « Partagé avec moi »). On avertit donc dès que la version
 # installée diffère — antérieure comme postérieure — car aucune autre n'a été
 # validée. Mettre à jour cette constante APRÈS avoir testé une nouvelle version.
-CLI_TESTED_VERSION = "0.8.0"
+CLI_TESTED_VERSION = "0.9.0"
 
 # 1.9.3 — CLÉ = L'EMPREINTE DU BINAIRE, comme le cache disque.
 #

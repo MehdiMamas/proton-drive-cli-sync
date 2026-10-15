@@ -21,8 +21,9 @@ def default_state():
     return {
         "account": "tester@example.com",
         "version_text": (
-            "Proton Drive CLI cli-drive@0.8.0+fake\n"
-            "Proton Drive SDK js@0.19.1+fake\n"
+            "Proton Drive CLI cli-drive@0.9.0+fake\n"
+            "Proton Drive SDK js@0.22.2+fake\n"
+            "You are running the latest version.\n"
         ),
         "nodes": {
             "/my-files": {"type": "folder"},

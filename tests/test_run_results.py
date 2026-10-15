@@ -239,7 +239,7 @@ def test_last_run_json_written_atomically_and_keeps_last_full_on_subpath(
     assert record["exit"] == 0
     assert record["mode"] == "full"
     assert record["engine_version"] == proton_sync.__version__
-    assert record["cli_version"] == "0.8.0"
+    assert record["cli_version"] == "0.9.0"
     assert "T" in record["started_at"] and "T" in record["finished_at"]
     assert record["counters"]["files_uploaded"] == 1
     assert "last_subpath" not in data

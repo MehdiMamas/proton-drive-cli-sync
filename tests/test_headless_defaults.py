@@ -238,7 +238,7 @@ def test_cli_version_cache_under_data_dir(
     assert cache.is_file()
     assert not (isolated_home / ".proton_sync" / "cli-version.json").exists()
     stored = json.loads(cache.read_text(encoding="utf-8"))
-    assert stored["version"] == "0.8.0"
+    assert stored["version"] == "0.9.0"
 
 
 def test_non_object_legacy_copy_skips_notice_key(tmp_path, monkeypatch, capsys):
