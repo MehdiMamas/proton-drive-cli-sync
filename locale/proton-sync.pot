@@ -600,9 +600,6 @@ msgstr ""
 msgid "  Path maps: {n} correspondence(s) across {u} user(s) desktop<->NAS."
 msgstr ""
 
-msgid "No NAS target to watch. The NAS watcher has nothing to do."
-msgstr ""
-
 #, python-brace-format
 msgid "NAS watcher started — {n} target(s):"
 msgstr ""
@@ -772,12 +769,6 @@ msgstr ""
 
 #, python-brace-format
 msgid "scripts partly pushed ({e})"
-msgstr ""
-
-#, python-brace-format
-msgid ""
-"NAS scripts updated: {files}. The service file also changed — on the NAS, "
-"review proton-sync/nas_watcher.service.new, then run the command below."
 msgstr ""
 
 #, python-brace-format
@@ -3618,4 +3609,370 @@ msgid "Content checked by SHA1 on {date}."
 msgstr ""
 
 msgid "No SHA1 content check on record for this mapping."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"No NAS target yet: no mapping has been pushed. Waiting — a mapping pushed "
+"later is picked up within {s}s."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"No NAS target yet: {n} mapping(s) found, none of them on the NAS. Waiting — "
+"a NAS mapping pushed later is picked up within {s}s."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"NAS scripts updated: {files}. The service file was written as well — on the "
+"NAS, install it with the command below."
+msgstr ""
+
+msgid ""
+"NAS account running the watcher\n"
+"\n"
+"The account on the NAS under which the NAS watcher service runs. When it is "
+"set, “💾 Install / Update” builds the service file proton-nas-watch.service "
+"for that account and puts it next to the scripts on the NAS, then shows the "
+"command to install it there.\n"
+"\n"
+"The account must exist on the NAS, be able to read the folders you back up, "
+"and write into the proton-sync folder.\n"
+"\n"
+"Leave it empty if you installed the service yourself: nothing is built and "
+"your service file is left alone."
+msgstr ""
+
+msgid "Setup assistant…"
+msgstr ""
+
+msgid "NAS account running the watcher: "
+msgstr ""
+
+msgid ""
+"You turned the NAS on. The setup assistant can guide you through the NAS "
+"steps: shared folder, data folders and the watcher on the NAS.\n"
+"\n"
+"Open it now?"
+msgstr ""
+
+msgid "Setup assistant"
+msgstr ""
+
+msgid "Open it"
+msgstr ""
+
+msgid "Not now"
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"“{a}” is not a valid account name: use letters, digits, “.”, “_” or “-”, "
+"starting with a letter."
+msgstr ""
+
+msgid "Setup assistant — Proton Drive sync"
+msgstr ""
+
+msgid "Next ›"
+msgstr ""
+
+msgid "‹ Back"
+msgstr ""
+
+msgid "Welcome"
+msgstr ""
+
+msgid "Local only, or with a NAS"
+msgstr ""
+
+msgid "NAS — shared folder"
+msgstr ""
+
+msgid "NAS — data folders"
+msgstr ""
+
+msgid "NAS — watcher"
+msgstr ""
+
+msgid "Schedule and real time"
+msgstr ""
+
+#, python-brace-format
+msgid "Step {n} of {t}"
+msgstr ""
+
+msgid "Finish"
+msgstr ""
+
+msgid ""
+"This assistant prepares the backup of your folders to Proton Drive, step by "
+"step. Each step is checked before you move on."
+msgstr ""
+
+msgid ""
+"1. The Proton Drive CLI, which does the actual transfers.\n"
+"2. Signing in to your Proton account.\n"
+"3. Local only, or with a NAS.\n"
+"4–6. For a NAS: the shared folder, the data folders, and the watcher that "
+"runs on the NAS.\n"
+"7. The nightly pass and real time.\n"
+"At the end, the system is running and only waits for the folders you want to "
+"back up."
+msgstr ""
+
+msgid ""
+"You can close the assistant at any time and come back later with the “Setup "
+"assistant…” button. Everything it sets stays editable in “⚙ Configuration…”."
+msgstr ""
+
+msgid ""
+"This application does not include Proton's CLI: you download it from Proton, "
+"then show the assistant where it is."
+msgstr ""
+
+msgid "Open Proton's download page"
+msgstr ""
+
+msgid "Path of the “proton-drive” binary:"
+msgstr ""
+
+msgid "Check"
+msgstr ""
+
+msgid "Give the path of the binary first."
+msgstr ""
+
+msgid "Reading the CLI version…"
+msgstr ""
+
+msgid ""
+"The CLI did not report its version. Check that this is the Proton Drive CLI."
+msgstr ""
+
+#, python-brace-format
+msgid "Proton Drive CLI {v} — the version this application was tested with."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"Proton Drive CLI {v}. This application was tested with {t}: it works, at "
+"your own risk."
+msgstr ""
+
+msgid ""
+"A browser window opens for you to sign in to Proton. Your password and 2FA "
+"stay in the browser — this application never sees them."
+msgstr ""
+
+msgid "Sign in…"
+msgstr ""
+
+msgid "Check again"
+msgstr ""
+
+msgid "Checking the Proton session…"
+msgstr ""
+
+msgid "Not connected yet. Press “Sign in…”."
+msgstr ""
+
+msgid "Local only"
+msgstr ""
+
+msgid ""
+"The folders to back up are on this computer's own disks. Nothing is "
+"installed elsewhere."
+msgstr ""
+
+msgid "With a NAS"
+msgstr ""
+
+msgid ""
+"Some folders are on a NAS, mounted on this computer over NFS. A small "
+"watcher runs on the NAS so that changes made there are backed up too. You "
+"will need to run two commands on the NAS."
+msgstr ""
+
+msgid ""
+"The NAS and this computer exchange their files through one shared folder: an "
+"NFS mount on this computer. Any exported folder works; the application keeps "
+"its files in a “proton-sync” folder inside it."
+msgstr ""
+
+msgid "NFS mounts found on this computer:"
+msgstr ""
+
+msgid "Shared folder (on this computer): "
+msgstr ""
+
+msgid "Refresh the list"
+msgstr ""
+
+msgid ""
+"No NFS mount found. Mount the NAS folders on this computer first (see the "
+"installation guide), then press “Refresh the list”."
+msgstr ""
+
+#, python-brace-format
+msgid "{p}   ← {s}:{e}"
+msgstr ""
+
+msgid "Choose the shared folder, then press “Check”."
+msgstr ""
+
+msgid "Choose the shared folder first."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"{p} is not on an NFS mount. The shared folder must be mounted from the NAS."
+msgstr ""
+
+#, python-brace-format
+msgid "Cannot write into {p}: {e}"
+msgstr ""
+
+#, python-brace-format
+msgid "OK. On the NAS, the application's files will be in {d}."
+msgstr ""
+
+msgid "Add a line by hand (for a case the detection misses):"
+msgstr ""
+
+msgid "Add"
+msgstr ""
+
+msgid "No line needed: no other NFS mount found."
+msgstr ""
+
+msgid ""
+"The watcher runs on the NAS as a system service. Give the NAS account it "
+"will run as: it must exist on the NAS, be able to read the folders you back "
+"up, and write into the shared folder."
+msgstr ""
+
+msgid "NAS account: "
+msgstr ""
+
+msgid "Send to the NAS"
+msgstr ""
+
+msgid ""
+"Then, on the NAS, run these two commands — the first installs the only "
+"library the watcher needs, the second installs and starts the service:"
+msgstr ""
+
+msgid "On the NAS:"
+msgstr ""
+
+msgid "Check the watcher"
+msgstr ""
+
+msgid "Press “Send to the NAS”."
+msgstr ""
+
+msgid "Sending the scripts to the NAS…"
+msgstr ""
+
+msgid ""
+"The service file could not be built: the shared folder is not on an NFS "
+"mount."
+msgstr ""
+
+#, python-brace-format
+msgid "Scripts and service file are on the NAS, in {d}."
+msgstr ""
+
+msgid "Shared folder"
+msgstr ""
+
+#, python-brace-format
+msgid "{l}: testing…"
+msgstr ""
+
+msgid ""
+"No answer from the watcher. On the NAS, check that the service started, and "
+"that the account exists: journalctl -u proton-nas-watch.service -n 30 --no-"
+"pager"
+msgstr ""
+
+msgid ""
+"A full pass runs every night and catches anything the real time missed. Real "
+"time sends a change within about a minute."
+msgstr ""
+
+msgid "Nightly pass at (HH:MM): "
+msgstr ""
+
+msgid "Propagate deletions in the nightly pass"
+msgstr ""
+
+msgid ""
+"Off by default: a file deleted here stays on Proton. You can turn it on "
+"later, once you trust your mappings."
+msgstr ""
+
+msgid "Real time"
+msgstr ""
+
+#, python-brace-format
+msgid "Mappings file: {p}"
+msgstr ""
+
+msgid "Install"
+msgstr ""
+
+msgid "On this computer:"
+msgstr ""
+
+msgid "The services keep running when you are logged out (linger is on)."
+msgstr ""
+
+msgid ""
+"Linger is off: the nightly pass only runs while you are logged in. To have "
+"it run anyway, run this command:"
+msgstr ""
+
+msgid "Give the time as HH:MM, for example 03:00."
+msgstr ""
+
+msgid "Installing…"
+msgstr ""
+
+#, python-brace-format
+msgid "Cannot create {p}."
+msgstr ""
+
+msgid ""
+"The system is ready: it only waits for mappings — the folders you want to "
+"back up."
+msgstr ""
+
+msgid ""
+"Add a folder with “➕ Folder…” in the main window. Its first full pass (“▶ "
+"Run sync”) sends the existing files; after that, the nightly pass and real "
+"time take over."
+msgstr ""
+
+msgid "Add a first folder now"
+msgstr ""
+
+msgid ""
+"On the NAS, these folders do not have the same path as on this computer. "
+"Each line pairs the path here with the path on the NAS; the assistant read "
+"them from the NFS mounts. Untick a pairing that is not used for the backup. "
+"Folders that have the same path on both sides do not appear: they need no "
+"line."
+msgstr ""
+
+#, python-brace-format
+msgid "{l}: {m}"
+msgstr ""
+
+msgid "Already installed. “Install” rewrites them with the settings above."
+msgstr ""
+
+msgid "Press “Install”."
 msgstr ""

@@ -673,9 +673,6 @@ msgstr ""
 "  Tabelas de caminhos: {n} correspondência(s) em {u} utilizador(es) desktop<-"
 ">NAS."
 
-msgid "No NAS target to watch. The NAS watcher has nothing to do."
-msgstr "Nenhum alvo NAS para vigiar. O observador do NAS não tem nada a fazer."
-
 #, python-brace-format
 msgid "NAS watcher started — {n} target(s):"
 msgstr "Observador do NAS iniciado — {n} alvo(s):"
@@ -858,15 +855,6 @@ msgstr "settings.json (idioma {lang})"
 #, python-brace-format
 msgid "scripts partly pushed ({e})"
 msgstr "scripts enviados parcialmente ({e})"
-
-#, python-brace-format
-msgid ""
-"NAS scripts updated: {files}. The service file also changed — on the NAS, "
-"review proton-sync/nas_watcher.service.new, then run the command below."
-msgstr ""
-"Scripts NAS atualizados: {files}. O ficheiro de serviço também mudou — no "
-"NAS, verifique proton-sync/nas_watcher.service.new, depois execute o comando "
-"abaixo."
 
 #, python-brace-format
 msgid ""
@@ -4508,3 +4496,453 @@ msgstr "Conteúdo verificado por SHA1 em {date}."
 
 msgid "No SHA1 content check on record for this mapping."
 msgstr "Não há verificação SHA1 do conteúdo registada para este mapeamento."
+
+#, python-brace-format
+msgid ""
+"No NAS target yet: no mapping has been pushed. Waiting — a mapping pushed "
+"later is picked up within {s}s."
+msgstr ""
+"Ainda sem alvo NAS: nenhum mapeamento foi enviado. Em espera — um mapeamento "
+"enviado mais tarde é considerado em menos de {s} s."
+
+#, python-brace-format
+msgid ""
+"No NAS target yet: {n} mapping(s) found, none of them on the NAS. Waiting — "
+"a NAS mapping pushed later is picked up within {s}s."
+msgstr ""
+"Ainda sem alvo NAS: {n} mapeamento(s) encontrado(s), nenhum no NAS. Em "
+"espera — um mapeamento NAS enviado mais tarde é considerado em menos de {s} "
+"s."
+
+#, python-brace-format
+msgid ""
+"NAS scripts updated: {files}. The service file was written as well — on the "
+"NAS, install it with the command below."
+msgstr ""
+"Scripts do NAS atualizados: {files}. O ficheiro de serviço também foi "
+"escrito — no NAS, instale-o com o comando abaixo."
+
+msgid ""
+"NAS account running the watcher\n"
+"\n"
+"The account on the NAS under which the NAS watcher service runs. When it is "
+"set, “💾 Install / Update” builds the service file proton-nas-watch.service "
+"for that account and puts it next to the scripts on the NAS, then shows the "
+"command to install it there.\n"
+"\n"
+"The account must exist on the NAS, be able to read the folders you back up, "
+"and write into the proton-sync folder.\n"
+"\n"
+"Leave it empty if you installed the service yourself: nothing is built and "
+"your service file is left alone."
+msgstr ""
+"Conta do NAS que executa o observador\n"
+"\n"
+"A conta do NAS com a qual corre o serviço do observador do NAS. Quando "
+"indicada, «💾 Instalar / Atualizar» cria o ficheiro de serviço proton-nas-"
+"watch.service para essa conta, coloca-o ao lado dos scripts no NAS e mostra "
+"o comando para o instalar lá.\n"
+"\n"
+"A conta tem de existir no NAS, poder ler as pastas de que faz cópia e "
+"escrever na pasta proton-sync.\n"
+"\n"
+"Deixe vazio se instalou o serviço por si: nada é criado e o seu ficheiro de "
+"serviço não é tocado."
+
+msgid "Setup assistant…"
+msgstr "Assistente inicial…"
+
+msgid "NAS account running the watcher: "
+msgstr "Conta do NAS que executa o observador: "
+
+msgid ""
+"You turned the NAS on. The setup assistant can guide you through the NAS "
+"steps: shared folder, data folders and the watcher on the NAS.\n"
+"\n"
+"Open it now?"
+msgstr ""
+"Ativou o NAS. O assistente de configuração pode guiá-lo pelos passos do NAS: "
+"pasta partilhada, pastas de dados e o observador no NAS.\n"
+"\n"
+"Abrir agora?"
+
+msgid "Setup assistant"
+msgstr "Assistente de configuração"
+
+msgid "Open it"
+msgstr "Abrir"
+
+msgid "Not now"
+msgstr "Agora não"
+
+#, python-brace-format
+msgid ""
+"“{a}” is not a valid account name: use letters, digits, “.”, “_” or “-”, "
+"starting with a letter."
+msgstr ""
+"«{a}» não é um nome de conta válido: use letras, algarismos, «.», «_» ou "
+"«-», a começar por uma letra."
+
+msgid "Setup assistant — Proton Drive sync"
+msgstr "Assistente de configuração — sincronização do Proton Drive"
+
+msgid "Next ›"
+msgstr "Seguinte ›"
+
+msgid "‹ Back"
+msgstr "‹ Anterior"
+
+msgid "Welcome"
+msgstr "Boas-vindas"
+
+msgid "Local only, or with a NAS"
+msgstr "Só local, ou com um NAS"
+
+msgid "NAS — shared folder"
+msgstr "NAS — pasta partilhada"
+
+msgid "NAS — data folders"
+msgstr "NAS — pastas de dados"
+
+msgid "NAS — watcher"
+msgstr "NAS — observador"
+
+msgid "Schedule and real time"
+msgstr "Agendamento e tempo real"
+
+#, python-brace-format
+msgid "Step {n} of {t}"
+msgstr "Passo {n} de {t}"
+
+msgid "Finish"
+msgstr "Concluir"
+
+msgid ""
+"This assistant prepares the backup of your folders to Proton Drive, step by "
+"step. Each step is checked before you move on."
+msgstr ""
+"Este assistente prepara a cópia de segurança das suas pastas no Proton "
+"Drive, passo a passo. Cada passo é verificado antes de avançar."
+
+msgid ""
+"1. The Proton Drive CLI, which does the actual transfers.\n"
+"2. Signing in to your Proton account.\n"
+"3. Local only, or with a NAS.\n"
+"4–6. For a NAS: the shared folder, the data folders, and the watcher that "
+"runs on the NAS.\n"
+"7. The nightly pass and real time.\n"
+"At the end, the system is running and only waits for the folders you want to "
+"back up."
+msgstr ""
+"1. A CLI do Proton Drive, que faz as transferências.\n"
+"2. O início de sessão na sua conta Proton.\n"
+"3. Só local, ou com um NAS.\n"
+"4–6. Com um NAS: a pasta partilhada, as pastas de dados e o observador que "
+"corre no NAS.\n"
+"7. A passagem noturna e o tempo real.\n"
+"No fim, o sistema está a funcionar e só espera as pastas de que quer fazer "
+"cópia."
+
+msgid ""
+"You can close the assistant at any time and come back later with the “Setup "
+"assistant…” button. Everything it sets stays editable in “⚙ Configuration…”."
+msgstr ""
+"Pode fechar o assistente a qualquer momento e voltar mais tarde com o botão "
+"«Assistente inicial…». Tudo o que ele define continua editável em «⚙ "
+"Configuração…»."
+
+msgid ""
+"This application does not include Proton's CLI: you download it from Proton, "
+"then show the assistant where it is."
+msgstr ""
+"Esta aplicação não inclui a CLI do Proton: descarrega-a do Proton e depois "
+"indica ao assistente onde ela está."
+
+msgid "Open Proton's download page"
+msgstr "Abrir a página de transferência do Proton"
+
+msgid "Path of the “proton-drive” binary:"
+msgstr "Caminho do binário «proton-drive»:"
+
+msgid "Check"
+msgstr "Verificar"
+
+msgid "Give the path of the binary first."
+msgstr "Indique primeiro o caminho do binário."
+
+msgid "Reading the CLI version…"
+msgstr "A ler a versão da CLI…"
+
+msgid ""
+"The CLI did not report its version. Check that this is the Proton Drive CLI."
+msgstr ""
+"A CLI não indicou a sua versão. Verifique se se trata da CLI do Proton Drive."
+
+#, python-brace-format
+msgid "Proton Drive CLI {v} — the version this application was tested with."
+msgstr "CLI do Proton Drive {v} — a versão com que esta aplicação foi testada."
+
+#, python-brace-format
+msgid ""
+"Proton Drive CLI {v}. This application was tested with {t}: it works, at "
+"your own risk."
+msgstr ""
+"CLI do Proton Drive {v}. Esta aplicação foi testada com {t}: funciona, por "
+"sua conta e risco."
+
+msgid ""
+"A browser window opens for you to sign in to Proton. Your password and 2FA "
+"stay in the browser — this application never sees them."
+msgstr ""
+"Abre-se uma janela do navegador para iniciar sessão no Proton. A sua palavra-"
+"passe e a autenticação de dois fatores ficam no navegador — esta aplicação "
+"nunca as vê."
+
+msgid "Sign in…"
+msgstr "Iniciar sessão…"
+
+msgid "Check again"
+msgstr "Verificar novamente"
+
+msgid "Checking the Proton session…"
+msgstr "A verificar a sessão Proton…"
+
+msgid "Not connected yet. Press “Sign in…”."
+msgstr "Ainda não ligado. Prima «Iniciar sessão…»."
+
+msgid "Local only"
+msgstr "Só local"
+
+msgid ""
+"The folders to back up are on this computer's own disks. Nothing is "
+"installed elsewhere."
+msgstr ""
+"As pastas de que faz cópia estão nos discos deste computador. Nada é "
+"instalado noutro lado."
+
+msgid "With a NAS"
+msgstr "Com um NAS"
+
+msgid ""
+"Some folders are on a NAS, mounted on this computer over NFS. A small "
+"watcher runs on the NAS so that changes made there are backed up too. You "
+"will need to run two commands on the NAS."
+msgstr ""
+"Algumas pastas estão num NAS, montado neste computador por NFS. Um pequeno "
+"observador corre no NAS para que as alterações feitas lá também sejam "
+"guardadas. Terá de executar dois comandos no NAS."
+
+msgid ""
+"The NAS and this computer exchange their files through one shared folder: an "
+"NFS mount on this computer. Any exported folder works; the application keeps "
+"its files in a “proton-sync” folder inside it."
+msgstr ""
+"O NAS e este computador trocam os seus ficheiros através de uma pasta "
+"partilhada: uma montagem NFS neste computador. Qualquer pasta exportada "
+"serve; a aplicação guarda os seus ficheiros numa pasta «proton-sync» dentro "
+"dela."
+
+msgid "NFS mounts found on this computer:"
+msgstr "Montagens NFS encontradas neste computador:"
+
+msgid "Shared folder (on this computer): "
+msgstr "Pasta partilhada (neste computador): "
+
+msgid "Refresh the list"
+msgstr "Atualizar a lista"
+
+msgid ""
+"No NFS mount found. Mount the NAS folders on this computer first (see the "
+"installation guide), then press “Refresh the list”."
+msgstr ""
+"Nenhuma montagem NFS encontrada. Monte primeiro as pastas do NAS neste "
+"computador (veja o guia de instalação) e prima «Atualizar a lista»."
+
+#, python-brace-format
+msgid "{p}   ← {s}:{e}"
+msgstr "{p}   ← {s}:{e}"
+
+msgid "Choose the shared folder, then press “Check”."
+msgstr "Escolha a pasta partilhada e prima «Verificar»."
+
+msgid "Choose the shared folder first."
+msgstr "Escolha primeiro a pasta partilhada."
+
+#, python-brace-format
+msgid ""
+"{p} is not on an NFS mount. The shared folder must be mounted from the NAS."
+msgstr ""
+"{p} não está numa montagem NFS. A pasta partilhada tem de ser montada a "
+"partir do NAS."
+
+#, python-brace-format
+msgid "Cannot write into {p}: {e}"
+msgstr "Não é possível escrever em {p}: {e}"
+
+#, python-brace-format
+msgid "OK. On the NAS, the application's files will be in {d}."
+msgstr "OK. No NAS, os ficheiros da aplicação ficarão em {d}."
+
+msgid "Add a line by hand (for a case the detection misses):"
+msgstr "Adicionar uma linha à mão (para um caso que a deteção não apanha):"
+
+msgid "Add"
+msgstr "Adicionar"
+
+msgid "No line needed: no other NFS mount found."
+msgstr "Nenhuma linha necessária: não foi encontrada outra montagem NFS."
+
+msgid ""
+"The watcher runs on the NAS as a system service. Give the NAS account it "
+"will run as: it must exist on the NAS, be able to read the folders you back "
+"up, and write into the shared folder."
+msgstr ""
+"O observador corre no NAS como serviço do sistema. Indique a conta do NAS "
+"com que vai correr: tem de existir no NAS, poder ler as pastas de que faz "
+"cópia e escrever na pasta partilhada."
+
+msgid "NAS account: "
+msgstr "Conta do NAS: "
+
+msgid "Send to the NAS"
+msgstr "Enviar para o NAS"
+
+msgid ""
+"Then, on the NAS, run these two commands — the first installs the only "
+"library the watcher needs, the second installs and starts the service:"
+msgstr ""
+"Depois, no NAS, execute estes dois comandos — o primeiro instala a única "
+"biblioteca de que o observador precisa, o segundo instala e inicia o serviço:"
+
+msgid "On the NAS:"
+msgstr "No NAS:"
+
+msgid "Check the watcher"
+msgstr "Verificar o observador"
+
+msgid "Press “Send to the NAS”."
+msgstr "Prima «Enviar para o NAS»."
+
+msgid "Sending the scripts to the NAS…"
+msgstr "A enviar os scripts para o NAS…"
+
+msgid ""
+"The service file could not be built: the shared folder is not on an NFS "
+"mount."
+msgstr ""
+"Não foi possível criar o ficheiro de serviço: a pasta partilhada não está "
+"numa montagem NFS."
+
+#, python-brace-format
+msgid "Scripts and service file are on the NAS, in {d}."
+msgstr "Os scripts e o ficheiro de serviço estão no NAS, em {d}."
+
+msgid "Shared folder"
+msgstr "Pasta partilhada"
+
+#, python-brace-format
+msgid "{l}: testing…"
+msgstr "{l}: a testar…"
+
+msgid ""
+"No answer from the watcher. On the NAS, check that the service started, and "
+"that the account exists: journalctl -u proton-nas-watch.service -n 30 --no-"
+"pager"
+msgstr ""
+"Sem resposta do observador. No NAS, verifique se o serviço arrancou e se a "
+"conta existe: journalctl -u proton-nas-watch.service -n 30 --no-pager"
+
+msgid ""
+"A full pass runs every night and catches anything the real time missed. Real "
+"time sends a change within about a minute."
+msgstr ""
+"Todas as noites corre uma passagem completa que recupera o que o tempo real "
+"possa ter falhado. O tempo real envia uma alteração em cerca de um minuto."
+
+msgid "Nightly pass at (HH:MM): "
+msgstr "Passagem noturna às (HH:MM): "
+
+msgid "Propagate deletions in the nightly pass"
+msgstr "Propagar as eliminações na passagem noturna"
+
+msgid ""
+"Off by default: a file deleted here stays on Proton. You can turn it on "
+"later, once you trust your mappings."
+msgstr ""
+"Desativado por predefinição: um ficheiro eliminado aqui fica no Proton. Pode "
+"ativá-lo mais tarde, quando confiar nos seus mapeamentos."
+
+msgid "Real time"
+msgstr "Tempo real"
+
+#, python-brace-format
+msgid "Mappings file: {p}"
+msgstr "Ficheiro de mapeamentos: {p}"
+
+msgid "Install"
+msgstr "Instalar"
+
+msgid "On this computer:"
+msgstr "Neste computador:"
+
+msgid "The services keep running when you are logged out (linger is on)."
+msgstr "Os serviços continuam a correr quando termina a sessão (linger ativo)."
+
+msgid ""
+"Linger is off: the nightly pass only runs while you are logged in. To have "
+"it run anyway, run this command:"
+msgstr ""
+"O linger está desativado: a passagem noturna só corre enquanto a sua sessão "
+"está aberta. Para que corra mesmo assim, execute este comando:"
+
+msgid "Give the time as HH:MM, for example 03:00."
+msgstr "Indique a hora no formato HH:MM, por exemplo 03:00."
+
+msgid "Installing…"
+msgstr "A instalar…"
+
+#, python-brace-format
+msgid "Cannot create {p}."
+msgstr "Não é possível criar {p}."
+
+msgid ""
+"The system is ready: it only waits for mappings — the folders you want to "
+"back up."
+msgstr ""
+"O sistema está pronto: só espera mapeamentos — as pastas de que quer fazer "
+"cópia."
+
+msgid ""
+"Add a folder with “➕ Folder…” in the main window. Its first full pass (“▶ "
+"Run sync”) sends the existing files; after that, the nightly pass and real "
+"time take over."
+msgstr ""
+"Adicione uma pasta com «➕ Pasta…» na janela principal. A sua primeira "
+"passagem completa («▶ Executar sincronização») envia os ficheiros "
+"existentes; depois, a passagem noturna e o tempo real assumem."
+
+msgid "Add a first folder now"
+msgstr "Adicionar já uma primeira pasta"
+
+msgid ""
+"On the NAS, these folders do not have the same path as on this computer. "
+"Each line pairs the path here with the path on the NAS; the assistant read "
+"them from the NFS mounts. Untick a pairing that is not used for the backup. "
+"Folders that have the same path on both sides do not appear: they need no "
+"line."
+msgstr ""
+"No NAS, estas pastas não têm o mesmo caminho que neste computador. Cada "
+"linha associa o caminho daqui ao do NAS; o assistente leu-os das montagens "
+"NFS. Desmarque uma associação que não seja usada para a cópia de segurança. "
+"As pastas que têm o mesmo caminho dos dois lados não aparecem: não precisam "
+"de linha."
+
+#, python-brace-format
+msgid "{l}: {m}"
+msgstr "{l}: {m}"
+
+msgid "Already installed. “Install” rewrites them with the settings above."
+msgstr "Já instalados. «Instalar» volta a escrevê-los com as definições acima."
+
+msgid "Press “Install”."
+msgstr "Prima «Instalar»."

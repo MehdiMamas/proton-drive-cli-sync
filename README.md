@@ -17,6 +17,11 @@ Reference document for this project.
 > everything is driven (sync, priming, scheduling, real-time, configuration). The
 > other `.py` files in the folder are internal modules — the engine, the watchers,
 > the service managers — called by the application, never directly by you.
+>
+> On the first launch, the **setup assistant** opens and takes you, step by step and
+> checking each one, to a system that only waits for your mappings: CLI, Proton
+> sign-in, an optional NAS (with the two commands to run on the NAS), scheduling and
+> real time. It opens again later from the editor's "Setup assistant…" button.
 
 ---
 
@@ -199,13 +204,14 @@ proton_mapping_editor.py    <- Tkinter GUI (JSON editing, launching, scheduling,
 proton_sync.py              <- batch sync engine (core)
 mount_check.py              <- mount safety guard (mandatory for deletions)
 schedule_manager.py         <- GUI backend for the nightly timer (systemd --user)
+setup_wizard.py             <- setup assistant (first launch)
 
 # Real-time layer
 local_watcher.py            <- inotify watcher for local sources (local machine)
 nas_watcher.py              <- inotify watcher for NAS sources (runs on the NAS)
 realtime_consumer.py        <- consumer: reads markers, debounces, launches the engine
 realtime_manager.py         <- GUI backend for real-time (daemons, config, NAS push, queues)
-proton-nas-watch.service    <- systemd unit for the NAS watcher (to install on the NAS)
+proton-nas-watch.service    <- NAS service (built by the app, installed on the NAS)
 
 ~/.proton-drive-sync/       <- data folder (created automatically, per user)
     proton_sync.lock        <- lock
@@ -680,7 +686,7 @@ Plus a **"Real-time events"** area that follows the daemons' journal live (`jour
 - **local machine**: two `systemd --user` services, `proton-watch.service` (→ `local_watcher.py`) and `proton-consume.service` (→ `realtime_consumer.py`), installed and driven **from the GUI** (the "Install / Update" button generates them, reloads systemd and enables them). `Restart=on-failure`, relaunched at session login.
   - **Mount-aware local watcher**: it immediately watches the sources already mounted (local ones right at startup) then **re-scans** the mounts — quickly at boot to pick up NAS sources as soon as they appear (a boot race no longer leaves it blind to the NAS for the whole session), then calmly to handle a mount going down or coming back during the session. Every change is logged (`➕` added, `➖` removed, `🔄` re-scan).
   - **Consumer and locked keyring**: if the session isn't open (keyring locked), the consumer launches no doomed pass; it writes **a single** "⏳ Waiting for session login" line, keeps the markers, and **resumes automatically** at login ("🔓 Session opened — resuming"). It probes authentication via `proton_sync.py --check-auth`, the same detection as the engine (no duplicated logic).
-- **NAS**: one **system** service `proton-nas-watch.service` (under the `nas` account), installed **manually on the NAS** (starts at boot, no session needed). The GUI does not drive it — no SSH, no remote credentials — it **observes** it through the NFS queue. Each machine thus keeps its own daemons alive.
+- **NAS**: one **system** service `proton-nas-watch.service`, under a NAS account, built by the application for that account and installed **on the NAS** with two commands it provides (starts at boot, no session needed). Writing it yourself is also possible: see `INSTALLATION-realtime.md`, section 2. The GUI does not drive it — no SSH, no remote credentials — it **observes** it through the NFS queue. Each machine thus keeps its own daemons alive.
 - **Linger**: required for the daemons (and the nightly timer) to run outside an open session. Displayed and reminded by the GUI; enabled with `sudo loginctl enable-linger <user>` (once, admin rights).
 
 **Persistence across a reboot**: for real-time to restart at boot, three links must hold — network at boot, **NAS mounted at boot** (NFS mount in `/etc/fstab` with `_netdev`; a login-time mount would let the daemons start on empty mount points), and the keyring (which only unlocks at graphical session login). Without a session, markers pile up in the queue (nothing lost) and are processed at login. Even in a **boot race** (watcher started before the NFS mount is ready), the local watcher **catches up** the NAS sources as soon as they appear thanks to its re-scan (see above), so no source is lost for the session. Full details, fstab and check commands: `INSTALLATION-realtime.md`, "Persistence across a reboot".
@@ -791,7 +797,7 @@ Since the "configuration" work package, everything that varies from one installa
 | Key | Default | Role |
 |---|---|---|
 | `language` | `"auto"` | Interface language (pre-existing, "Language…" dialog) |
-| `nas_enabled` | `true` | **NAS mode switch.** When `false` (**local-only** mode), the application **never** tries to reach a NAS: no mappings push, no NAS queue polling in the consumer, NAS sections **hidden** in the Real-time window — a clean cut, not "try then fail" |
+| `nas_enabled` | `false` | **NAS mode switch.** When `false` (**local-only** mode), the application **never** tries to reach a NAS: no mappings push, no NAS queue polling in the consumer, NAS sections **hidden** in the Real-time window — a clean cut, not "try then fail" |
 | `nas_mount_path` | `"/media/home_nas"` | NFS mount point where the NAS's `proton-sync/config` and `proton-sync/queue` live |
 | `proton_cli_path` | `null` | Path to the Proton CLI binary. `null` = default resolution. Priority order shared everywhere: **`PROTON_DRIVE_CLI` environment variable > this setting > `<scripts folder>/proton-drive`**. When set, the generated systemd units use it too |
 | `rename_ext_enabled` | `true` | Automatic uppercase-extension fixing (see the "Upload robustness…" section) — durably on/off; `--no-rename-ext` remains the one-shot override |
@@ -805,6 +811,7 @@ Since the "configuration" work package, everything that varies from one installa
 | `max_delete_ratio` | `0.5` | With the guard on: fraction of what that folder holds on Proton above which the pass trashes nothing there. Stored as a fraction (0 to 1); ⚙ Configuration shows and takes it as a whole percentage (50). A bad value falls back to 0.5. Applies to every mapping |
 | `create_thumbnails` | `true` | The CLI makes a thumbnail when it sends a file it can preview (an image, for example). `false` = every upload passes `--skip-thumbnails` (⚙ Configuration: “Create thumbnails when sending”). Files already on Proton are not touched |
 | `tray_enabled` | `false` | Status icon in the system tray (see below) |
+| `nas_service_account` | `""` | NAS account the NAS watcher runs as. When set, "💾 Install / Update" builds the `proton-nas-watch.service` file for it and drops it with the scripts. Empty = nothing is built: a hand-written service file is left alone |
 
 Changes apply at the **next launch** of the GUI and the **next restart** of the daemons (like the language). The file is written atomically and **preserves unknown keys**.
 
@@ -820,13 +827,13 @@ Changes apply at the **next launch** of the GUI and the **next restart** of the 
 
 **Active file change (guard rail).** At "Install/Update", if the file differs from the one in the units, **every change asks for confirmation** (markers may arrive at any moment — no "zero pending" exemption): the dialog quantifies pending markers, **including those targeting folders NOT covered by the new file** — those will be discarded ("⊘" journal lines) and can only be recovered by reloading the old file for a manual or scheduled pass. Two outcomes: *Confirm the change* or *Cancel (keep the current file)*. The local queue self-cleans (marker with no mapping → ignored, visible "⊘" line); at startup, the NAS watcher reports (without touching) any orphan queue still holding markers — a possible historical leftover.
 
-**Automatic script sync to the NAS.** On every real-time "Install/Update", the workstation pushes to `proton-sync/` on the NAS the files the NAS watcher depends on (`nas_watcher.py`, `local_watcher.py`, `config.py`, `i18n.py`, `paths.py`, `mount_check.py` + `locale/`), as a differential copy (only changed files), and writes `settings.json` there with the interface language (the only setting the NAS reads). This avoids the partial-deployment trap — a stale `config.py` on the NAS puts the service into a silent crash loop. The `.service` file is not installed remotely (that needs sudo): it is only **dropped** as `nas_watcher.service.new`, and if its content changed, the install message reminds you of the command to run on the NAS (`sudo systemctl daemon-reload && sudo systemctl restart proton-nas-watch.service`).
+**Automatic script sync to the NAS.** On every real-time "Install/Update", the workstation pushes to `proton-sync/` on the NAS the files the NAS watcher depends on (`nas_watcher.py`, `local_watcher.py`, `config.py`, `i18n.py`, `paths.py`, `mount_check.py`, `nas_selftest.py`, `nas_selftest_watcher.py` + `locale/`), as a differential copy (only changed files), and writes `settings.json` there with the interface language (the only setting the NAS reads). This avoids the partial-deployment trap — a stale `config.py` on the NAS puts the service into a silent crash loop. When `nas_service_account` is set, it also **builds** the `proton-nas-watch.service` file for that account and that folder (the path as the NAS sees it, read from the NFS mount) and drops it next to the scripts. It is never installed remotely (that needs sudo): when its content changes, the install message gives the full command to run on the NAS (copy into `/etc/systemd/system/`, `daemon-reload`, `enable`, `restart`).
 
 **NAS script drift alert.** Since "Install/Update" is no longer used day to day (the daemons reload themselves), nothing flagged that a script deployment to the NAS was still pending — the NAS could silently keep stale code. The consumer therefore periodically compares (at startup then every ~5 min, only when the NAS is reachable) the workstation's scripts and catalogs against their NAS copies — by sha256, over the exact same files the push would copy — and records the verdict in `status.json`. On a mismatch: the **tray icon** switches to the purple motif with an **amber "!" badge**, and the **real-time window** shows a warning in section 4 ("⚠ NAS scripts out of date — run Install/Update to push them, then restart the NAS watcher"). Both displays read the **same field** (a single source of truth). A single click on **Install/Update** pushes the files; the next check, seeing them in sync, **clears the alert on its own** (the push happens **before** the daemons restart, so the consumer's startup check already sees the NAS up to date). The alert never lights up in local-only mode or when the NAS is absent — nothing to push by design.
 
 **Restart after a code update (workstation).** A program that keeps running keeps the code it loaded at startup, even after new files are dropped into the application folder. The real-time consumer, the local watcher and the tray icon therefore watch the application's code (date and size of each `.py` and `.mo`) and restart themselves onto it, in place (same process, nothing for systemd to report), once the new files have stayed unchanged for one minute and all compile. The consumer checks between two cycles, never during a pass; the watcher at its periodic mount re-scan; the icon at its refresh. The main window shows a yellow reminder, "The application was updated: close and reopen this window.", and reopens itself as soon as nothing would be lost: no unsaved mapping change, no sync, priming or reset running, no other window open. The next time it opens, it lists once what restarted and when ("Update applied"). The NAS watcher is not concerned: it still needs `sudo systemctl restart proton-nas-watch.service`, and the alert above says so. Versions older than this mechanism do not have it: after installing this one, use "💾 Install / Update" once and restart the tray icon by hand.
 
-**NAS side**: `nas_watcher.py` no longer has a hard-coded prefix list (`/media/nas1`…) — it filters on the **`source_kind == "nfs"`** field already present in every pushed mapping (same information, zero duplication). Its base folder remains configurable via `--config-dir`/`--queue-dir`.
+**NAS side**: `nas_watcher.py` no longer has a hard-coded prefix list (`/media/nas1`…) — it filters on the **`source_kind == "nfs"`** field already present in every pushed mapping (same information, zero duplication). Its base folder remains configurable via `--config-dir`/`--queue-dir`. With no NAS mapping at all, it waits instead of exiting: it answers correspondence tests, says in its log whether nothing was pushed or every mapping is local, and picks up the first NAS mapping pushed within 30 s.
 
 ---
 
@@ -842,7 +849,8 @@ The project's main files:
 - `nas_watcher.py` — inotify watcher for NAS sources (**runs on the NAS**)
 - `realtime_consumer.py` — real-time consumer (markers, debounce, targeted engine launch)
 - `realtime_manager.py` — GUI backend for real-time (daemons, `realtime.conf`, NAS push, drift, queues)
-- `proton-nas-watch.service` — systemd unit for the NAS watcher (to install on the NAS)
+- `setup_wizard.py` — setup assistant (from the CLI to a system that only waits for mappings)
+- `proton-nas-watch.service` — systemd unit for the NAS watcher, built by the application for the NAS account you give and dropped into `proton-sync/` (to install on the NAS)
 - `mappings-user1.json` — User1's config (living file, modified regularly)
 - `mappings-user2.json` — User2's config
 - `i18n.py` — translation foundation (language resolution, gettext, `settings.json`) — **required next to the other `.py` files**, local machine AND NAS

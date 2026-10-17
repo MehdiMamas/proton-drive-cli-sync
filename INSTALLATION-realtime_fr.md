@@ -7,7 +7,7 @@
 
 Complément à `INSTALLATION-systemd.fr.md`. Le temps réel ajoute **trois démons** au
 timer nocturne déjà en place : deux sur la **machine locale** (pilotés depuis le GUI) et
-un sur le **NAS** (installé manuellement, géré sur le NAS).
+un sur le **NAS** (installé sur le NAS avec deux commandes, que l'application fournit).
 
 ## Prérequis
 
@@ -70,15 +70,17 @@ sudo loginctl enable-linger <utilisateur>
 
 ---
 
-## 2. NAS — watcher NAS (manuel, sur le NAS)
+## 2. NAS — watcher NAS (sur le NAS)
 
 > **Uniquement si vous utilisez un NAS.** Par défaut, une installation neuve est en
 > mode **local seul** : les dossiers se synchronisent directement vers Proton Drive,
 > sans NAS. Dans ce cas, **sautez les sections 2 et 3** — rien de ce qui suit n'est
 > requis. Le NAS s'active explicitement dans la Configuration (« Utiliser un NAS »).
 
-Le watcher NAS tourne **sur le NAS**, sous le compte `nas`, en service **système**
-(il doit démarrer au boot sans session ouverte). Le GUI ne le pilote pas.
+Le watcher NAS tourne **sur le NAS**, en service **système** (il doit démarrer au
+boot sans session ouverte), sous un compte du NAS qui peut lire les dossiers
+sauvegardés et écrire dans le dossier partagé. Le GUI ne le pilote pas : il lui
+envoie ses fichiers, puis l'observe à travers le dossier partagé.
 
 > **Pourquoi un service système (pas `--user`) et sans linger ?** La machine locale
 > utilise des services `--user` avec *linger* car ils vivent dans votre session
@@ -89,29 +91,97 @@ Le watcher NAS tourne **sur le NAS**, sous le compte `nas`, en service **systèm
 > nécessite ni session ni linger — exactement ce qu'il faut pour un NAS sans écran.
 > N'utilisez **pas** `systemctl --user` ni `enable-linger` sur le NAS.
 
-Sur le NAS :
+**Le dossier partagé.** C'est un montage NFS du poste, n'importe quel dossier exporté
+par le NAS. L'application y range ses fichiers dans `proton-sync/` : les scripts du
+watcher, `locale/`, `settings.json` (la langue de l'interface — le NAS ne lit jamais
+`~/.config`), le fichier de service `proton-nas-watch.service`, et les dossiers
+`config/` (copies des mappings) et `queue/` (marqueurs). Le watcher trouve `config/`
+et `queue/` à côté de lui-même : aucun chemin n'est imposé sur le NAS.
+
+**Avec l'assistant.** Le bouton « Assistant de démarrage… » de l'éditeur (il s'ouvre
+seul au premier lancement, et l'application le propose quand vous cochez « Utiliser
+un NAS ») mène aux trois pages du NAS : le dossier partagé, les correspondances de
+chemins, puis le watcher. À la page du watcher, indiquez le compte du NAS qui fera
+tourner le service et cliquez sur « Envoyer au NAS » : les scripts et le fichier de
+service, fabriqué pour ce compte, arrivent dans `proton-sync/`. L'assistant affiche
+alors les deux commandes à lancer sur le NAS, avec les vrais chemins, puis « Vérifier
+le watcher » attend sa réponse et teste chaque correspondance.
+
+**Sans l'assistant.** Renseignez « Compte du NAS qui fait tourner le watcher » dans
+« ⚙ Configuration… », puis cliquez sur « 💾 Installer / Mettre à jour » dans la
+fenêtre temps réel : le résultat est le même, et le message de fin donne la commande
+à lancer. Laissez ce champ vide si vous avez écrit votre fichier de service
+vous-même : rien n'est alors fabriqué ni déposé.
+
+Les deux commandes, sur le NAS — ici pour un dossier partagé `/home/nasuser` :
 
 ```bash
-# Fichiers requis dans /home/nasuser/proton-sync/ (à copier ensemble) :
-#   nas_watcher.py, local_watcher.py (helpers partagés), mount_check.py,
-#   config.py, paths.py, i18n.py + le dossier locale/
-#   (traductions ; sans eux, logs en anglais).
-# pyinotify installé (python3-pyinotify ou pip).
-# « 💾 Installer / Mettre à jour » sur le poste les pousse, et y écrit
-#   settings.json avec la langue de l'interface.
-# Langue des logs : ce settings.json à côté des scripts (jamais ~/.config sur
-#   le NAS) ; sans lui, LANG du NAS.
-sudo cp proton-nas-watch.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now proton-nas-watch.service
+sudo apt install python3-pyinotify
+```
+
+```bash
+sudo cp /home/nasuser/proton-sync/proton-nas-watch.service /etc/systemd/system/ \
+  && sudo systemctl daemon-reload \
+  && sudo systemctl enable proton-nas-watch.service \
+  && sudo systemctl restart proton-nas-watch.service
+```
+
+La seconde vaut aussi pour une mise à jour du fichier de service. Pour contrôler le
+service, sur le NAS :
+
+```bash
 systemctl status proton-nas-watch.service
 journalctl -u proton-nas-watch.service -n 50 --no-pager
 ```
 
-Le watcher lit les copies de mappings dans `/home/nasuser/proton-sync/config/`
+**Écrire le fichier soi-même.** Si vous préférez que l'application ne fabrique pas ce
+fichier, laissez le champ du compte vide et créez-le directement sur le NAS. Deux
+valeurs sont propres à votre NAS : le compte (`User=`) et le dossier `proton-sync`
+(`WorkingDirectory=` et `ExecStart=`). L'exemple ci-dessous vaut pour le compte
+`nasuser` et le dossier partagé `/home/nasuser`.
+
+Sur le NAS, ouvrez l'éditeur :
+
+```bash
+sudo nano /etc/systemd/system/proton-nas-watch.service
+```
+
+Collez ce contenu, adaptez les deux valeurs, puis enregistrez :
+
+```ini
+[Unit]
+Description=NAS real-time watcher (Proton Drive) — writes markers
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nasuser
+WorkingDirectory=/home/nasuser/proton-sync
+ExecStart=/usr/bin/python3 /home/nasuser/proton-sync/nas_watcher.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Puis, sur le NAS :
+
+```bash
+sudo systemctl daemon-reload \
+  && sudo systemctl enable proton-nas-watch.service \
+  && sudo systemctl restart proton-nas-watch.service
+```
+
+Le watcher lit les copies de mappings dans `proton-sync/config/`
 (`mappings-user1.json`, `mappings-user2.json`…) — c'est ce que **pousse le GUI**
 via *Temps réel → ⬆ Pousser les mappings vers le NAS*. Il recharge ces copies à
-chaud, donc un nouveau push est pris en compte sans redémarrer le service.
+chaud : un nouveau push est pris en compte en moins de 30 s, sans redémarrer le
+service. Tant qu'aucun mapping n'a sa source sur le NAS, il reste en attente,
+répond aux tests de correspondance, et le dit dans son journal (« Pas encore de
+cible NAS »).
 
 > **Scripts vs mappings.** Ce rechargement à chaud concerne les **mappings**. Mettre
 > à jour les **scripts** du NAS eux-mêmes (`nas_watcher.py`, `config.py`, catalogues
@@ -124,6 +194,9 @@ chaud, donc un nouveau push est pris en compte sans redémarrer le service.
 
 ## 3. Vérifier la chaîne complète
 
+0. **⚙ Configuration… → Test** sur chaque correspondance (ou « Vérifier le watcher »
+   dans l'assistant) : ● (vert). Le watcher du NAS répond, et chaque paire désigne
+   bien le même dossier des deux côtés.
 1. **GUI → Temps réel → ⬆ Pousser les mappings vers le NAS** : l'indicateur passe
    au ● (vert) « À jour sur le NAS ».
 2. **Watcher NAS (observation)** : ● (vert) « NAS joignable ».

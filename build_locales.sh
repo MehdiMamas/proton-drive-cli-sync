@@ -23,7 +23,7 @@ cd "$(dirname "$0")"
 TRANSLATED_FILES="i18n.py config.py proton_sync.py realtime_consumer.py \
 local_watcher.py nas_watcher.py schedule_manager.py realtime_manager.py \
 proton_mapping_editor.py mount_check.py tray_indicator.py nas_selftest.py \
-paths.py"
+paths.py setup_wizard.py"
 
 if [ "$1" = "--pot" ]; then
     # ── GARDE-FOU ────────────────────────────────────────────────────────────

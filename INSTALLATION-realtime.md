@@ -7,7 +7,7 @@
 
 Companion to `INSTALLATION-systemd.md`. The real-time layer adds **three daemons**
 on top of the nightly timer already in place: two on the **desktop** (driven from
-the GUI) and one on the **NAS** (installed manually, managed on the NAS).
+the GUI) and one on the **NAS** (installed on the NAS with two commands, which the application provides).
 
 Guiding principle: **systemd everywhere; each machine keeps its own daemons
 alive.** The GUI only drives the local daemons (desktop); it **observes** the NAS
@@ -68,16 +68,17 @@ sudo loginctl enable-linger <user>
 
 ---
 
-## 2. NAS — NAS watcher (manual, on the NAS)
+## 2. NAS — NAS watcher (on the NAS)
 
 > **Only if you use a NAS.** By default, a fresh install runs in **local-only**
 > mode: folders sync straight to Proton Drive, with no NAS. In that case, **skip
 > sections 2 and 3** — none of the following is needed. A NAS is enabled explicitly
 > in Configuration ("Use a NAS").
 
-The NAS watcher runs **on the NAS**, under the `nas` account, as a **system**
-service (it must start at boot without an open session). The GUI does not drive
-it.
+The NAS watcher runs **on the NAS** as a **system** service (it must start at boot
+without an open session), under a NAS account that can read the backed-up folders
+and write into the shared folder. The GUI does not drive it: it sends the watcher
+its files, then observes it through the shared folder.
 
 > **Why a system service (not `--user`) and no linger?** The local machine uses
 > `--user` services plus *linger* because they live in your graphical session.
@@ -88,29 +89,96 @@ it.
 > exactly what a headless NAS requires. Do **not** use `systemctl --user` or
 > `enable-linger` on the NAS.
 
-On the NAS:
+**The shared folder.** It is an NFS mount on the desktop, any folder the NAS exports.
+The application keeps its files in `proton-sync/` inside it: the watcher scripts,
+`locale/`, `settings.json` (the interface language — the NAS never reads
+`~/.config`), the service file `proton-nas-watch.service`, and the `config/`
+(mapping copies) and `queue/` (markers) folders. The watcher finds `config/` and
+`queue/` next to itself: no path is imposed on the NAS.
+
+**With the assistant.** The editor's "Setup assistant…" button (it opens by itself
+on the first launch, and the application offers it when you tick "Use a NAS") leads
+to the three NAS pages: the shared folder, the path correspondences, then the
+watcher. On the watcher page, give the NAS account that will run the service and
+click "Send to the NAS": the scripts and the service file, built for that account,
+land in `proton-sync/`. The assistant then shows the two commands to run on the NAS,
+with the real paths, and "Check the watcher" waits for its answer and tests each
+correspondence.
+
+**Without the assistant.** Fill in "NAS account running the watcher" in
+"⚙ Configuration…", then click "💾 Install / Update" in the real-time window: the
+result is the same, and the closing message gives the command to run. Leave that
+field empty if you wrote your service file yourself: nothing is then built or
+dropped.
+
+The two commands, on the NAS — here for a shared folder `/home/nasuser`:
 
 ```bash
-# Required files in /home/nasuser/proton-sync/ (copy them together):
-#   nas_watcher.py, local_watcher.py (shared helpers), mount_check.py,
-#   config.py, paths.py, i18n.py + the locale/ folder
-#   (translations; without them, logs in English).
-# pyinotify installed (python3-pyinotify or pip).
-# "💾 Install / Update" on the desktop pushes them, and writes
-#   settings.json there with the interface language.
-# Log language: that settings.json beside the scripts (never ~/.config on the
-#   NAS); without it, the NAS's LANG.
-sudo cp proton-nas-watch.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now proton-nas-watch.service
+sudo apt install python3-pyinotify
+```
+
+```bash
+sudo cp /home/nasuser/proton-sync/proton-nas-watch.service /etc/systemd/system/ \
+  && sudo systemctl daemon-reload \
+  && sudo systemctl enable proton-nas-watch.service \
+  && sudo systemctl restart proton-nas-watch.service
+```
+
+The second one also applies to an update of the service file. To check the service,
+on the NAS:
+
+```bash
 systemctl status proton-nas-watch.service
 journalctl -u proton-nas-watch.service -n 50 --no-pager
 ```
 
-The watcher reads the mapping copies in `/home/nasuser/proton-sync/config/`
+**Writing the file yourself.** If you would rather the application did not build
+this file, leave the account field empty and create it directly on the NAS. Two
+values are specific to your NAS: the account (`User=`) and the `proton-sync` folder
+(`WorkingDirectory=` and `ExecStart=`). The example below is for the account
+`nasuser` and the shared folder `/home/nasuser`.
+
+On the NAS, open the editor:
+
+```bash
+sudo nano /etc/systemd/system/proton-nas-watch.service
+```
+
+Paste this content, adapt the two values, then save:
+
+```ini
+[Unit]
+Description=NAS real-time watcher (Proton Drive) — writes markers
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nasuser
+WorkingDirectory=/home/nasuser/proton-sync
+ExecStart=/usr/bin/python3 /home/nasuser/proton-sync/nas_watcher.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then, on the NAS:
+
+```bash
+sudo systemctl daemon-reload \
+  && sudo systemctl enable proton-nas-watch.service \
+  && sudo systemctl restart proton-nas-watch.service
+```
+
+The watcher reads the mapping copies in `proton-sync/config/`
 (`mappings-user1.json`, `mappings-user2.json`…) — that's what **the GUI pushes**
-via *Real-time → ⬆ Push mappings to the NAS*. It hot-reloads these copies, so a
-new push is picked up without restarting the service.
+via *Real-time → ⬆ Push mappings to the NAS*. It hot-reloads these copies: a new
+push is picked up within 30 s, without restarting the service. As long as no mapping
+has its source on the NAS, it waits, answers correspondence tests, and says so in
+its log ("No NAS target yet").
 
 > **Scripts vs mappings.** This hot-reload applies to **mappings**. Updating the NAS
 > **scripts** themselves (`nas_watcher.py`, `config.py`, the `locale/` catalogs…)
@@ -123,6 +191,9 @@ new push is picked up without restarting the service.
 
 ## 3. Verifying the full chain
 
+0. **⚙ Configuration… → Test** on each correspondence (or "Check the watcher" in the
+   assistant): ● (green). The NAS watcher answers, and each pair points to the same
+   folder on both sides.
 1. **GUI → Real-time → ⬆ Push mappings to the NAS**: the indicator turns to ● (green)
    "Up to date on the NAS".
 2. **NAS watcher (observation)**: ● (green) "NAS reachable".
