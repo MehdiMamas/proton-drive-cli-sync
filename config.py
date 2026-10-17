@@ -21,6 +21,7 @@ Two concerns:
        - max_delete_min                (int)
        - max_delete_ratio              (float)
        - create_thumbnails             (bool, on by default)
+       - nas_service_account           (str, "" = no service file built)
 
   2. DATA_DIR and its subpaths (cache, queue, logs): a single computed
      location per installation (~/.proton-drive-sync), with a ONE-TIME, safe
@@ -37,9 +38,10 @@ from a deployment):
     except ImportError:
         appconfig = None   # callers fall back to their own built-in defaults
 """
-__version__ = "1.10.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.11.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
+import re
 import os
 
 import paths
@@ -133,6 +135,12 @@ DEFAULTS = {
     # l'identique) -> aucune traduction. Utilisée UNIQUEMENT par le watcher NAS
     # (surveillance + écriture des marqueurs) ; poussée avec la config.
     "nas_path_map": [],
+    # Compte du NAS sous lequel tourne le watcher NAS. Sert seulement à
+    # FABRIQUER le fichier proton-nas-watch.service poussé avec les scripts
+    # (« 💾 Installer / Mettre à jour », assistant de démarrage). Vide = aucun
+    # fichier de service fabriqué : une installation existante dont le service
+    # a été écrit à la main garde exactement son comportement.
+    "nas_service_account": "",
 }
 
 # Caractères interdits dans le suffixe de collision : casseraient un nom de
@@ -247,6 +255,32 @@ def set_nas_path_map(pairs):
         if loc and nas:
             clean.append({"local": loc, "nas": nas})
     return _put("nas_path_map", clean)
+
+
+# Nom de compte acceptable dans un fichier systemd : une lettre, puis lettres,
+# chiffres, « . », « _ », « - », sans blanc ni retour à la ligne (une valeur libre pourrait
+# injecter des lignes dans le fichier de service).
+_ACCOUNT_RE = re.compile(r"[A-Za-z][A-Za-z0-9._-]{0,31}")
+
+
+def valid_account_name(name):
+    # fullmatch : « $ » accepterait un saut de ligne final.
+    return bool(isinstance(name, str) and _ACCOUNT_RE.fullmatch(name))
+
+
+def nas_service_account():
+    v = get("nas_service_account")
+    v = v.strip() if isinstance(v, str) else ""
+    return v if valid_account_name(v) else ""
+
+
+def set_nas_service_account(name):
+    """Enregistre le compte du service NAS. Vide = aucun fichier fabriqué.
+    Retourne False pour un nom invalide (rien n'est écrit)."""
+    name = (name or "").strip()
+    if name and not valid_account_name(name):
+        return False
+    return _put("nas_service_account", name)
 
 
 def _pair_key(local, nas):

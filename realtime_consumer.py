@@ -24,7 +24,7 @@ Principes (décidés en conception) :
 
 Un démon par utilisateur (sa session, son trousseau, ses mappings).
 """
-__version__ = "1.9.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.9.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -74,6 +74,16 @@ except ImportError:
 
     def _nas_scripts_stale():
         return False
+
+# Chemins du NAS de realtime_manager : recalculés à chaque cycle, pour suivre
+# un point de montage modifié dans la Configuration sans redémarrer ce démon
+# (sa file NAS relit déjà le réglage à chaque appel ; les sondes ci-dessus
+# lisaient, elles, le montage du démarrage).
+try:
+    from realtime_manager import refresh_nas_paths as _refresh_nas_paths
+except ImportError:
+    def _refresh_nas_paths():
+        return None
 
 # Dossier parent unifié (dossier de données unifié, config.py — migration
 # automatique et sûre depuis l'ancien ~/.proton_sync, voir config.py).
@@ -1407,6 +1417,10 @@ def main():
 
     while True:
         cfg = load_config()  # relu à chaque cycle -> délai modifiable à chaud
+        try:
+            _refresh_nas_paths()
+        except Exception:
+            pass
         # Charger les mappings frais à chaque cycle (la vérité reste à jour).
         try:
             with open(args.config, "r", encoding="utf-8") as f:

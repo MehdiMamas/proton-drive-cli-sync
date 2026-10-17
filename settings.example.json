@@ -6,6 +6,7 @@
   "nas_enabled": true,
   "nas_mount_path": "/media/home_nas",
   "account_name": null,
+  "nas_service_account": "",
 
   "proton_cli_path": null,
 

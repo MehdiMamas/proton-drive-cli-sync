@@ -24,7 +24,7 @@ Tout est centré sur l'utilisateur courant et son fichier de mappings actif.
 Conçu pour tourner SANS privilèges (session utilisateur). Le linger (sudo) est
 seulement LU et rappelé, jamais modifié ici.
 """
-__version__ = "1.7.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.8.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
@@ -37,6 +37,7 @@ import hashlib
 import getpass
 import datetime
 import subprocess
+import shlex
 
 # i18n (import guardé : l'absence de i18n.py n'empêche rien — les
 # messages restent alors en anglais, la langue source).
@@ -112,14 +113,38 @@ DEFAULT_CYCLE_SECONDS = 30
 # NAS via NFS (côté machine locale). Le watcher NAS, lui, voit ces dossiers en local.
 # Point de montage CONFIGURABLE (Configuration… dans le GUI) — plus de chemin
 # figé pour une autre topologie d'installation.
-NAS_MOUNT = appconfig.nas_mount_path() if _HAS_CONFIG else "/media/home_nas"
-NAS_BASE = os.path.join(NAS_MOUNT, "proton-sync")
-NAS_CONFIG_DIR = os.path.join(NAS_BASE, "config")   # mappings-<user>.json poussés
-NAS_QUEUE_DIR = os.path.join(NAS_BASE, "queue")     # queue/<user>/
-# Réglages du watcher NAS : proton-sync/settings.json, à côté de ses scripts
-# (nas_watcher.py y fixe PROTON_SYNC_SETTINGS). Il n'y lit que la langue, que
-# push_scripts_to_nas() écrit depuis la Configuration de ce compte.
-NAS_SETTINGS_PATH = os.path.join(NAS_BASE, "settings.json")
+#
+# NAS_BASE/proton-sync/ contient : config/ (mappings-<user>.json poussés),
+# queue/<user>/, et settings.json — les réglages du watcher NAS, à côté de ses
+# scripts (nas_watcher.py y fixe PROTON_SYNC_SETTINGS). Il n'y lit que la
+# langue, que push_scripts_to_nas() écrit depuis la Configuration de ce compte.
+#
+# 1.8.0 — Ces chemins sont des variables du module, recalculées par
+# refresh_nas_paths(). Le GUI vit des heures : figés à l'import, ils ignoraient
+# un point de montage modifié dans la Configuration, et le test de
+# correspondance interrogeait l'ANCIEN montage (constaté le 16 oct. 2026 : la
+# demande partait vers un autre NAS que celui affiché).
+NAS_MOUNT = NAS_BASE = NAS_CONFIG_DIR = NAS_QUEUE_DIR = NAS_SETTINGS_PATH = None
+
+
+def refresh_nas_paths(mount=None):
+    """Recalcule les chemins du NAS depuis le réglage (ou `mount` s'il est
+    donné). À appeler après tout changement du point de montage."""
+    global NAS_MOUNT, NAS_BASE, NAS_CONFIG_DIR, NAS_QUEUE_DIR, NAS_SETTINGS_PATH
+    if mount is None:
+        mount = appconfig.nas_mount_path() if _HAS_CONFIG else "/media/home_nas"
+    NAS_MOUNT = mount
+    NAS_BASE = os.path.join(NAS_MOUNT, "proton-sync")
+    NAS_CONFIG_DIR = os.path.join(NAS_BASE, "config")
+    NAS_QUEUE_DIR = os.path.join(NAS_BASE, "queue")
+    NAS_SETTINGS_PATH = os.path.join(NAS_BASE, "settings.json")
+
+
+refresh_nas_paths()
+
+# Fichier de service du watcher NAS, FABRIQUÉ par ce module (voir
+# build_nas_service_text) et déposé sous ce nom dans NAS_BASE, avec les scripts.
+NAS_SERVICE_NAME = "proton-nas-watch.service"
 
 # Scripts dont le WATCHER NAS a besoin — SEULE source de vérité, partagée par
 # push_scripts_to_nas() (qui les copie) et nas_scripts_stale() (qui détecte
@@ -476,6 +501,187 @@ def _nas_settings_update(lenient=False):
     return data
 
 
+# ─────────────────────────────────────────────────────────────────────────
+#  Montages NFS du poste et fichier de service du NAS (1.8.0)
+# ─────────────────────────────────────────────────────────────────────────
+# Un montage NFS dit lui-même d'où il vient : « serveur:/export » dans
+# /proc/mounts. Le chemin d'un dossier SUR LE NAS se déduit donc sans rien
+# demander : /mnt/x/home_nas monté depuis srv:/home/nas -> /home/nas.
+# Limite connue : un export NFSv4 à racine virtuelle (fsid=0) annonce un chemin
+# relatif à cette racine, qui n'est pas le chemin réel sur le NAS. Le test de
+# correspondance le révèle (rouge) ; l'utilisateur corrige alors à la main.
+# Aucune de ces fonctions ne touche au montage lui-même (lecture de
+# /proc/mounts seulement) : elles ne bloquent pas sur un NAS mort.
+
+def split_nfs_source(src):
+    """« serveur:/export » -> (serveur, export), ou None si ce n'est pas une
+    source NFS lisible. Gère « [IPv6]:/export »."""
+    if not isinstance(src, str) or not src:
+        return None
+    if src.startswith("["):
+        end = src.find("]:")
+        if end == -1:
+            return None
+        server, export = src[1:end], src[end + 2:]
+    else:
+        idx = src.find(":")
+        if idx <= 0:
+            return None
+        server, export = src[:idx], src[idx + 1:]
+    if not export.startswith("/"):
+        return None
+    return server, (export.rstrip("/") or "/")
+
+
+def nfs_mounts(mounts=None):
+    """Montages NFS du poste : liste de dicts {point, server, export, fstype},
+    triée par point de montage. `mounts` (liste de (src, point, fstype)) sert
+    aux tests ; par défaut, /proc/mounts."""
+    if mounts is None:
+        if not _HAS_MOUNT_CHECK:
+            return []
+        try:
+            mounts = mount_check._read_mounts()
+        except Exception:
+            return []
+    out = []
+    seen = set()
+    for src, point, fstype in mounts:
+        if fstype not in ("nfs", "nfs4"):
+            continue
+        parsed = split_nfs_source(src)
+        if parsed is None or point in seen:
+            continue
+        seen.add(point)
+        out.append({"point": point.rstrip("/") or "/", "server": parsed[0],
+                    "export": parsed[1], "fstype": fstype})
+    return sorted(out, key=lambda m: m["point"])
+
+
+def nas_side_path(local_path, mounts=None):
+    """Chemin, VU DU NAS, d'un chemin du poste porté par un montage NFS ; None
+    si aucun montage NFS ne le porte. Sans E/S sur le montage (normpath, pas
+    realpath : un realpath ferait des stat, qui bloquent sur un NAS mort)."""
+    path = os.path.normpath(local_path or "")
+    best = None
+    for m in nfs_mounts(mounts):
+        p = m["point"]
+        if path == p or path.startswith(p.rstrip("/") + "/"):
+            if best is None or len(p) > len(best["point"]):
+                best = m
+    if best is None:
+        return None
+    rel = os.path.relpath(path, best["point"])
+    if rel == ".":
+        return best["export"]
+    return os.path.normpath(os.path.join(best["export"], rel))
+
+
+def suggested_pairs(shared_mount=None, mounts=None):
+    """Correspondances déduites des montages NFS : [{local, nas}] pour chaque
+    montage NFS du MÊME serveur que le dossier partagé, autre que lui. Le
+    watcher ne voit que les disques de son NAS : un montage venant d'un autre
+    serveur ne peut pas être une correspondance. Une paire identique des deux
+    côtés (/media/nas1 <-> /media/nas1) est omise : elle ne traduit rien."""
+    shared = os.path.normpath(shared_mount) if shared_mount else None
+    all_mounts = nfs_mounts(mounts)
+    server = next((m["server"] for m in all_mounts if m["point"] == shared), None)
+    out = []
+    for m in all_mounts:
+        if shared and m["point"] == shared:
+            continue
+        if server is not None and m["server"] != server:
+            continue
+        if m["point"] == m["export"]:
+            continue
+        out.append({"local": m["point"], "nas": m["export"]})
+    return out
+
+
+def suggested_service_account(nas_dir):
+    """Proposition de compte pour le service NAS : <nom> quand le dossier
+    partagé est sous /home/<nom>, sinon "" (aucune supposition)."""
+    parts = os.path.normpath(nas_dir or "").split("/")
+    if len(parts) >= 3 and parts[0] == "" and parts[1] == "home" and parts[2]:
+        name = parts[2]
+        if not _HAS_CONFIG or appconfig.valid_account_name(name):
+            return name
+    return ""
+
+
+def build_nas_service_text(account, script_dir):
+    """Contenu de proton-nas-watch.service pour ce compte et ce dossier (vus du
+    NAS). Service SYSTÈME : il démarre au boot, sans session. Pas de ligne
+    Group= : le service prend le groupe principal du compte."""
+    # « % » introduit un spécificateur systemd : le doubler. Le chemin du
+    # script va entre guillemets dès qu'il contient un blanc.
+    sd = script_dir.replace("%", "%%")
+    script = os.path.join(sd, "nas_watcher.py")
+    exec_path = f'"{script}"' if " " in script else script
+    return (
+        "# Generated by proton-drive-cli-sync (Install / Update).\n"
+        "# NAS-side real-time watcher. Install it ON THE NAS, as root:\n"
+        f"#   cp {os.path.join(script_dir, NAS_SERVICE_NAME)} /etc/systemd/system/\n"
+        "#   systemctl daemon-reload && systemctl enable --now "
+        f"{NAS_SERVICE_NAME}\n"
+        "[Unit]\n"
+        "Description=NAS real-time watcher (Proton Drive) — writes markers\n"
+        "After=network-online.target local-fs.target\n"
+        "Wants=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"User={account}\n"
+        f"WorkingDirectory={sd}\n"
+        f"ExecStart=/usr/bin/python3 {exec_path}\n"
+        "Environment=PYTHONUNBUFFERED=1\n"
+        "Restart=on-failure\n"
+        "RestartSec=5\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+def nas_service_plan(mounts=None):
+    """(texte, dossier_vu_du_NAS) du fichier de service à déposer, ou
+    (None, None) quand il n'y a rien à fabriquer : aucun compte réglé, ou
+    dossier partagé introuvable parmi les montages NFS."""
+    account = appconfig.nas_service_account() if _HAS_CONFIG else ""
+    if not account:
+        return None, None
+    nas_dir = nas_side_path(NAS_BASE, mounts)
+    if not nas_dir:
+        return None, None
+    return build_nas_service_text(account, nas_dir), nas_dir
+
+
+def nas_service_install_command(nas_dir):
+    """Commande à lancer SUR LE NAS : juste à la première installation comme
+    après un changement du fichier (enable est sans effet s'il est déjà actif,
+    restart démarre un service arrêté)."""
+    src = shlex.quote(os.path.join(nas_dir, NAS_SERVICE_NAME))
+    return (f"sudo cp {src} /etc/systemd/system/ && "
+            "sudo systemctl daemon-reload && "
+            f"sudo systemctl enable {NAS_SERVICE_NAME} && "
+            f"sudo systemctl restart {NAS_SERVICE_NAME}")
+
+
+def _write_text_if_changed(path, text):
+    """Écrit `text` dans `path` (atomique) s'il diffère. True si écrit."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            if f.read() == text:
+                return False
+    except OSError:
+        pass
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+    return True
+
+
 def push_scripts_to_nas():
     """Copie vers le NAS les scripts dont le WATCHER NAS a besoin, pour que le
     NAS ne soit jamais désynchronisé du poste (un déploiement partiel — ex.
@@ -484,9 +690,10 @@ def push_scripts_to_nas():
     i18n.py, mount_check.py + le dossier locale/, et settings.json avec la
     langue de l'interface (NAS_SETTINGS_PATH).
 
-    Le fichier .service, lui, est seulement DÉPOSÉ (nas_watcher.service.new) —
-    jamais installé à distance : cela requiert sudo + daemon-reload système sur
-    le NAS. Le message de retour rappelle la commande à lancer s'il a changé.
+    Le fichier de service, FABRIQUÉ pour le compte du NAS réglé
+    (nas_service_account), est seulement DÉPOSÉ (proton-nas-watch.service) —
+    jamais installé à distance : cela requiert sudo sur le NAS. Le message de
+    retour donne la commande complète à lancer quand il a changé.
 
     Silencieux et sans échec bloquant : c'est un confort de déploiement, il ne
     doit jamais empêcher l'installation locale. Retourne (ok, détail) — ok=False
@@ -539,24 +746,22 @@ def push_scripts_to_nas():
             os.replace(tmp, NAS_SETTINGS_PATH)
             pushed_names.append(_("settings.json (language {lang})").format(
                 lang=settings["language"]))
-        # .service : déposé à côté (jamais activé à distance).
-        svc_src = os.path.join(APP_DIR, "nas_watcher.service")
+        # Fichier de service : FABRIQUÉ pour le compte réglé, déposé à côté
+        # des scripts, jamais installé à distance (il faut sudo sur le NAS).
+        # Sans compte réglé, rien n'est fabriqué ni déposé.
+        svc_text, svc_dir = nas_service_plan()
         svc_changed = False
-        if os.path.exists(svc_src):
-            svc_dst = os.path.join(NAS_BASE, "nas_watcher.service.new")
-            if _sha256_of_file(svc_src) != _sha256_of_file(svc_dst):
-                shutil.copyfile(svc_src, svc_dst)
-                svc_changed = True
+        if svc_text:
+            svc_changed = _write_text_if_changed(
+                os.path.join(NAS_BASE, NAS_SERVICE_NAME), svc_text)
     except OSError as e:
         return False, _("scripts partly pushed ({e})").format(e=e), None
     if svc_changed:
-        # Le fichier .service a changé : commande complète (daemon-reload + restart).
-        cmd = ("sudo systemctl daemon-reload && "
-               "sudo systemctl restart proton-nas-watch.service")
-        return True, _("NAS scripts updated: {files}. The service file also "
-                       "changed — on the NAS, review proton-sync/"
-                       "nas_watcher.service.new, then run the command below.").format(
-                           files=", ".join(pushed_names)), cmd
+        cmd = nas_service_install_command(svc_dir)
+        return True, _("NAS scripts updated: {files}. The service file was "
+                       "written as well — on the NAS, install it with the "
+                       "command below.").format(
+                           files=", ".join(pushed_names) or "—"), cmd
     if pushed_names:
         # Lister les fichiers poussés + rappeler le redémarrage du watcher : un
         # script mis à jour n'est actif qu'après relance du service NAS (l'ancien
@@ -616,11 +821,15 @@ def nas_scripts_stale():
         # settings.json du NAS : même règle que le push (langue de l'interface).
         if _nas_settings_update(lenient=True) is not None:
             return True
-        # .service déposé à côté (nas_watcher.service.new).
-        svc_src = os.path.join(APP_DIR, "nas_watcher.service")
-        if os.path.exists(svc_src):
-            svc_dst = os.path.join(NAS_BASE, "nas_watcher.service.new")
-            if _sha256_of_file(svc_src) != _sha256_of_file(svc_dst):
+        # Fichier de service fabriqué (même règle que le push).
+        svc_text, _svc_dir = nas_service_plan()
+        if svc_text:
+            try:
+                with open(os.path.join(NAS_BASE, NAS_SERVICE_NAME), "r",
+                          encoding="utf-8") as f:
+                    if f.read() != svc_text:
+                        return True
+            except OSError:
                 return True
     except OSError:
         return False                           # incident NAS : pas de faux positif
@@ -1239,7 +1448,8 @@ def status(mappings_path):
 #  DESKTOP (Protocole 1). Voir nas_selftest.py (verdict) et
 #  nas_selftest_watcher.py (côté watcher).
 # ─────────────────────────────────────────────────────────────────────────
-def run_selftest(local_prefix, nas_prefix, timeout=20.0, poll=0.4):
+def run_selftest(local_prefix, nas_prefix, timeout=20.0, poll=0.4,
+                 nas_mount=None):
     """Teste UNE correspondance de chemin (local_prefix <-> nas_prefix) de bout
     en bout, sans jamais toucher au moteur de synchro. Retourne (couleur, message)
     via nas_selftest.verdict().
@@ -1253,6 +1463,10 @@ def run_selftest(local_prefix, nas_prefix, timeout=20.0, poll=0.4):
 
     Invariant : purement additif, aucune écriture dans les files de marqueurs,
     aucun appel moteur. En cas d'absence de réponse -> timed_out (jaune).
+
+    `nas_mount` : point de montage du dossier partagé à utiliser pour CE test —
+    celui que l'utilisateur voit à l'écran, même pas encore enregistré. Par
+    défaut, le réglage enregistré (relu à l'appel, jamais celui du lancement).
     """
     import uuid
     try:
@@ -1261,7 +1475,9 @@ def run_selftest(local_prefix, nas_prefix, timeout=20.0, poll=0.4):
         return ("yellow", _("Self-test module unavailable."))
 
     test_id = uuid.uuid4().hex[:12]
-    sdir = os.path.join(NAS_BASE, "selftest")
+    if nas_mount is None:
+        nas_mount = appconfig.nas_mount_path() if _HAS_CONFIG else NAS_MOUNT
+    sdir = os.path.join(nas_mount, "proton-sync", "selftest")
     req_path = os.path.join(sdir, f"request-{test_id}.json")
     reply_path = os.path.join(sdir, f"reply-{test_id}.json")
     ready_path = os.path.join(sdir, f"ready-{test_id}")
