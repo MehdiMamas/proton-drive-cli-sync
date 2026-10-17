@@ -25,11 +25,16 @@ Différences avec le watcher local (couche 3) :
   NAS exige toujours, lui, un « sudo systemctl restart proton-nas-watch.service »
   (règle d'or : un process Python garde son ancien code en mémoire) — c'est une
   chose DISTINCTE du rechargement à chaud des mappings.
+- Sans cible (aucun mapping poussé, ou mappings tous sur les disques du poste),
+  le watcher RESTE EN VIE : il journalise la raison, écoute les tests de
+  correspondance et reprend au premier mapping NAS poussé. Avant la 1.3.0, il
+  sortait en code 0 — systemd ne le relançait pas, un mapping poussé ensuite
+  n'était jamais vu, et le test de correspondance restait sans réponse.
 
 La logique pure (sélection des cibles, aiguillage, rattrapage, diff des watches)
 est testable sans pyinotify. Le branchement pyinotify est testé sur le NAS.
 """
-__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.3.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import sys
@@ -116,6 +121,25 @@ def discover_users(config_dir=CONFIG_DIR):
         if user:
             users[user] = path
     return users
+
+
+def idle_counts(config_dir=CONFIG_DIR):
+    """(utilisateurs, mappings) trouvés dans config/ — sert à dire POURQUOI le
+    watcher n'a aucune cible : rien n'a été poussé, ou tout est local. Pure."""
+    users = discover_users(config_dir)
+    total = sum(len(_load_mappings_file(p)) for p in users.values())
+    return len(users), total
+
+
+def idle_message(n_users, n_mappings, rescan_interval):
+    """Ligne de journal quand le watcher n'a aucune cible NAS. Pure."""
+    if n_mappings == 0:
+        return _("No NAS target yet: no mapping has been pushed. Waiting — a "
+                 "mapping pushed later is picked up within {s}s.").format(
+                     s=rescan_interval)
+    return _("No NAS target yet: {n} mapping(s) found, none of them on the NAS. "
+             "Waiting — a NAS mapping pushed later is picked up within {s}s."
+             ).format(n=n_mappings, s=rescan_interval)
 
 
 def _load_mappings_file(path):
@@ -445,11 +469,13 @@ def run_watcher(config_dir=CONFIG_DIR, queue_dir=QUEUE_DIR, log=None,
     targets, path_maps = load_all_targets(config_dir, log=log)
     _log_orphan_queues(config_dir, queue_dir, log)
     if not targets:
-        log(_("No NAS target to watch. The NAS watcher has nothing to do."))
-        return
-
-    # Vérif de la marge de watches (alerte si insuffisant).
-    _check_watch_capacity(targets, log)
+        # Pas de sortie : le service doit rester joignable (tests de
+        # correspondance) et voir le premier mapping NAS poussé.
+        n_users, n_mappings = idle_counts(config_dir)
+        log(idle_message(n_users, n_mappings, rescan_interval))
+    else:
+        # Vérif de la marge de watches (alerte si insuffisant).
+        _check_watch_capacity(targets, log)
 
     log(_("NAS watcher started — {n} target(s):").format(n=len(targets)))
     for t in targets:
@@ -557,9 +583,23 @@ def run_watcher(config_dir=CONFIG_DIR, queue_dir=QUEUE_DIR, log=None,
             # mapping). add_watch retourne le dict {path: wd} de pyinotify ; on le
             # passe tel quel à rm_watch pour retirer.
             def _st_add_watch(path):
+                # Watch NON récursif : les témoins du test sont écrits à la
+                # racine du dossier testé. Un watch récursif sur un gros export
+                # coûtait le parcours de tout l'arbre, et surtout recevait du
+                # noyau les MÊMES identifiants que les watches des mappings
+                # déjà posés dessous : les retirer en fin de test coupait la
+                # surveillance de ces mappings en silence (vérifié, 16 oct.).
+                # Dossier déjà surveillé (mapping) : rien à poser, ses
+                # événements alimentent déjà le registre du test.
                 if not os.path.isdir(path):
                     return None
-                return wm.add_watch(path, mask, rec=True, auto_add=True)
+                if wm.get_wd(path) is not None:
+                    return {}
+                before = set(wm.watches.keys())
+                res = wm.add_watch(path, mask, rec=False, auto_add=False)
+                # Ne rendre que ce que CE test a ajouté.
+                return {p: wd for p, wd in res.items()
+                        if wd and wd > 0 and wd not in before}
 
             def _st_rm_watch(token):
                 if not token:
