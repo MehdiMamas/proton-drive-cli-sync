@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.31.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.32.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -79,6 +79,12 @@ try:
     import code_update
 except ImportError:
     code_update = None
+
+# Assistant de démarrage (import tolérant : sans le module, pas d'assistant).
+try:
+    import setup_wizard
+except ImportError:
+    setup_wizard = None
 
 # Moteur importé comme MODULE pour réutiliser get_remote_listing (navigateur de
 # destinations Proton) — aucune logique de parsing parallèle. Import tolérant :
@@ -828,6 +834,17 @@ CONFIG_HELP = {
         "Afterwards, restart the background services so they follow the new "
         "name. Leave the field empty to return to automatic mode."
     ),
+    "nas-service-account": _(
+        "NAS account running the watcher\n\n"
+        "The account on the NAS under which the NAS watcher service runs. When "
+        "it is set, “💾 Install / Update” builds the service file "
+        "proton-nas-watch.service for that account and puts it next to the "
+        "scripts on the NAS, then shows the command to install it there.\n\n"
+        "The account must exist on the NAS, be able to read the folders you back "
+        "up, and write into the proton-sync folder.\n\n"
+        "Leave it empty if you installed the service yourself: nothing is built "
+        "and your service file is left alone."
+    ),
     "tray-icon": _(
         "Status icon in the system tray\n\n"
         "Shows a small circular double-arrow icon near the clock:\n"
@@ -1271,8 +1288,12 @@ def _parse_delete_guard_line(line):
 
 
 class MappingEditor(tk.Tk):
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, first_run=False):
         super().__init__()
+        # Premier lancement (aucun réglage) : l'assistant prend en charge le
+        # CLI et la connexion — les avis de démarrage qui en parlent se taisent.
+        self._first_run = bool(first_run and setup_wizard is not None
+                               and _HAS_CONFIG and _HAS_REALTIME)
         install_ui_pump(self)                # canal fil-secondaire → fil principal
         self.title(APP_TITLE)
         self.geometry("1060x700")
@@ -1362,7 +1383,10 @@ class MappingEditor(tk.Tk):
         # affichée ne peut pas en recevoir. Sans binaire, RIEN ne fonctionne
         # (ni synchro, ni connexion, ni amorçage) — mais l'édition des mappings
         # reste possible, donc on informe sans jamais fermer l'application.
-        self.after(400, self._check_cli_present_at_startup)
+        if self._first_run:
+            self.after(500, lambda: self.on_setup_wizard())
+        else:
+            self.after(400, self._check_cli_present_at_startup)
         # Ancienne unité sans RestartPreventExitStatus=5 : le contrôle est
         # différé comme la sonde CLI. Pas de lecture du fichier ni de
         # systemctl dans __init__.
@@ -1697,6 +1721,12 @@ class MappingEditor(tk.Tk):
                 return False
         return self._cli_shared_delete
 
+    def on_setup_wizard(self, start="welcome"):
+        """Ouvre l'assistant de démarrage (une seule fenêtre à la fois)."""
+        if setup_wizard is None:
+            return None
+        return setup_wizard.open_wizard(self, sys.modules[__name__], start=start)
+
     def _announce_cli_version(self, status, version):
         """Compare la version du CLI installé à celle sur laquelle le projet a été
         testé, et propose de QUITTER pour corriger la situation. Les comportements
@@ -1704,7 +1734,8 @@ class MappingEditor(tk.Tk):
         été validée. On propose, on n'impose pas — « Continuer » reste possible.
         (Le MOTEUR, lui, tourne sans écran : il se contente d'une ligne
         d'avertissement et ne bloque jamais — voir proton_sync.)"""
-        if not _HAS_ENGINE:
+        if not _HAS_ENGINE or self._first_run:
+            # Premier lancement : la page CLI de l'assistant dit la version.
             self._maybe_disable_rename_ext()
             return
         try:
@@ -1859,6 +1890,12 @@ class MappingEditor(tk.Tk):
         ttk.Button(toolbar2, text=_("🚫 Mapping exclusions"), command=self.on_edit_mapping_exclusions).pack(side="left", padx=2)
         ttk.Button(toolbar2, text=_("🗑 Delete"), command=self.on_remove).pack(side="left", padx=2)
         ttk.Button(toolbar2, text=_("↪ Move to file…"), command=self.on_move_mapping).pack(side="left", padx=2)
+        # Assistant de démarrage : au bout de la deuxième rangée. La première
+        # est pleine en français et en allemand à 1024 px (bouton coupé, vérifié).
+        if setup_wizard is not None and _HAS_CONFIG and _HAS_REALTIME:
+            ttk.Separator(toolbar2, orient="vertical").pack(side="left", fill="y", padx=8)
+            ttk.Button(toolbar2, text=_("Setup assistant…"),
+                       command=self.on_setup_wizard).pack(side="left", padx=2)
 
         # Ligne de résumé des exclusions globales (juste sous la barre d'outils)
         self.excl_summary = tk.StringVar(value="")
@@ -4414,6 +4451,7 @@ class MappingEditor(tk.Tk):
             nas_frame = ttk.LabelFrame(frm, text=_("NAS"), padding=10)
             nas_frame.pack(fill="x", pady=(0, 10))
             nas_var = tk.BooleanVar(value=appconfig.nas_enabled())
+            nas_was_on = appconfig.nas_enabled()
             row1 = ttk.Frame(nas_frame); row1.pack(anchor="w", fill="x")
             ttk.Checkbutton(row1, text=_("Use a NAS"), variable=nas_var).pack(side="left")
             help_btn(row1, "nas-enabled")
@@ -4431,6 +4469,13 @@ class MappingEditor(tk.Tk):
             ident_entry = ttk.Entry(row2b, textvariable=ident_var, width=28)
             ident_entry.pack(side="left")
             help_btn(row2b, "nas-identity")
+
+            row2c = ttk.Frame(nas_frame); row2c.pack(anchor="w", fill="x", pady=(8, 0))
+            ttk.Label(row2c, text=_("NAS account running the watcher: ")).pack(side="left")
+            svc_acct_var = tk.StringVar(value=appconfig.nas_service_account())
+            svc_acct_entry = ttk.Entry(row2c, textvariable=svc_acct_var, width=20)
+            svc_acct_entry.pack(side="left")
+            help_btn(row2c, "nas-service-account")
 
             # ---- Tableau : correspondance des chemins de DONNÉES desktop<->NAS ----
             pm_head = ttk.Frame(nas_frame); pm_head.pack(anchor="w", fill="x", pady=(12, 0))
@@ -4516,10 +4561,15 @@ class MappingEditor(tk.Tk):
                                         "before testing."), title=_("Correspondence test"))
                         return
                     _e["status"]._set_dot("#3b82f6")  # bleu = en cours
+                    # Le point de montage AFFICHÉ, même pas encore enregistré :
+                    # c'est lui que l'utilisateur teste. Lu ICI, sur le fil
+                    # principal — jamais une variable Tk dans le fil.
+                    shown_mount = mount_var.get().strip() or None
 
                     def worker():
                         try:
-                            color, msg = realtime_manager.run_selftest(loc, na)
+                            color, msg = realtime_manager.run_selftest(
+                                loc, na, nas_mount=shown_mount)
                         except Exception as ex:
                             color, msg = "yellow", _("Test error: {e}").format(e=ex)
                         def apply():
@@ -4648,6 +4698,7 @@ class MappingEditor(tk.Tk):
                 state = "normal" if nas_var.get() else "disabled"
                 mount_entry.configure(state=state)
                 ident_entry.configure(state=state)
+                svc_acct_entry.configure(state=state)
                 # Le tableau de correspondance suit le même sort que le reste des
                 # réglages NAS : sans NAS il n'a aucun sens, or il restait actif
                 # (incohérence). Le bouton d'aide « ? » de l'en-tête reste, lui,
@@ -4735,6 +4786,19 @@ class MappingEditor(tk.Tk):
                 _cur_rb.configure(state="disabled")
                 launcher_target_var.set("none")
 
+        def _offer_nas_wizard():
+            # NAS activé ici sur un compte qui ne l'avait pas : PROPOSER les
+            # pages du NAS de l'assistant (rien ne s'ouvre sans le demander).
+            if (setup_wizard is not None and _HAS_REALTIME and not nas_was_on
+                    and nas_var.get()):
+                if dlg_confirm(self, _(
+                        "You turned the NAS on. The setup assistant can guide "
+                        "you through the NAS steps: shared folder, data folders "
+                        "and the watcher on the NAS.\n\nOpen it now?"),
+                        title=_("Setup assistant"), ok_text=_("Open it"),
+                        cancel_text=_("Not now")):
+                    self.on_setup_wizard(start="nas")
+
         def _finish(old_ident):
             # Continuation d'apply() APRÈS la décision de migration NAS. Séparée
             # pour que les renommages NFS de la migration puissent tourner dans un
@@ -4816,6 +4880,8 @@ class MappingEditor(tk.Tk):
                 dlg_info(self, _("Configuration saved.\n\nChanges apply "
                         "automatically (the window uses them at its next launch)."),
                         title=_("Configuration"))
+            if _HAS_CONFIG:
+                _offer_nas_wizard()
 
         def _after_migrate(mok, mmsg, old_ident):
             # Reprise après la migration NAS asynchrone (sur le fil principal, via
@@ -4852,6 +4918,15 @@ class MappingEditor(tk.Tk):
                     dlg_error(dlg, _("The NAS mount point cannot be empty when a "
                                      "NAS is enabled."), title=_("Configuration"))
                     dlg.grab_set()
+                    return
+                _acct = svc_acct_var.get().strip()
+                if _acct and not appconfig.valid_account_name(_acct):
+                    dlg_error(dlg, _("“{a}” is not a valid account name: use "
+                                     "letters, digits, “.”, “_” or “-”, starting "
+                                     "with a letter.").format(a=_acct),
+                              title=_("Configuration"))
+                    dlg.grab_set()
+                    svc_acct_entry.focus_set()
                     return
                 # Seuils du garde-fou : une valeur refusée ne serait pas écrite
                 # (l'ancienne resterait), donc on le dit avant d'enregistrer.
@@ -4897,6 +4972,11 @@ class MappingEditor(tk.Tk):
                 appconfig.set_proton_cli_path(_cli_saisi or None)
                 appconfig.set_nas_enabled(nas_var.get())
                 appconfig.set_nas_mount_path(mount_var.get())
+                appconfig.set_nas_service_account(svc_acct_var.get())
+                if _HAS_REALTIME:
+                    # Les chemins du NAS suivent le point de montage enregistré
+                    # sans relancer l'application.
+                    realtime_manager.refresh_nas_paths()
                 # Table de correspondance des chemins de données (lignes non vides).
                 pairs = [{"local": e["local_var"].get().strip(),
                           "nas": e["nas_var"].get().strip()}
@@ -7593,7 +7673,15 @@ def main():
                 break
         if srv is None:
             return   # une autre instance a bel et bien repris le nom -> on sort
-    app = MappingEditor(config_path)
+    # Premier lancement : aucun fichier de réglages encore. Mesuré AVANT de
+    # créer la fenêtre, puisque l'éditeur peut en écrire un dès son démarrage.
+    first_run = False
+    try:
+        import paths as _paths
+        first_run = not os.path.exists(_paths.settings_path())
+    except Exception:
+        first_run = False
+    app = MappingEditor(config_path, first_run=first_run)
     app._singleton_srv = srv                     # garder la référence vivante
     _start_singleton_listener(app, srv)
     app.mainloop()
