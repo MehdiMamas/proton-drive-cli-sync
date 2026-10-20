@@ -22,6 +22,7 @@ Two concerns:
        - max_delete_ratio              (float)
        - create_thumbnails             (bool, on by default)
        - twoway_trigger                (str, "none" = no events probe, full listing)
+       - twoway_probe_cmd              (str, probe command of the "events" trigger)
        - nas_service_account           (str, "" = no service file built)
 
   2. DATA_DIR and its subpaths (cache, queue, logs): a single computed
@@ -129,6 +130,8 @@ DEFAULTS = {
     # Déclencheur du deux sens (clé "sync_mappings" des mappings). "none" :
     # aucune sonde d'événements, listing complet du côté Proton à chaque passage.
     "twoway_trigger": "none",
+    # Command line of the events probe (trigger "events").
+    "twoway_probe_cmd": "proton-sync-events",
     "tray_enabled": False,            # icône d'état dans la barre des tâches (tray_indicator.py)
     "account_name": None,             # identité NAS stable (None = auto : amorçage intelligent)
     # Correspondance des chemins de DONNÉES entre cette machine (desktop) et le
@@ -624,6 +627,14 @@ def twoway_trigger():
     if isinstance(v, str) and v.strip():
         return v.strip().lower()
     return DEFAULTS["twoway_trigger"]
+
+
+def twoway_probe_cmd():
+    """Command line of the events probe (trigger "events")."""
+    v = get("twoway_probe_cmd")
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    return DEFAULTS["twoway_probe_cmd"]
 
 
 def parse_min(value):

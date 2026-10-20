@@ -129,7 +129,7 @@ def test_trigger_none_lists_the_whole_remote_and_runs(
 def test_unknown_trigger_name_falls_back_to_full_listing(
         fake_drive, local_tree, engine, tmp_path):
     src = local_tree({"Two/a.txt": (b"AAAA", 1_000_000_000)})
-    engine.update_settings(twoway_trigger="events")
+    engine.update_settings(twoway_trigger="bogus")
     cfg = _write(tmp_path, [], [_tw(src / "Two", "/my-files/TW")])
     result = engine(cfg)
     assert result.returncode == 0, result.stdout + result.stderr

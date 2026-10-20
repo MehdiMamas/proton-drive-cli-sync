@@ -827,8 +827,16 @@ def load_sync_mappings(path):
 # balayage, sonde absente ou en échec) ; il fonctionne pleinement ainsi. Une
 # valeur appelable remplace ce parcours :
 # fn(mapping, config_path, cache, exclusions, **opts) -> complet.
-# Seul "none" existe pour l'instant ; la sonde d'événements viendra ensuite.
-TWOWAY_TRIGGERS = {"none": None}
+# "events" : sonde d'événements externe, repli sur le listing complet si elle
+# manque ou échoue (voir twoway.sync_events).
+
+
+def _twoway_events(*args, **kwargs):
+    import twoway
+    return twoway.sync_events(*args, **kwargs)
+
+
+TWOWAY_TRIGGERS = {"none": None, "events": _twoway_events}
 
 
 def twoway_runner():

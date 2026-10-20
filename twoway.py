@@ -7,9 +7,14 @@ A failed remote listing does not update the sync database for that folder.
 
 __version__ = "1.3.0"
 
+import hashlib
+import json
 import os
+import posixpath
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -187,6 +192,10 @@ class _Ctx:
         self.delete = bool(delete)
         # Remote listings read by the move detection, reused by _sync_dir.
         self.prelisted = {}
+        # Events pass: folders known on both sides are not walked again
+        # unless they are in ``deep``.
+        self.shallow = False
+        self.deep = set()
 
 
 def _context(mapping, config_path, cache, exclusions, dry_run, verbose,
@@ -259,6 +268,10 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
         if entry.path in gone_dirs:
             continue
         if entry.is_dir(follow_symlinks=False):
+            if (ctx.shallow and entry.path not in ctx.deep
+                    and listing.get(entry.name) is not None
+                    and _known_both_sides(entry.path, ctx)):
+                continue
             if not _sync_dir(entry.path, remote_folder, ctx,
                              listing.get(entry.name)):
                 all_children = False
@@ -1249,3 +1262,274 @@ def _detect_local_moves(ctx, dest_parent):
         if not ctx.dry_run:
             ctx.db.move_file_row(row["local_path"], new, new_remote,
                                  inode=os.stat(new).st_ino)
+
+
+# --- events trigger -----------------------------------------------------------
+#
+# The "events" trigger asks an external probe what changed in the Proton folder
+# of one mapping, and reconciles only the folders concerned. The probe keeps
+# its own bookmark (one data folder per mapping, PROTON_SYNC_EVENTS_DIR); this
+# engine stores nothing about it. Changes are hints: they are applied through
+# the same paths as a full pass (renames and moves, guarded deletions), and a
+# full listing replaces them whenever the probe cannot be trusted.
+#
+# Probe command line (setting twoway_probe_cmd, default "proton-sync-events"),
+# run for one mapping at a time, never two at once:
+#   <cmd> events changes -j -k <proton folder>   read, bookmark not advanced
+#   <cmd> events changes -j <proton folder>      acknowledge (advances)
+# Order of a pass: read with -k, apply, and only if the apply completed run
+# again without -k and apply that output too (it repeats the first changes plus
+# any that arrived in between, so applying is idempotent).
+
+PROBE_TIMEOUT = 300
+
+
+class ProbeError(Exception):
+    pass
+
+
+def probe_state_dir(mapping, config_path):
+    """Data folder of this mapping's probe state: one per sync_mappings entry."""
+    key = os.path.normpath(mapping.get("source") or "")
+    tag = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+    base = os.path.dirname(os.fspath(syncdb.database_path(config_path)))
+    return os.path.join(base, "events-probe", tag)
+
+
+def probe_command():
+    appconfig = getattr(_ps, "appconfig", None)
+    if getattr(_ps, "_HAS_CONFIG", False) and appconfig is not None:
+        return appconfig.twoway_probe_cmd()
+    return "proton-sync-events"
+
+
+def run_probe(folder, state_dir, keep, command=None):
+    """One probe run on a Proton folder; returns the parsed JSON object.
+
+    Raises ProbeError when the command is missing or fails, or when its output
+    is not one JSON object with a list of changes."""
+    try:
+        argv = shlex.split(command if command is not None else probe_command())
+    except ValueError as exc:
+        raise ProbeError(str(exc))
+    if not argv:
+        raise ProbeError("empty probe command")
+    argv += ["events", "changes", "-j"] + (["-k"] if keep else []) + [folder]
+    env = dict(os.environ, PROTON_SYNC_EVENTS_DIR=state_dir)
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        done = subprocess.run(argv, capture_output=True, text=True, env=env,
+                              timeout=PROBE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProbeError(str(exc))
+    if done.returncode != 0:
+        raise ProbeError("exit {c}: {e}".format(
+            c=done.returncode, e=(done.stderr or "").strip()[:200]))
+    return parse_probe_output(done.stdout)
+
+
+def parse_probe_output(text):
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ProbeError("bad JSON: {e}".format(e=exc))
+    if (not isinstance(data, dict) or "initialized" not in data
+            or not isinstance(data.get("changes", []), list)):
+        raise ProbeError("unexpected output")
+    data.setdefault("changes", [])
+    return data
+
+
+def _probe_changes(data):
+    """Well-formed changes only; anything else is ignored (they are hints)."""
+    out = []
+    for ch in data.get("changes") or []:
+        if (isinstance(ch, dict) and isinstance(ch.get("path"), str)
+                and ch.get("action") in ("created", "modified", "revised",
+                                         "moved", "removed")):
+            out.append(ch)
+    return out
+
+
+def sync_events(mapping, config_path, cache, exclusions, dry_run=False,
+                verbose=False, allow_mass_delete=False, global_ex=None,
+                delete=False):
+    """The "events" trigger for one mapping. Returns True when complete."""
+    kwargs = dict(dry_run=dry_run, verbose=verbose,
+                  allow_mass_delete=allow_mass_delete, global_ex=global_ex,
+                  delete=delete)
+
+    def full(why):
+        print("[probe-fallback] " + _(
+            "Events probe: {w}; listing the whole Proton side").format(w=why))
+        return sync_mapping(mapping, config_path, cache, exclusions, **kwargs)
+
+    if mapping.get("type") == "file":
+        return sync_mapping(mapping, config_path, cache, exclusions, **kwargs)
+    source = mapping.get("source") or ""
+    dest_parent = mapping.get("dest_parent") or ""
+    ctx = _context(mapping, config_path, cache, exclusions, dry_run, verbose,
+                   allow_mass_delete, source_root=source,
+                   global_ex=global_ex, delete=delete)
+    folder = _remote_root(ctx, dest_parent)
+    state_dir = probe_state_dir(mapping, config_path)
+    with ctx.db:
+        baseline = ctx.db.get_folder(source) is not None
+    ctx.db.close()
+    try:
+        data = run_probe(folder, state_dir, keep=True)
+    except ProbeError as exc:
+        return full("unavailable ({e})".format(e=exc))
+    if not data.get("initialized"):
+        return full("first run, starting point set")
+    if not baseline:
+        return full("no baseline for this mapping yet")
+
+    ctx = _context(mapping, config_path, cache, exclusions, dry_run, verbose,
+                   allow_mass_delete, source_root=source,
+                   global_ex=global_ex, delete=delete)
+    ctx.shallow = True
+    with ctx.db:
+        complete = _apply_events(_probe_changes(data), ctx, dest_parent)
+        if not complete or dry_run:
+            return complete
+        try:
+            ack = run_probe(folder, state_dir, keep=False)
+        except ProbeError as exc:
+            print("[probe-fallback] " + _(
+                "Events probe: could not acknowledge ({e}); the changes will "
+                "be reported again").format(e=exc))
+            return complete
+        later = _probe_changes(ack)
+        if later:
+            return _apply_events(later, ctx, dest_parent)
+        return complete
+
+
+def _known_both_sides(local_dir, ctx):
+    row = ctx.db.get_folder(local_dir)
+    return bool(row and row.get("remote_seen") and row.get("local_seen"))
+
+
+def _apply_events(changes, ctx, dest_parent):
+    """Apply probe changes: moves first, then reconcile the folders concerned."""
+    root = _remote_root(ctx, dest_parent).rstrip("/")
+    _detect_local_moves(ctx, dest_parent)
+    affected = set()
+    for ch in changes:
+        rel = ch["path"].strip("/")
+        old = (ch.get("from") or "").strip("/")
+        if ch["action"] == "moved" and old:
+            _apply_moved(ch, ctx, dest_parent, root)
+        for p in (rel, old):
+            if p:
+                affected.add(posixpath.dirname(p))
+        if ch.get("type") == "folder" and ch["action"] != "removed":
+            affected.add(rel)
+    for path in _local_changed_folders(ctx):
+        rel = os.path.relpath(path, ctx.source_root)
+        affected.add("" if rel == "." else "/".join(rel.split(os.sep)))
+    complete = True
+    done = set()
+    for rel in sorted(affected, key=lambda r: r.count("/") if r else -1):
+        local = ctx.source_root if not rel else os.path.join(
+            ctx.source_root, *rel.split("/"))
+        local = _nearest_known_folder(local, ctx)
+        if local is None or local in done:
+            continue
+        done.add(local)
+        ctx.deep.add(local)
+        remote_parent = posixpath.dirname(
+            _remote_for(ctx, dest_parent, local)) or "/"
+        if not _sync_dir(local, remote_parent, ctx):
+            complete = False
+    ctx.prelisted.clear()
+    if complete and not ctx.dry_run:
+        _backfill_ids(ctx, dest_parent)
+    return complete
+
+
+def _apply_moved(ch, ctx, dest_parent, root):
+    """A move or rename seen on Proton, applied here as a move or rename."""
+    old_remote = root + "/" + ch["from"].strip("/")
+    new_remote = root + "/" + ch["path"].strip("/")
+    is_dir = ch.get("type") == "folder"
+    if is_dir:
+        rows = [r for r in ctx.db.folders() if r.get("remote_path") == old_remote]
+    else:
+        rows = [r for r in ctx.db.rows()
+                if r.get("remote_path") == old_remote and r.get("state") == "synced"]
+    if len(rows) != 1:
+        return False  # not in the baseline: the reconcile treats it as new
+    return _move_local(rows[0], new_remote, is_dir, ctx, dest_parent)
+
+
+def _nearest_known_folder(path, ctx):
+    """Closest existing folder at or above ``path`` the baseline knows."""
+    root = ctx.source_root.rstrip(os.sep)
+    while path:
+        stripped = path.rstrip(os.sep)
+        if os.path.isdir(path) and (
+                stripped == root or ctx.db.get_folder(path) is not None):
+            return path
+        if len(stripped) <= len(root):
+            return None
+        path = os.path.dirname(path)
+    return None
+
+
+def _file_row_unchanged(path, row):
+    """Size, mtime and inode against the baseline row; no hashing."""
+    if row.get("state") != "synced":
+        return False
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    size, mtime = row.get("claimed_size"), row.get("local_mtime")
+    if size is None or mtime is None:
+        return False
+    if st.st_size != size or float(st.st_mtime) != float(mtime):
+        return False
+    inode = row.get("local_inode")
+    return not inode or st.st_ino == inode
+
+
+def _local_changed_folders(ctx):
+    """Folders under the mapping with a local change since the baseline.
+
+    The disk walk is cheap; only remote listings are not, and those stay
+    limited to the folders returned here and those the probe names."""
+    root = ctx.source_root
+
+    def excluded(name):
+        return bool(ctx.exclusions and ctx.exclusions.is_excluded(name))
+
+    changed = set()
+    seen_files, seen_dirs = set(), {root}
+    for parent, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not excluded(d)]
+        for name in dirs:
+            path = os.path.join(parent, name)
+            seen_dirs.add(path)
+            if not os.path.islink(path) and ctx.db.get_folder(path) is None:
+                changed.add(parent)
+        for name in files:
+            if excluded(name) or _is_conflict_copy(name):
+                continue
+            path = os.path.join(parent, name)
+            seen_files.add(path)
+            row = ctx.db.get(path)
+            if row is None or not _file_row_unchanged(path, row):
+                changed.add(parent)
+    for row in ctx.db.rows():
+        path = row["local_path"]
+        if (_under(path, root) and path not in seen_files
+                and not excluded(os.path.basename(path))):
+            changed.add(os.path.dirname(path))
+    for row in ctx.db.folders():
+        path = row["local_path"]
+        if (_under(path, root) and path not in seen_dirs
+                and not excluded(os.path.basename(path))):
+            changed.add(os.path.dirname(path))
+    return changed
