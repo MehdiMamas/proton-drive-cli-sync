@@ -5,6 +5,7 @@ one-way mapping in the same file never downloads.
 """
 
 import os
+import shutil
 
 import pytest
 
@@ -577,3 +578,119 @@ def test_a_download_under_another_name_is_still_used(tmp_path, monkeypatch):
     assert "wrote 0 files" in reason
 
 
+
+
+# --- folder baseline ------------------------------------------------------
+
+def _synced(engine, local_tree, write_mappings, files, **extra):
+    src = local_tree(files)
+    extra.setdefault("source_kind", "local")
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/B", **extra)])
+    assert engine(cfg).returncode == 0
+    return src, cfg
+
+
+def _drop_remote(fake_drive, remote_path):
+    base = remote_state.normalize(remote_path)
+
+    def mutate(state):
+        for path in [p for p in state["nodes"]
+                     if p == base or p.startswith(base + "/")]:
+            state["nodes"].pop(path)
+    fake_drive._update(mutate)
+
+
+def test_folder_deleted_locally_is_trashed_on_proton(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, cfg = _synced(engine, local_tree, write_mappings,
+                       {"Docs/sub/a.txt": (b"AAAA", 1_000_000_000),
+                        "Docs/keep.txt": (b"KKKK", 1_000_000_000)},
+                       allow_delete=True)
+    shutil.rmtree(src / "Docs" / "sub")
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (src / "Docs" / "sub").exists()
+    assert fake_drive.content("/my-files/B/Docs/sub/a.txt") is None
+    assert "sub" not in fake_drive.listing("/my-files/B/Docs")
+    assert fake_drive.trashed("/my-files/B/Docs/sub")
+    assert fake_drive.content("/my-files/B/Docs/keep.txt") == b"KKKK"
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        assert database.get_folder(str(src / "Docs" / "sub")) is None
+        assert database.get(str(src / "Docs" / "sub" / "a.txt")) is None
+
+
+def test_folder_deleted_on_proton_is_held_locally_not_destroyed(
+        fake_drive, local_tree, write_mappings, engine):
+    src, cfg = _synced(engine, local_tree, write_mappings,
+                       {"Docs/sub/a.txt": (b"AAAA", 1_000_000_000)})
+    _drop_remote(fake_drive, "/my-files/B/Docs/sub")
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[held] " in result.stdout
+    assert not (src / "Docs" / "sub").exists()
+    assert "sub" not in fake_drive.listing("/my-files/B/Docs")
+    dest = result.stdout.split("[held] ", 1)[1].split(" -> ", 1)[1].splitlines()[0].strip()
+    assert os.path.exists(dest)
+
+
+def test_folder_deletions_are_held_without_delete(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src, cfg = _synced(engine, local_tree, write_mappings,
+                       {"Docs/gone_here/a.txt": (b"AAAA", 1_000_000_000),
+                        "Docs/gone_there/b.txt": (b"BBBB", 1_000_000_000)},
+                       allow_delete=True)
+    shutil.rmtree(src / "Docs" / "gone_here")
+    _drop_remote(fake_drive, "/my-files/B/Docs/gone_there")
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "deletions are off" in result.stdout
+    assert not (src / "Docs" / "gone_here").exists()
+    assert fake_drive.content("/my-files/B/Docs/gone_here/a.txt") == b"AAAA"
+    assert (src / "Docs" / "gone_there" / "b.txt").read_bytes() == b"BBBB"
+    assert fake_drive.content("/my-files/B/Docs/gone_there/b.txt") is None
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        assert database.get_folder(str(src / "Docs" / "gone_here"))
+        assert database.get_folder(str(src / "Docs" / "gone_there"))
+
+
+def test_edit_inside_a_folder_deleted_on_proton_wins(
+        fake_drive, local_tree, write_mappings, engine):
+    src, cfg = _synced(engine, local_tree, write_mappings,
+                       {"Docs/sub/a.txt": (b"AAAA", 1_000_000_000),
+                        "Docs/sub/b.txt": (b"BBBB", 1_000_000_000)})
+    (src / "Docs" / "sub" / "a.txt").write_bytes(b"EDITED!")
+    _drop_remote(fake_drive, "/my-files/B/Docs/sub")
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (src / "Docs" / "sub" / "a.txt").read_bytes() == b"EDITED!"
+    assert fake_drive.content("/my-files/B/Docs/sub/a.txt") == b"EDITED!"
+
+
+def test_edit_inside_a_folder_deleted_locally_wins(
+        fake_drive, local_tree, write_mappings, engine):
+    src, cfg = _synced(engine, local_tree, write_mappings,
+                       {"Docs/sub/a.txt": (b"AAAA", 1_000_000_000)},
+                       allow_delete=True)
+    shutil.rmtree(src / "Docs" / "sub")
+    fake_drive.seed_file("/my-files/B/Docs/sub/a.txt", b"NEWER-ON-PROTON",
+                         mtime=2_000_000_000)
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (src / "Docs" / "sub" / "a.txt").read_bytes() == b"NEWER-ON-PROTON"
+    assert fake_drive.content("/my-files/B/Docs/sub/a.txt") == b"NEWER-ON-PROTON"
+
+
+def test_mass_delete_guard_holds_folder_deletions(
+        fake_drive, local_tree, write_mappings, engine):
+    engine.update_settings(mass_delete_guard=True, max_delete_min=1)
+    src, cfg = _synced(engine, local_tree, write_mappings,
+                       {"Docs/one/a.txt": (b"AAAA", 1_000_000_000),
+                        "Docs/two/b.txt": (b"BBBB", 1_000_000_000)},
+                       allow_delete=True)
+    shutil.rmtree(src / "Docs" / "one")
+    shutil.rmtree(src / "Docs" / "two")
+    result = engine(cfg, "--delete")
+    assert "[delete-guard]" in result.stdout, result.stdout + result.stderr
+    assert fake_drive.content("/my-files/B/Docs/one/a.txt") == b"AAAA"
+    assert fake_drive.content("/my-files/B/Docs/two/b.txt") == b"BBBB"
+    assert not (src / "Docs" / "one").exists()
