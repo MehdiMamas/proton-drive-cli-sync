@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.18.1"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.19.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -64,6 +64,15 @@ try:
     _HAS_MOUNT_CHECK = True
 except ImportError:
     _HAS_MOUNT_CHECK = False
+
+# Dossiers d'arrivée en conflit (mapping_keys.py) : sans ce module, on ne sait
+# pas dire quels mappings se marchent dessus sur Proton — TOUTES les
+# suppressions sont alors refusées, comme sans mount_check (garde-fou).
+try:
+    import mapping_keys
+    _HAS_MAPPING_KEYS = True
+except ImportError:
+    _HAS_MAPPING_KEYS = False
 
 # Réglages d'installation (chemins, présence NAS, extensions...) : une SEULE
 # source de vérité partagée par le moteur, le GUI et les démons. Repli sûr si
@@ -2352,6 +2361,59 @@ def build_delete_opts(mapping, guard_path, global_ex=None, allow_mass_delete=Fal
     return opts
 
 
+def _hold_arrival_conflicts(mappings):
+    """Retient les suppressions des mappings dont le dossier d'arrivée sur
+    Proton est le même que celui d'un autre mapping, en contient un, ou se
+    trouve dans celui d'un autre (les deux mappings de chaque paire).
+
+    Avec les suppressions propagées, le moteur met à la corbeille tout ce qui,
+    sur Proton, n'a pas d'équivalent dans la source du mapping : il jetterait
+    donc le contenu de l'autre mapping (démontré sur le faux Drive). Les
+    fichiers continuent d'être envoyés ; seul ce geste est retenu, pour tout
+    le passage. Le réglage du fichier n'est pas modifié : la retenue ne vaut
+    qu'en mémoire, et cesse d'elle-même quand le conflit est corrigé.
+
+    Calculé sur la liste COMPLÈTE du fichier, avant toute restriction
+    (--only-source, --reset-source, --subpath) : un mapping traité seul reste
+    en conflit avec ceux qu'on ne traite pas.
+
+    Retourne {id(mapping): (source de l'autre, dossier d'arrivée, allow_delete
+    d'origine, même dossier ?)} pour chaque mapping retenu."""
+    held = {}
+    if not _HAS_MAPPING_KEYS:
+        for m in mappings:
+            if isinstance(m, dict) and m.get("allow_delete"):
+                m["allow_delete"] = False
+        return held
+    for i, j in mapping_keys.deletion_holds(mappings).items():
+        m, other = mappings[i], mappings[j]
+        mine = mapping_keys.arrival_folder(m)
+        same = mapping_keys.conflict_kind(mine, mapping_keys.arrival_folder(other)) == "same"
+        held[id(m)] = (other.get("source", "?"), mine,
+                       bool(m.get("allow_delete")), same)
+        m["allow_delete"] = False
+    return held
+
+
+def _print_arrival_holds(scope, held, delete):
+    """Une ligne par mapping de la portée du passage dont les suppressions
+    auraient été propagées et sont retenues."""
+    if not delete:
+        return
+    for m in scope:
+        info = held.get(id(m))
+        if info and info[2]:
+            if info[3]:
+                text = _("deletions held for {s}: {o} puts its content in the same "
+                         "Proton folder, {r}; files are still sent.")
+            else:
+                text = _("deletions held for {s}: its Proton folder {r} and the one "
+                         "of {o} are nested, one inside the other; files are still "
+                         "sent.")
+            print("  ⚠  [arrival-conflict] " + text.format(
+                s=m.get("source", "?"), r=info[1], o=info[0]))
+
+
 def _wipe_mapping_remote(mapping, dry_run=False, verbose=False):
     """Envoie à la CORBEILLE (jamais définitif, quel que soit delete_mode) le
     dossier distant d'un mapping, en préalable à une reconstruction (option de la
@@ -3614,6 +3676,9 @@ def main():
     # la reprise des vérifications d'après les journaux porte sur tous les
     # mappings du fichier, pas seulement sur ceux de ce passage.
     all_mappings = list(mappings)
+    # Conflits de dossiers d'arrivée : suppressions retenues en mémoire pour
+    # tout le passage, AVANT toute restriction de portée.
+    arrival_held = _hold_arrival_conflicts(mappings)
 
     # Le cache est indexé par le nom du fichier de mappings (sans son chemin).
     # Comme ça, déplacer le JSON ne casse pas le cache.
@@ -3800,6 +3865,9 @@ def main():
             if not _HAS_MOUNT_CHECK:
                 print(_("   ⚠  mount_check.py missing: ALL deletions will be "
                   "refused (safety guard)."))
+        if not _HAS_MAPPING_KEYS:
+            print(_("   ⚠  mapping_keys.py missing: ALL deletions will be "
+                    "refused (safety guard)."))
 
     # ── Mode TEMPS RÉEL (--subpath) ────────────────────────────────────────
     # Si --subpath est fourni, on synchronise UNIQUEMENT ce sous-dossier dans le
@@ -3828,6 +3896,7 @@ def main():
         print(_("   Mapping: {s}  =>  {d}").format(s=target["source"], d=target["dest_parent"]))
         if args.delete:
             print(_("   ⚠  Deletion propagation requested (--delete)"))
+        _print_arrival_holds([target], arrival_held, args.delete)
         eff_ex = mapping_exclusions(target, global_ex)
         _RUN.mappings_total = 1
         result = sync_subpath(target, args.subpath, dry_run=args.dry_run,
@@ -3887,10 +3956,19 @@ def main():
             #     s'applique qu'aux mappings de type dossier ; un mapping fichier
             #     n'a pas de « dossier distant » propre à vider.
             if args.wipe_remote and m.get("type") == "folder":
-                _wipe_mapping_remote(m, dry_run=args.dry_run, verbose=args.verbose)
+                if id(m) in arrival_held:
+                    # Vider ce dossier jetterait aussi ce qu'un autre mapping y
+                    # a déposé : même règle que les suppressions.
+                    print(_("  ⛔ Remote wipe REFUSED: this mapping's Proton folder "
+                            "is the same as the one of {o}, or nested with it.").format(
+                                o=arrival_held[id(m)][0]))
+                    print(_("     Nothing deleted remotely — this mapping was NOT reset."))
+                else:
+                    _wipe_mapping_remote(m, dry_run=args.dry_run, verbose=args.verbose)
 
     # État de santé accumulé au fil de la boucle : une entrée par mapping
     # réellement traité, publiée en une seule écriture à la fin.
+    _print_arrival_holds(mappings, arrival_held, args.delete)
     health = []
     _take_unreadable()   # repart d'une ardoise propre pour le 1er mapping
     _RUN.mappings_total = len(mappings)
