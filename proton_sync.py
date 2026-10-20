@@ -131,6 +131,8 @@ class RunStats:
         "folders_stall_skipped",
         "items_trashed",
         "trash_failed",
+        "rename_failed",
+        "move_failed",
         "deletions_refused",
         "sources_missing",
         "mappings_total",
@@ -2324,6 +2326,36 @@ def remote_trash(remote_path, permanent=False, dry_run=False):
         return False
     print(f"    🗑  " + _("sent to trash") + f" : {remote_path}")
     _RUN.add("items_trashed")
+    return True
+
+
+def remote_rename(remote_path, new_name, dry_run=False):
+    """Renomme un élément distant sur place (`filesystem rename`), sans envoi
+    ni corbeille. Retourne True si OK."""
+    if dry_run:
+        print(f"    [DRY-RUN] " + _("would rename") + f" : {remote_path} -> {new_name}")
+        return True
+    res = run_cli(["filesystem", "rename", remote_path, new_name])
+    if res.returncode != 0:
+        print(_("    ❌ rename of {p} failed: {e}").format(p=remote_path, e=res.stderr.strip()))
+        _RUN.add("rename_failed")
+        return False
+    print(f"    ✏️  " + _("renamed") + f" : {remote_path} -> {new_name}")
+    return True
+
+
+def remote_move(remote_path, target_parent, dry_run=False):
+    """Déplace un élément distant vers un autre dossier (`filesystem move`),
+    sans envoi ni corbeille. Retourne True si OK."""
+    if dry_run:
+        print(f"    [DRY-RUN] " + _("would move") + f" : {remote_path} -> {target_parent}")
+        return True
+    res = run_cli(["filesystem", "move", remote_path, target_parent])
+    if res.returncode != 0:
+        print(_("    ❌ move of {p} failed: {e}").format(p=remote_path, e=res.stderr.strip()))
+        _RUN.add("move_failed")
+        return False
+    print(f"    ➡️  " + _("moved") + f" : {remote_path} -> {target_parent}")
     return True
 
 

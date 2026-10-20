@@ -85,3 +85,38 @@ def test_delete_folder_tree_forgets_the_folder_and_its_files(tmp_path):
         assert database.get_folder("/x/Docs/sub") is None
         assert database.get("/x/Docs/sub/a.txt") is None
         assert database.get_folder("/x/Docs2") is not None
+
+
+
+
+def test_move_file_row_keeps_node_id_and_checksum(tmp_path):
+    with syncdb.SyncDB(tmp_path / "s.db") as database:
+        database.upsert({"local_path": "/l/a", "remote_path": "/r/a",
+                         "remote_node_id": "n1", "sha1": "abc", "local_inode": 5,
+                         "state": "synced"})
+        assert database.move_file_row("/l/a", "/l/b", "/r/b", inode=9)
+        assert database.get("/l/a") is None
+        row = database.get("/l/b")
+        assert (row["remote_path"], row["remote_node_id"], row["sha1"],
+                row["local_inode"]) == ("/r/b", "n1", "abc", 9)
+        assert not database.move_file_row("/l/none", "/l/x", "/r/x")
+
+
+def test_move_tree_rewrites_folder_and_file_rows(tmp_path):
+    with syncdb.SyncDB(tmp_path / "s.db") as database:
+        database.upsert_folder({"local_path": "/l/d", "remote_path": "/r/d",
+                                "remote_node_id": "f1", "local_seen": True,
+                                "remote_seen": True})
+        database.upsert_folder({"local_path": "/l/d/e", "remote_path": "/r/d/e",
+                                "remote_node_id": "f2"})
+        database.upsert({"local_path": "/l/d/e/x", "remote_path": "/r/d/e/x",
+                         "remote_node_id": "n1", "state": "synced"})
+        database.upsert({"local_path": "/l/dd/x", "remote_path": "/r/dd/x",
+                         "state": "synced"})
+        database.move_tree("/l/d", "/l/z/q", "/r/d", "/r/z/q")
+        assert database.get_folder("/l/d") is None
+        assert database.get_folder("/l/z/q")["remote_node_id"] == "f1"
+        assert database.get_folder("/l/z/q/e")["remote_path"] == "/r/z/q/e"
+        row = database.get("/l/z/q/e/x")
+        assert row["remote_path"] == "/r/z/q/e/x" and row["remote_node_id"] == "n1"
+        assert database.get("/l/dd/x")["remote_path"] == "/r/dd/x"

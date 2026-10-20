@@ -275,3 +275,59 @@ class SyncDB:
             "OR substr(local_path, 1, ?) = ?",
             (local_path, len(prefix), prefix))
         self._conn.commit()
+
+    def move_file_row(self, old_local, new_local, new_remote, inode=None):
+        """A synced file was renamed or moved: keep its baseline row (node id,
+        sha1, size) under the new paths. Returns False when there was no row."""
+        row = self.get(old_local)
+        if row is None:
+            return False
+        row["local_path"] = new_local
+        row["remote_path"] = new_remote
+        if inode is not None:
+            row["local_inode"] = inode
+        self._conn.execute("DELETE FROM files WHERE local_path = ?", (old_local,))
+        self._conn.commit()
+        self.upsert(row)
+        return True
+
+    def move_tree(self, old_local, new_local, old_remote, new_remote):
+        """A folder was renamed or moved: rewrite the paths of its own row and of
+        every file and folder row below it. Node ids and checksums are kept."""
+        old_prefix = old_local.rstrip(os.sep) + os.sep
+        new_prefix = new_local.rstrip(os.sep) + os.sep
+        old_rprefix = old_remote.rstrip("/") + "/"
+        new_rprefix = new_remote.rstrip("/") + "/"
+
+        def local_of(path):
+            if path == old_local:
+                return new_local
+            return new_prefix + path[len(old_prefix):]
+
+        def remote_of(path):
+            if path == old_remote:
+                return new_remote
+            if path.startswith(old_rprefix):
+                return new_rprefix + path[len(old_rprefix):]
+            return path
+
+        def inside(path):
+            return path == old_local or path.startswith(old_prefix)
+
+        files = [r for r in self.rows() if inside(r["local_path"])]
+        folders = [r for r in self.folders() if inside(r["local_path"])]
+        for row in files:
+            self._conn.execute("DELETE FROM files WHERE local_path = ?",
+                               (row["local_path"],))
+        for row in folders:
+            self._conn.execute("DELETE FROM folders WHERE local_path = ?",
+                               (row["local_path"],))
+        self._conn.commit()
+        for row in folders:
+            row["local_path"] = local_of(row["local_path"])
+            row["remote_path"] = remote_of(row["remote_path"])
+            self.upsert_folder(row)
+        for row in files:
+            row["local_path"] = local_of(row["local_path"])
+            row["remote_path"] = remote_of(row["remote_path"])
+            self.upsert(row)
