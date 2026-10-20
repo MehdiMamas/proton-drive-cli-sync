@@ -5,11 +5,16 @@ download does not replace the local file and does not rewrite its sync row.
 A failed remote listing does not update the sync database for that folder.
 """
 
+import json
 import os
+import posixpath
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 
 import syncdb
 
@@ -64,7 +69,11 @@ def sync_mapping(mapping, config_path, cache, exclusions, dry_run=False,
                    verbose, allow_mass_delete, source_root=source,
                    global_ex=global_ex, delete=delete)
     with ctx.db:
-        return _sync_dir(source, mapping.get("dest_parent") or "", ctx)
+        _detect_remote_moves(ctx)
+        complete = _sync_dir(source, mapping.get("dest_parent") or "", ctx)
+        if not ctx.dry_run:
+            _backfill_ids(ctx)
+        return complete
 
 
 def sync_tree(mapping, local_dir, remote_parent, config_path, cache, exclusions,
@@ -92,6 +101,11 @@ class _Ctx:
         self.source_root = source_root
         self.config_path = config_path
         self.delete = bool(delete)
+        # Reconcile one folder only: known sub-folders are left to their own
+        # events (the events trigger sets this).
+        self.shallow = False
+        # Listings the move detection already read: {remote folder: listing}.
+        self.prelisted = {}
 
 
 def _context(mapping, config_path, cache, exclusions, dry_run, verbose,
@@ -131,7 +145,9 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     print("📂 " + local_dir)
     if not ctx.dry_run and not _ps.ensure_remote_path(remote_folder):
         return False
-    listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
+    listing = ctx.prelisted.pop(remote_folder, None)
+    if listing is None:
+        listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
     if not listing.ok:
         print("[list-skipped] " + _(
             "Could not list {p} — folder skipped this pass "
@@ -149,6 +165,7 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     local_names = set()
     dir_failed = False
     all_children = True
+    _detect_local_renames(entries, local_dir, ctx)
     gone_dirs = _folders_gone_on_proton(entries, listing, ctx)
     if gone_dirs and not _handle_folders_gone_on_proton(
             gone_dirs, listing, remote_folder, ctx):
@@ -162,6 +179,9 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
         if entry.path in gone_dirs:
             continue
         if entry.is_dir(follow_symlinks=False):
+            if (ctx.shallow and listing.get(entry.name) is not None
+                    and ctx.db.get_folder(entry.path)):
+                continue
             if not _sync_dir(entry.path, remote_folder, ctx,
                              listing.get(entry.name)):
                 all_children = False
@@ -174,7 +194,7 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
         dir_failed = True
 
     complete = all_children and not dir_failed
-    if ctx.cache is not None and not ctx.dry_run and complete:
+    if ctx.cache is not None and not ctx.dry_run and complete and not ctx.shallow:
         excl_fp = ctx.exclusions.fingerprint() if ctx.exclusions else None
         signature = _ps._local_signature(local_dir, remote_folder, excl_fp)
         if signature is not None:
@@ -293,6 +313,10 @@ def _remember_folder(local_dir, remote_folder, remote_info, ctx):
     if ctx.dry_run:
         return
     node_id = remote_info.get("node_id") if isinstance(remote_info, dict) else None
+    if not node_id:
+        # A reconcile that did not list the parent keeps the id it knew.
+        known = ctx.db.get_folder(local_dir)
+        node_id = known.get("remote_node_id") if known else None
     ctx.db.upsert_folder({
         "local_path": local_dir,
         "remote_path": remote_folder,
@@ -895,3 +919,369 @@ def _conflict_copies(local_path):
         if _CONFLICT_STEM.sub("", other_stem) == stem:
             found.append(os.path.join(directory, name))
     return sorted(found)
+
+
+# ---------------------------------------------------------------------------
+# Remote moves and renames, local renames (#17 sections 1 and 3)
+# ---------------------------------------------------------------------------
+
+def _remote_root(ctx):
+    return _remote_folder(ctx.source_root, ctx.mapping.get("dest_parent") or "", ctx)
+
+
+def _local_for(remote_path, ctx):
+    """Local path of a remote path under the mapped tree."""
+    rel = remote_path[len(_remote_root(ctx)):].strip("/")
+    if not rel:
+        return ctx.source_root
+    return os.path.join(ctx.source_root, *rel.split("/"))
+
+
+def _walk_remote(ctx):
+    """Every node of the mapped remote tree: ({id: (path, type)}, {path: (id, type)}).
+
+    Returns None when a listing failed, so callers do nothing on a partial view."""
+    by_id, by_path = {}, {}
+    todo = [_remote_root(ctx)]
+    while todo:
+        folder = todo.pop()
+        listing = _ps.get_remote_listing(folder, verbose=ctx.verbose)
+        ctx.prelisted[folder] = listing
+        if not listing.ok:
+            return None
+        for name, info in listing.items():
+            if ctx.exclusions and ctx.exclusions.is_excluded(name):
+                continue
+            path = folder.rstrip("/") + "/" + name
+            rtype = info.get("type") if isinstance(info, dict) else None
+            node_id = info.get("node_id") if isinstance(info, dict) else None
+            if node_id:
+                by_id[node_id] = (path, rtype)
+            by_path[path] = (node_id, rtype)
+            if rtype == "folder":
+                todo.append(path)
+    return by_id, by_path
+
+
+def _detect_remote_moves(ctx):
+    """Apply remote renames and moves found by node id (full pass)."""
+    prefix = ctx.source_root.rstrip(os.sep) + os.sep
+    mine = [r for r in list(ctx.db.folders()) + list(ctx.db.rows())
+            if r.get("remote_node_id") and r["local_path"].startswith(prefix)]
+    if not mine:
+        return
+    walked = _walk_remote(ctx)
+    if walked is None:
+        return
+    by_id = walked[0]
+    if _apply_moves(ctx, lambda node_id: by_id.get(node_id)):
+        ctx.prelisted.clear()  # paths changed, list again
+
+
+def _apply_moves(ctx, where):
+    """Move local folders, then files, whose baseline node is somewhere else.
+
+    ``where(node_id)`` gives the node's current (remote path, type) or None."""
+    skipped = set()
+    moved = False
+    while True:
+        pending = []
+        for row in ctx.db.folders():
+            if row["local_path"] == ctx.source_root or row["local_path"] in skipped:
+                continue
+            found = where(row.get("remote_node_id")) if row.get("remote_node_id") else None
+            if found and found[1] == "folder" and found[0] != row["remote_path"]:
+                pending.append((row, found[0]))
+        if not pending:
+            break
+        pending.sort(key=lambda item: item[0]["remote_path"].count("/"))
+        row, new_remote = pending[0]
+        if _move_local(row, new_remote, True, ctx):
+            moved = True
+        else:
+            skipped.add(row["local_path"])
+        if ctx.dry_run:
+            skipped.update(r["local_path"] for r, _n in pending)
+    for row in ctx.db.rows():
+        node_id = row.get("remote_node_id")
+        if not node_id or row.get("state") != "synced":
+            continue
+        found = where(node_id)
+        if found and found[1] == "file" and found[0] != row["remote_path"]:
+            if _move_local(row, found[0], False, ctx):
+                moved = True
+    return moved
+
+
+def _move_local(row, new_remote, is_folder, ctx):
+    old_local = row["local_path"]
+    new_local = _local_for(new_remote, ctx)
+    if not os.path.lexists(old_local):
+        return False
+    if os.path.lexists(new_local):
+        print("[move-skipped] " + _(
+            "{o} moved on Proton but {n} already exists here, left for the "
+            "normal reconcile.").format(o=old_local, n=new_local))
+        return False
+    print("[moved] " + _("{o} -> {n} (moved on Proton)").format(
+        o=old_local, n=new_local))
+    if ctx.dry_run:
+        return True
+    try:
+        os.makedirs(os.path.dirname(new_local), exist_ok=True)
+        os.rename(old_local, new_local)
+    except OSError as exc:
+        print("[move-skipped] " + _("Could not move {o}: {e}").format(
+            o=old_local, e=exc))
+        return False
+    if is_folder:
+        ctx.db.move_tree(old_local, new_local, row["remote_path"], new_remote)
+    else:
+        try:
+            inode = os.stat(new_local).st_ino
+        except OSError:
+            inode = None
+        ctx.db.move_file_row(old_local, new_local, new_remote, inode)
+    return True
+
+
+def _backfill_ids(ctx):
+    """Fill in the node ids the uploads could not know, so renames are found."""
+    folders = ctx.db.folders()
+    files = ctx.db.rows()
+    missing = [r for r in folders + files if not r.get("remote_node_id")]
+    if not missing:
+        return
+    walked = _walk_remote(ctx)
+    ctx.prelisted.clear()
+    if walked is None:
+        return
+    by_path = walked[1]
+    for row in files:
+        if row.get("remote_node_id"):
+            continue
+        found = by_path.get(row["remote_path"])
+        if found and found[0] and found[1] == "file":
+            stored = dict(row)
+            stored["remote_node_id"] = found[0]
+            ctx.db.upsert(stored)
+    for row in folders:
+        if row.get("remote_node_id"):
+            continue
+        if row["local_path"] == ctx.source_root:
+            data, _err = _ps.cli_json(["filesystem", "info", row["remote_path"]])
+            node_id = _ps._unwrap(data.get("uid")) if isinstance(data, dict) else None
+        else:
+            found = by_path.get(row["remote_path"])
+            node_id = found[0] if found and found[1] == "folder" else None
+        if node_id:
+            stored = dict(row)
+            stored["remote_node_id"] = node_id
+            ctx.db.upsert_folder(stored)
+
+
+def _detect_local_renames(entries, local_dir, ctx):
+    """Log files renamed here: same inode and sha1 as a vanished baseline row.
+
+    The CLI has no move command, so the new name goes up as a normal upload
+    and the old remote copy leaves through the gated removal in _remote_only."""
+    fresh = []
+    for entry in entries:
+        if (entry.is_file() and not entry.is_symlink()
+                and ctx.db.get(entry.path) is None
+                and not _is_conflict_copy(entry.name)):
+            fresh.append(entry)
+    if not fresh:
+        return
+    vanished = [r for r in ctx.db.rows()
+                if os.path.dirname(r["local_path"]) == local_dir
+                and r.get("state") == "synced" and r.get("local_inode")
+                and not os.path.lexists(r["local_path"])]
+    for entry in fresh:
+        try:
+            inode = entry.stat().st_ino
+        except OSError:
+            continue
+        for row in vanished:
+            if row.get("local_inode") != inode:
+                continue
+            try:
+                same = _ps._local_sha1(entry.path) == row.get("sha1")
+            except OSError:
+                same = False
+            if same:
+                print("[renamed] " + _(
+                    "{o} was renamed to {n} here, sending the new name; the "
+                    "old copy on Proton goes through the deletion checks."
+                ).format(o=os.path.basename(row["local_path"]), n=entry.name))
+                break
+
+
+# ---------------------------------------------------------------------------
+# Events trigger
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChangeEvent:
+    event: str                 # created | modified | moved | removed
+    node_id: str
+    parent_id: str = None
+    old_parent_id: str = None
+    name: str = None
+    type: str = "file"         # file | folder
+    sha1: str = None
+
+
+class ProbeError(Exception):
+    pass
+
+
+_EVENT_KINDS = ("created", "modified", "moved", "removed")
+
+
+def parse_probe_output(text):
+    """The one adapter from the probe's output to the event model.
+
+    One JSON object per line. ``{"cursor": "..."}`` carries the cursor for
+    the next run; any other line with an ``event`` and a ``node_id`` is a
+    change. Malformed lines are skipped. Returns (events, cursor)."""
+    events, cursor = [], None
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if "cursor" in obj and "event" not in obj:
+            if obj["cursor"] is not None:
+                cursor = str(obj["cursor"])
+            continue
+        kind = obj.get("event")
+        node_id = obj.get("node_id")
+        if kind not in _EVENT_KINDS or not node_id:
+            continue
+        events.append(ChangeEvent(
+            event=kind, node_id=str(node_id),
+            parent_id=obj.get("parent_id"),
+            old_parent_id=obj.get("old_parent_id"),
+            name=obj.get("name"),
+            type=obj.get("type") or "file",
+            sha1=obj.get("sha1")))
+    return events, cursor
+
+
+def run_probe(cmd, cursor=None):
+    """Run the configured probe; returns (events, cursor). Raises ProbeError."""
+    try:
+        argv = shlex.split(cmd)
+    except ValueError as exc:
+        raise ProbeError(str(exc))
+    if not argv:
+        raise ProbeError("empty probe command")
+    if cursor:
+        argv += ["--cursor", cursor]
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True,
+                                timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProbeError(str(exc))
+    if result.returncode != 0:
+        raise ProbeError("exit {c}: {e}".format(
+            c=result.returncode, e=(result.stderr or "").strip()[:200]))
+    return parse_probe_output(result.stdout)
+
+
+def _cursor_key(mapping):
+    return "twoway_cursor:" + (mapping.get("source") or "")
+
+
+def _folder_by_id(ctx, node_id):
+    if not node_id:
+        return None
+    for row in ctx.db.folders():
+        if row.get("remote_node_id") == node_id:
+            return row
+    return None
+
+
+def sync_events(mapping, config_path, cache, exclusions, dry_run=False,
+                verbose=False, allow_mass_delete=False, global_ex=None,
+                delete=False):
+    """The "events" trigger: reconcile only what the probe reports changed."""
+    cmd = _ps.appconfig.twoway_probe_cmd() if getattr(_ps, "_HAS_CONFIG", False) else ""
+    kwargs = dict(dry_run=dry_run, verbose=verbose,
+                  allow_mass_delete=allow_mass_delete, global_ex=global_ex,
+                  delete=delete)
+    if not cmd or mapping.get("type") == "file":
+        return sync_mapping(mapping, config_path, cache, exclusions, **kwargs)
+    key = _cursor_key(mapping)
+    source = mapping.get("source") or ""
+    meta = syncdb.SyncDB(syncdb.database_path(config_path))
+    with meta:
+        cursor = meta.get_meta(key)
+        baseline = any(r["local_path"] == source for r in meta.folders())
+    first = (not baseline or not cursor or bool(mapping.get("rescan")))
+    try:
+        events, new_cursor = run_probe(cmd, None if first else cursor)
+    except ProbeError as exc:
+        print("[probe-failed] " + _(
+            "Event probe failed ({e}); two-way mapping skipped.").format(e=exc))
+        return False
+
+    if first:
+        # Full listing: first run or explicit rescan. The cursor was taken
+        # before it, so events during the listing are replayed next time.
+        complete = sync_mapping(mapping, config_path, cache, exclusions, **kwargs)
+        if complete and new_cursor and not dry_run:
+            with syncdb.SyncDB(syncdb.database_path(config_path)) as db:
+                db.set_meta(key, new_cursor)
+        return complete
+
+    ctx = _context(mapping, config_path, cache, exclusions, dry_run, verbose,
+                   allow_mass_delete, source_root=source,
+                   global_ex=global_ex, delete=delete)
+    ctx.shallow = True
+    with ctx.db:
+        complete = _apply_events(events, ctx)
+        if complete and new_cursor and not dry_run:
+            ctx.db.set_meta(key, new_cursor)
+    return complete
+
+
+def _apply_events(events, ctx):
+    affected = []
+    for ev in events:
+        if ev.event == "moved" and ev.name:
+            _apply_moved_event(ev, ctx)
+        for pid in (ev.parent_id, ev.old_parent_id):
+            if pid and pid not in affected:
+                affected.append(pid)
+        if ev.type == "folder" and ev.event in ("modified", "created"):
+            if ev.node_id not in affected:
+                affected.append(ev.node_id)
+    complete = True
+    done = set()
+    for pid in affected:
+        row = _folder_by_id(ctx, pid)
+        if row is None or row["local_path"] in done:
+            continue
+        done.add(row["local_path"])
+        if not os.path.isdir(row["local_path"]):
+            continue
+        parent = posixpath.dirname(row["remote_path"]) or "/"
+        if not _sync_dir(row["local_path"], parent, ctx):
+            complete = False
+    return complete
+
+
+def _apply_moved_event(ev, ctx):
+    parent = _folder_by_id(ctx, ev.parent_id)
+    if parent is None:
+        return  # moved out of the mapped tree: the old folder's reconcile removes it
+    new_remote = parent["remote_path"].rstrip("/") + "/" + ev.name
+    where = lambda node_id: (new_remote, ev.type) if node_id == ev.node_id else None
+    _apply_moves(ctx, where)
