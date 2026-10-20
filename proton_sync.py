@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Moteur de synchro Proton Drive (NAS -> Proton, à sens unique).
+Moteur de synchro Proton Drive (NAS -> Proton, à sens unique). Les entrées
+de la clé "sync_mappings" (direction "twoway") se synchronisent dans les deux
+sens (twoway.py).
 
 Lit un fichier JSON de mappings (voir proton_mapping_editor.py) et, pour
 chaque entrée, n'envoie que les fichiers nouveaux ou modifiés plutôt que
@@ -817,12 +819,36 @@ def load_config(path):
     raise ValueError("Format de config non reconnu (ni liste, ni objet).")
 
 
-# Déclencheurs du deux sens, par nom. None = aucun moyen de savoir ce qui a
-# changé côté Proton : les mappings deux sens sont alors ignorés (pas de
-# parcours périodique de l'arbre distant). Une valeur appelable remplace le
-# parcours : fn(mapping, config_path, cache, exclusions, **opts) -> complet.
+def load_sync_mappings(path):
+    """Mappings deux sens : la clé "sync_mappings" du fichier de mappings.
+
+    "mappings" reste à sens unique, inchangé. Ancien format (liste), clé
+    absente ou valeur qui n'est pas une liste : aucun mapping deux sens."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        found = data.get("sync_mappings", [])
+        if isinstance(found, list):
+            return found
+    return []
+
+
+# Déclencheurs du deux sens, par nom. None = aucune sonde d'événements : le
+# moteur liste tout le côté Proton à chaque passage (premier passage, nouveau
+# balayage, sonde absente ou en échec) ; il fonctionne pleinement ainsi. Une
+# valeur appelable remplace ce parcours :
+# fn(mapping, config_path, cache, exclusions, **opts) -> complet.
 # Seul "none" existe pour l'instant ; la sonde d'événements viendra ensuite.
 TWOWAY_TRIGGERS = {"none": None}
+
+
+def twoway_runner():
+    """(nom, exécuteur) du déclencheur configuré. Exécuteur None = listing
+    complet. Un nom inconnu se comporte comme "none" (sonde absente)."""
+    name = "none"
+    if _HAS_CONFIG:
+        name = appconfig.twoway_trigger()
+    return name, TWOWAY_TRIGGERS.get(name)
 
 
 def mapping_exclusions(mapping, global_ex):
@@ -3947,6 +3973,7 @@ def main():
         _finish_pass(2, _pass_mode(args), args.dry_run, completed=False)
 
     mappings, global_ex = load_config(args.config)
+    sync_mappings = load_sync_mappings(args.config)
     # Liste COMPLÈTE, avant toute restriction (--only-source, --reset-source) :
     # la reprise des vérifications d'après les journaux porte sur tous les
     # mappings du fichier, pas seulement sur ceux de ce passage.
@@ -4164,6 +4191,14 @@ def main():
                 target = m
                 break
         if target is None:
+            for m in sync_mappings:
+                if isinstance(m, dict) and os.path.normpath(m.get("source", "")) == target_source:
+                    # Pas de sous-arbre en temps réel pour le deux sens : il
+                    # est traité par un passage complet.
+                    print(_("  ⏭ Two-way mapping skipped (not handled by a "
+                            "single-subtree pass): {s}").format(s=m["source"]))
+                    _finish_pass(0, "subpath", args.dry_run, completed=True)
+        if target is None:
             print(_("❌ No mapping with source = {s}").format(s=args.mapping_source))
             sys.exit(1)
         if target["type"] != "folder":
@@ -4331,6 +4366,19 @@ def main():
         # mappings déjà entièrement traités. L'écriture atomique (tmp+rename)
         # garantit qu'on ne se retrouve jamais avec un cache corrompu.
         cache.save()
+
+    # Mappings deux sens (clé "sync_mappings") : jamais lancés comme envois.
+    # Les conflits de chevauchement et les directions inconnues sont écartés
+    # avec une ligne de journal ; le reste passe par twoway.run_pass.
+    if sync_mappings and not args.reset_source:
+        import twoway
+        trigger_name, runner = twoway_runner()
+        for src, complete, unreadable in twoway.run_pass(
+                sync_mappings, all_mappings, args.config, cache, global_ex,
+                only_source=args.only_source, trigger_name=trigger_name,
+                runner=runner, dry_run=args.dry_run, verbose=args.verbose,
+                allow_mass_delete=args.allow_mass_delete, delete=args.delete):
+            health.append((src, complete, unreadable))
 
     # Publication de l'état de santé : ce que ce passage a constaté, réécrit
     # même quand tout va bien (une liste vide EST l'information « plus rien
