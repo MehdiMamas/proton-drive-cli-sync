@@ -795,6 +795,14 @@ def load_config(path):
     raise ValueError("Format de config non reconnu (ni liste, ni objet).")
 
 
+# Déclencheurs du deux sens, par nom. None = aucun moyen de savoir ce qui a
+# changé côté Proton : les mappings deux sens sont alors ignorés (pas de
+# parcours périodique de l'arbre distant). Une valeur appelable remplace le
+# parcours : fn(mapping, config_path, cache, exclusions, **opts) -> complet.
+# Seul "none" existe pour l'instant ; la sonde d'événements viendra ensuite.
+TWOWAY_TRIGGERS = {"none": None}
+
+
 def mapping_exclusions(mapping, global_ex):
     """Retourne les exclusions effectives pour un mapping : global + propres au mapping."""
     ex = mapping.get("exclusions") or {}
@@ -1626,6 +1634,8 @@ class RemoteListing(dict):
 
 def get_remote_listing(remote_path, verbose=False):
     """Retourne {nom: {"size", "mtime", "sha1", "type"}} pour un dossier distant.
+
+    `mtime` est claimedModificationTime en secondes POSIX, ou None.
     Le champ "type" ("file"/"folder") permet de choisir la bonne opération de
     suppression (trash/delete) et de descendre dans les dossiers orphelins.
 
@@ -1651,9 +1661,32 @@ def get_remote_listing(remote_path, verbose=False):
         size, mtime, sha1 = _extract_remote_meta(item)
         # Le type peut être enveloppé {ok, value} comme les autres champs.
         rtype = _unwrap(item.get("type"))
-        listing[name] = {"size": size, "mtime": mtime, "sha1": sha1, "type": rtype}
+        # claimed_size reste None si le CLI n'a pas envoyé claimedSize.
+        # `size` peut alors être totalStorageSize (taille chiffrée) : la
+        # décision de téléchargement ne doit pas s'en servir. L'envoi, lui,
+        # continue de lire `size` comme avant.
+        claimed_size = None
+        active_rev = _unwrap(item.get("activeRevision"))
+        if isinstance(active_rev, dict):
+            raw_claimed = active_rev.get("claimedSize")
+            if raw_claimed is not None and not isinstance(raw_claimed, bool):
+                try:
+                    claimed_size = int(raw_claimed)
+                except (TypeError, ValueError):
+                    claimed_size = None
+        node_id = _unwrap(item.get("uid"))
+        if not isinstance(node_id, str) or not node_id:
+            node_id = None
+        listing[name] = {
+            "size": size,
+            "mtime": mtime,
+            "sha1": sha1,
+            "type": rtype,
+            "claimed_size": claimed_size,
+            "node_id": node_id,
+        }
         if rtype == "folder":
-            _REMOTE_KNOWN.add(remote_path.rstrip("/") + "/" + name)
+            _remember_remote(remote_path.rstrip("/") + "/" + name)
     _remember_remote(remote_path)
     return RemoteListing(listing, ok=True)
 
@@ -1784,6 +1817,152 @@ def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
                                    verify_hash=verify_hash)
     _report_decision(local_path, reason, verbose)
     return send
+
+
+def _optional_sha1(value):
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _claimed_size_of(remote_info):
+    """Taille claimedSize uniquement. Ignore `size` (peut être chiffrée)."""
+    if not isinstance(remote_info, dict):
+        return None
+    raw = remote_info.get("claimed_size")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_differs_from_row(local_path, sync_row):
+    """True si le fichier local n'est plus celui de la ligne synchronisée.
+
+    None si on ne peut pas le savoir. Le SHA-1 tranche. Sans SHA-1 : taille
+    claimed et mtime local exact (même règle que le baseline d'envoi).
+    L'inode n'est pas un signal de contenu.
+    """
+    row_sha = _optional_sha1(sync_row.get("sha1"))
+    if row_sha:
+        try:
+            return _local_sha1(local_path) != row_sha
+        except OSError:
+            return None
+    raw_size = sync_row.get("claimed_size")
+    raw_mtime = sync_row.get("local_mtime")
+    if raw_size is None or isinstance(raw_size, bool) or raw_mtime is None:
+        return None
+    try:
+        row_size = int(raw_size)
+        row_mtime = float(raw_mtime)
+        st = os.stat(local_path)
+    except (TypeError, ValueError, OSError):
+        return None
+    if row_mtime != row_mtime:
+        return None
+    if st.st_size != row_size:
+        return True
+    return float(st.st_mtime) != row_mtime
+
+
+def _remote_differs_from_row(claimed_size, remote_sha, remote_mtime, sync_row):
+    """True si le distant n'est plus la ligne. None si métadonnées insuffisantes.
+
+    SHA-1 claimed s'il est des deux côtés. Sinon claimedSize et
+    claimedModificationTime (tolérance _MTIME_TOLERANCE_SECONDS). Jamais la
+    taille chiffrée.
+    """
+    row_sha = _optional_sha1(sync_row.get("sha1"))
+    if row_sha and remote_sha:
+        return remote_sha != row_sha
+    raw_size = sync_row.get("claimed_size")
+    raw_mtime = sync_row.get("claimed_mtime")
+    if raw_size is None or isinstance(raw_size, bool) or claimed_size is None:
+        return None
+    try:
+        row_size = int(raw_size)
+    except (TypeError, ValueError):
+        return None
+    if claimed_size != row_size:
+        return True
+    if remote_mtime is None or raw_mtime is None or isinstance(raw_mtime, bool):
+        return None
+    try:
+        row_mtime = float(raw_mtime)
+    except (TypeError, ValueError):
+        return None
+    if row_mtime != row_mtime:
+        return None
+    return abs(remote_mtime - row_mtime) > _MTIME_TOLERANCE_SECONDS
+
+
+def download_decision(local_path, remote_info, sync_row=None):
+    """Décide si un fichier distant doit être téléchargé.
+
+    Retourne (action, raison). action est ``download``, ``skip`` ou
+    ``conflict``. La comparaison utilise claimedSize, claimedDigests.sha1
+    et claimedModificationTime. Elle ne lit pas ``size`` : ce champ peut
+    être la taille chiffrée (totalStorageSize) quand claimedSize manque.
+
+    Sans ligne de synchro, un fichier local déjà présent n'est pas écrasé :
+    contenus identiques → skip, sinon conflict. Un fichier local absent
+    est téléchargé.
+    """
+    if remote_info is not None and not isinstance(remote_info, dict):
+        return "conflict", "remote-unverifiable"
+    if sync_row is not None and not isinstance(sync_row, dict):
+        sync_row = None
+    if remote_info is None:
+        return "skip", "remote-missing"
+
+    rtype = remote_info.get("type")
+    if rtype not in (None, "file"):
+        return "skip", "not-a-file"
+
+    claimed_size = _claimed_size_of(remote_info)
+    remote_sha = _optional_sha1(remote_info.get("sha1"))
+    remote_mtime = _remote_mtime_seconds(remote_info.get("mtime"))
+
+    if not os.path.lexists(local_path):
+        if claimed_size is None and not remote_sha:
+            return "conflict", "remote-unverifiable"
+        return "download", "local-missing"
+    if not os.path.isfile(local_path):
+        return "conflict", "local-not-file"
+
+    if sync_row is None:
+        if not remote_sha:
+            return "conflict", "no-baseline"
+        try:
+            same = _local_sha1(local_path) == remote_sha
+        except OSError:
+            return "conflict", "local-unreadable"
+        if same:
+            return "skip", "hash-equal"
+        return "conflict", "no-baseline"
+
+    local_changed = _local_differs_from_row(local_path, sync_row)
+    remote_changed = _remote_differs_from_row(
+        claimed_size, remote_sha, remote_mtime, sync_row)
+    if local_changed is None or remote_changed is None:
+        return "conflict", "unverifiable"
+    if not local_changed and not remote_changed:
+        return "skip", "unchanged"
+    if local_changed and not remote_changed:
+        return "skip", "local-only"
+    if remote_changed and not local_changed:
+        return "download", "remote-only"
+    if remote_sha:
+        try:
+            if _local_sha1(local_path) == remote_sha:
+                return "skip", "hash-equal"
+        except OSError:
+            return "conflict", "local-unreadable"
+    return "conflict", "both-changed"
+
 
 
 def _glob_escape_local_path(path):
@@ -2201,19 +2380,14 @@ def delete_orphans(local_dir, remote_folder, remote_items, local_names,
     n_deleted = 0
     n_failed = 0
     opts = delete_opts or {}
-    # Clé absente, "prune", ou toute autre valeur : la copie déjà envoyée part
-    # à la corbeille. "keep" ne conserve un nom QUE s'il est exclu sur CE
-    # mapping et PAS par les exclusions globales (celles-ci nettoient toujours).
-    keep = opts.get("excluded_remote", "prune") == "keep"
-    mapping_ex = opts.get("mapping_exclusions")
-    global_ex = opts.get("global_exclusions")
+    # Un nom exclu sur CE mapping reste sur Drive seulement sous "keep" :
+    # voir _keep_excluded_remote.
 
     orphans = []
     for name, info in remote_items.items():
         if name in local_names:
             continue  # existe encore localement -> on garde
-        if (keep and mapping_ex and mapping_ex.is_excluded(name)
-                and not (global_ex and global_ex.is_excluded(name))):
+        if _keep_excluded_remote(name, opts):
             if verbose:
                 print(_("    kept (excluded): {p}").format(
                     p=remote_folder.rstrip("/") + "/" + name))
@@ -2350,6 +2524,22 @@ def build_delete_opts(mapping, guard_path, global_ex=None, allow_mass_delete=Fal
             p.rstrip("/") for p in (allow_mass_delete or ())),
     })
     return opts
+
+
+def _keep_excluded_remote(name, opts):
+    """True : ce nom reste sur Drive bien qu'il n'existe plus localement.
+
+    Clé absente, "prune", ou toute autre valeur : non. "keep" ne conserve un
+    nom QUE s'il est exclu sur CE mapping et PAS par les exclusions globales
+    (celles-ci nettoient toujours). Même règle pour delete_orphans et pour le
+    passage deux sens (twoway.py)."""
+    if opts.get("excluded_remote", "prune") != "keep":
+        return False
+    mapping_ex = opts.get("mapping_exclusions")
+    global_ex = opts.get("global_exclusions")
+    return bool(mapping_ex and mapping_ex.is_excluded(name)
+                and not (global_ex and global_ex.is_excluded(name)))
+
 
 
 def _wipe_mapping_remote(mapping, dry_run=False, verbose=False):
