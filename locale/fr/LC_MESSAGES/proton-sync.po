@@ -4974,3 +4974,15 @@ msgstr "Déjà installés. « Installer » les réécrit avec les réglages ci-d
 
 msgid "Press “Install”."
 msgstr "Appuyez sur « Installer »."
+
+msgid "Sync mode"
+msgstr "Mode de synchro"
+
+msgid "Upload only — local changes are sent to Proton"
+msgstr "Envoi seul — les changements locaux sont envoyés vers Proton"
+
+msgid "Two-way — changes on Proton are also brought back to this computer"
+msgstr "Deux sens — les changements faits sur Proton sont aussi rapatriés sur cet ordinateur"
+
+msgid "Two-way mappings are skipped until an event trigger is configured. This mapping is saved but will not sync yet."
+msgstr "Les mappings deux sens sont ignorés tant qu'un déclencheur d'événements n'est pas configuré. Ce mapping est enregistré mais ne se synchronisera pas encore."
