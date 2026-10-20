@@ -69,6 +69,91 @@ def sync_mapping(mapping, config_path, cache, exclusions, dry_run=False,
         return _sync_dir(source, mapping.get("dest_parent") or "", ctx)
 
 
+_CONFLICT_TEXT = {
+    "local-same": "same local folder as {o}",
+    "local-parent": "its local folder contains the one of {o}",
+    "local-child": "its local folder is inside the one of {o}",
+    "arrival-same": "same Proton folder as {o}: {d}",
+    "arrival-inside": "its Proton folder is inside the one of {o}: {d}",
+    "arrival-contains": "its Proton folder contains the one of {o}: {d}",
+}
+
+
+def plan(sync_mappings, upload_mappings):
+    """Split the ``sync_mappings`` entries into (runnable, skipped).
+
+    skipped is a list of (mapping, log line). Nothing here runs an entry: an
+    unknown direction or type, or an overlap with another mapping, only
+    produces a line. Checked on every load of the file."""
+    import mapping_keys
+    skipped, ok = [], []
+    for m in sync_mappings:
+        if not isinstance(m, dict):
+            skipped.append((m, _("Two-way entry skipped: not a mapping object")))
+        elif m.get("direction") not in mapping_keys.SYNC_DIRECTIONS:
+            skipped.append((m, _("Sync mapping skipped: unknown direction {d!r}: {s}")
+                            .format(d=m.get("direction"), s=m.get("source", ""))))
+        elif m.get("type") not in mapping_keys.SYNC_TYPES:
+            skipped.append((m, _("Sync mapping skipped: unknown type {t!r}: {s}")
+                            .format(t=m.get("type"), s=m.get("source", ""))))
+        elif not m.get("source") or not m.get("dest_parent"):
+            skipped.append((m, _("Sync mapping skipped: source or destination missing: {s}")
+                            .format(s=m.get("source", ""))))
+        else:
+            ok.append(m)
+    conflicts = mapping_keys.sync_mapping_conflicts(ok, upload_mappings)
+    runnable = []
+    for i, m in enumerate(ok):
+        hit = conflicts.get(i)
+        if hit:
+            reason, other, detail = hit
+            why = _(_CONFLICT_TEXT[reason]).format(o=other.get("source", "?"), d=detail)
+            skipped.append((m, _("Two-way mapping not run: {s} ({w})")
+                            .format(s=m["source"], w=why)))
+        else:
+            runnable.append(m)
+    return runnable, skipped
+
+
+def run_pass(sync_mappings, upload_mappings, config_path, cache, global_ex,
+             only_source=None, trigger_name="none", runner=None, dry_run=False,
+             verbose=False, allow_mass_delete=False, delete=False):
+    """Run the two-way pass of one engine run. Returns a list of
+    (source, complete, unreadable) for the health report.
+
+    ``runner`` is a trigger's own function; None means no events probe, so
+    the whole Proton side is listed (``sync_mapping``). ``upload_mappings`` is
+    the full ``mappings`` list, for the overlap check."""
+    if runner is None and trigger_name != "none":
+        print(_("Two-way trigger {t!r} unknown: listing the whole Proton side")
+              .format(t=trigger_name))
+    runnable, skipped = plan(sync_mappings, upload_mappings)
+    for _skipped, line in skipped:
+        print("  \u23ed " + line)
+    if only_source:
+        wanted = {os.path.normpath(s) for s in only_source}
+        runnable = [m for m in runnable
+                    if os.path.normpath(m["source"]) in wanted]
+    out = []
+    for m in runnable:
+        print(_("\n\u25b6 Two-way mapping: {s}  =>  {d}").format(
+            s=m["source"], d=m["dest_parent"]))
+        _ps._RUN.mappings_total += 1
+        if not os.path.exists(m["source"]):
+            print(_("  \u274c Source not found, skipped: {s}").format(s=m["source"]))
+            _ps._RUN.add("sources_missing")
+            continue
+        complete = (runner or sync_mapping)(
+            m, config_path, cache, _ps.mapping_exclusions(m, global_ex),
+            dry_run=dry_run, verbose=verbose, allow_mass_delete=allow_mass_delete,
+            global_ex=global_ex, delete=delete)
+        if complete:
+            _ps._RUN.add("mappings_complete")
+        out.append((m["source"], bool(complete), _ps._take_unreadable()))
+        cache.save()
+    return out
+
+
 def sync_tree(mapping, local_dir, remote_parent, config_path, cache, exclusions,
               dry_run=False, verbose=False, allow_mass_delete=False, global_ex=None,
               delete=False):
