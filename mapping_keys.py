@@ -1,5 +1,5 @@
 """Pure helpers for mapping dictionaries (no GUI imports, testable without a display)."""
-__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 # Keys the mapping dialog builds itself on every save. A key in this set that the
 # dialog leaves out was deliberately switched off by the user and must NOT come back.
@@ -140,3 +140,106 @@ def unknown_top_level(document):
     if not isinstance(document, dict):
         return {}
     return {k: v for k, v in document.items() if k not in FILE_KEYS}
+
+
+# ── Conflits ENTRE deux fichiers de mappings ─────────────────────────────────
+# Le passage planifié et le temps réel peuvent tourner sur deux fichiers
+# différents. Deux mappings, un dans chaque fichier, qui arrivent dans le même
+# dossier du Drive (ou l'un dans l'autre) se mettent à la corbeille l'un
+# l'autre exactement comme deux mappings d'un même fichier. Exception : le
+# MÊME mapping présent dans les deux fichiers (même source, même destination,
+# mêmes exclusions effectives) — les deux passages font alors la même chose.
+
+import json as _json
+import os as _os
+
+
+def read_mappings_document(path):
+    """(mappings, exclusions globales) d'un fichier de mappings, ou None s'il
+    est absent ou illisible. Les deux formats : liste simple, ou objet
+    {exclusions, mappings}. Les exclusions sont rendues sous la forme
+    {"names": [...], "patterns": [...]}."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, list):
+        return [m for m in data if isinstance(m, dict)], {"names": [], "patterns": []}
+    if isinstance(data, dict):
+        maps = data.get("mappings") or []
+        ex = data.get("exclusions") or {}
+        if not isinstance(maps, list) or not isinstance(ex, dict):
+            return None
+        return ([m for m in maps if isinstance(m, dict)],
+                {"names": list(ex.get("names") or []),
+                 "patterns": list(ex.get("patterns") or [])})
+    return None
+
+
+def effective_exclusions(mapping, global_ex):
+    """Exclusions qui s'appliquent réellement au mapping : celles du fichier
+    plus les siennes, sous forme comparable (deux ensembles)."""
+    own = mapping.get("exclusions") or {}
+    g = global_ex or {}
+    names = set(g.get("names") or []) | set(own.get("names") or [])
+    patterns = set(g.get("patterns") or []) | set(own.get("patterns") or [])
+    return frozenset(names), frozenset(patterns)
+
+
+def _norm(path):
+    parts = [p for p in (path or "").strip().split("/") if p and p != "."]
+    return "/" + "/".join(parts)
+
+
+def same_mapping(a, global_a, b, global_b):
+    """Vrai si a et b font la même chose : même source, même destination, mêmes
+    exclusions effectives. Deux copies du même mapping dans deux fichiers ne se
+    nuisent pas ; des exclusions différentes, si — l'un enverrait ce que
+    l'autre met à la corbeille. Même raison pour excluded_remote : « keep »
+    d'un côté, la corbeille de l'autre jetterait ce que le premier garde."""
+    return (_norm(a.get("source")) == _norm(b.get("source"))
+            and _norm(a.get("dest_parent")) == _norm(b.get("dest_parent"))
+            and effective_exclusions(a, global_a) == effective_exclusions(b, global_b)
+            and (a.get("excluded_remote") == "keep") == (b.get("excluded_remote") == "keep"))
+
+
+def cross_conflicts(mine, global_mine, theirs, global_theirs):
+    """Conflits entre les mappings de deux fichiers. Retourne une liste de
+    (i, j, kind, folder_i, folder_j) : i indice dans `mine`, j dans `theirs`,
+    kind "same" (même dossier d'arrivée), "inside" (celui de i est dans celui
+    de j) ou "contains" (celui de j est dans celui de i). Le même mapping
+    présent dans les deux fichiers n'est pas un conflit."""
+    out = []
+    theirs_folders = [arrival_folder(t) if isinstance(t, dict) else None for t in theirs]
+    for i, m in enumerate(mine):
+        if not isinstance(m, dict):
+            continue
+        fi = arrival_folder(m)
+        if fi is None:
+            continue
+        for j, t in enumerate(theirs):
+            kind = conflict_kind(fi, theirs_folders[j])
+            if kind is None:
+                continue
+            if kind == "same" and same_mapping(m, global_mine, t, global_theirs):
+                continue
+            out.append((i, j, {"same": "same", "a_in_b": "inside", "b_in_a": "contains"}[kind],
+                        fi, theirs_folders[j]))
+    return out
+
+
+def other_running_files(path, running):
+    """Fichiers en service (`running` : chemins, None ignoré) autres que `path`,
+    sans doublon, comparés après résolution des liens."""
+    here = _os.path.realpath(path) if path else None
+    out, seen = [], set()
+    for p in running:
+        if not p:
+            continue
+        rp = _os.path.realpath(p)
+        if rp == here or rp in seen:
+            continue
+        seen.add(rp)
+        out.append(p)
+    return out
