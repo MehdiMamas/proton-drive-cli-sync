@@ -263,3 +263,15 @@ class SyncDB:
             (local_path,),
         )
         self._conn.commit()
+
+    def delete_folder_tree(self, local_path):
+        """Forget a folder and everything the baseline holds below it."""
+        prefix = local_path.rstrip(os.sep) + os.sep
+        self._conn.execute(
+            "DELETE FROM files WHERE substr(local_path, 1, ?) = ?",
+            (len(prefix), prefix))
+        self._conn.execute(
+            "DELETE FROM folders WHERE local_path = ? "
+            "OR substr(local_path, 1, ?) = ?",
+            (local_path, len(prefix), prefix))
+        self._conn.commit()

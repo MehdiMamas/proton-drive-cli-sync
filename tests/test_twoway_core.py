@@ -69,3 +69,19 @@ def test_database_path_follows_the_mappings_file(tmp_path):
     )
     with pytest.raises(ValueError):
         syncdb.database_path("/x/.json", tmp_path)
+
+
+def test_delete_folder_tree_forgets_the_folder_and_its_files(tmp_path):
+    with syncdb.SyncDB(str(tmp_path / "s.db")) as database:
+        for path in ("/x/Docs", "/x/Docs/sub", "/x/Docs2"):
+            database.upsert_folder({"local_path": path, "remote_path": "/r" + path,
+                                    "local_seen": 1, "remote_seen": 1})
+        database.upsert({"local_path": "/x/Docs/sub/a.txt", "remote_path": "/r/a",
+                         "remote_node_id": None, "sha1": None, "claimed_size": 1,
+                         "claimed_mtime": 1.0, "local_inode": 1, "local_mtime": 1.0,
+                         "state": "synced"})
+        database.delete_folder_tree("/x/Docs")
+        assert database.get_folder("/x/Docs") is None
+        assert database.get_folder("/x/Docs/sub") is None
+        assert database.get("/x/Docs/sub/a.txt") is None
+        assert database.get_folder("/x/Docs2") is not None
