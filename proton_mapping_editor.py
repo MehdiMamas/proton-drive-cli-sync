@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.33.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.34.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -72,7 +72,8 @@ except ImportError:
 
 # Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
 from mapping_keys import (carry_unknown_keys, arrival_conflicts, first_arrival_conflict,
-                          unknown_top_level)
+                          unknown_top_level, cross_conflicts, read_mappings_document,
+                          other_running_files)
 
 # Relance après mise à jour du code (import tolérant : sans le module,
 # l'éditeur fonctionne comme avant, sans rappel ni relance).
@@ -1105,6 +1106,98 @@ class RemoteFolderPicker(tk.Toplevel):
         if item and "\x01" not in item:
             self.dest_var.set(item)
             self.destroy()
+
+
+def running_mappings_files():
+    """Fichiers de mappings des services en service : planification, puis temps
+    réel (None pour un service absent ou désactivé). Même fonction que le
+    moteur."""
+    try:
+        if _HAS_REALTIME:
+            return realtime_manager.services_mappings_files()
+    except Exception:
+        pass
+    return [None, None]
+
+
+def file_in_service(path, running=None):
+    """Vrai si `path` est le fichier d'un des services en service."""
+    if not path:
+        return False
+    if running is None:
+        running = running_mappings_files()
+    here = os.path.realpath(path)
+    return any(p and os.path.realpath(p) == here for p in running)
+
+
+def cross_file_conflicts(path, mappings, global_ex, running=None):
+    """Conflits de dossiers d'arrivée entre `mappings` (le fichier `path`, ou
+    un fichier pas encore enregistré si `path` est None) et les AUTRES fichiers
+    en service. Liste de (i, autre fichier, mapping de l'autre fichier, kind,
+    dossier de i, dossier de l'autre). Le même mapping présent des deux côtés
+    (même source, même destination, mêmes exclusions effectives) n'en est pas
+    un — le moteur applique la même règle."""
+    if running is None:
+        running = running_mappings_files()
+    out = []
+    for other in other_running_files(path, running):
+        doc = read_mappings_document(other)
+        if doc is None:
+            continue
+        theirs, g_theirs = doc
+        for i, j, kind, fi, fj in cross_conflicts(mappings, global_ex or {},
+                                                   theirs, g_theirs):
+            out.append((i, other, theirs[j], kind, fi, fj))
+    return out
+
+
+def cross_file_conflict_lines(conflicts, mappings):
+    """Une entrée lisible par conflit, pour les boîtes de dialogue."""
+    lines = []
+    for i, other, theirs, kind, fi, fj in conflicts[:10]:
+        a = mappings[i].get("source", "?")
+        b = theirs.get("source", "?")
+        f = os.path.basename(other)
+        if kind == "same":
+            lines.append(_("  • {a}\n    and {b} (in {f})\n    both arrive in {r}").format(
+                a=a, b=b, f=f, r=fi))
+        else:
+            lines.append(_("  • {a}\n    and {b} (in {f})\n    arrive in {r} and {t}, "
+                           "one inside the other").format(a=a, b=b, f=f, r=fi, t=fj))
+    text = "\n\n".join(lines)
+    if len(conflicts) > 10:
+        text += "\n\n  " + _("…and {n} more").format(n=len(conflicts) - 10)
+    return text
+
+
+def confirm_cross_file_install(parent, path, other_service):
+    """Avant d'installer `path` pour un service : si l'AUTRE service tourne sur
+    un fichier différent et que des mappings des deux arrivent sur Proton dans
+    le même dossier (ou l'un dans l'autre), le dire et demander confirmation.
+    On n'interdit pas : le moteur retient de toute façon leurs suppressions,
+    et l'utilisateur peut vouloir installer pour corriger ensuite. Retourne
+    True pour continuer."""
+    try:
+        doc = read_mappings_document(path)
+        if doc is None:
+            return True
+        maps, g = doc
+        found = cross_file_conflicts(path, maps, g, other_service)
+    except Exception:
+        return True
+    if not found:
+        return True
+    return dlg_confirm(parent, _(
+        "The other service uses another mappings file, and on Proton some "
+        "mappings of the two files put their content in the same folder, or one "
+        "inside the other:\n\n{list}\n\n"
+        "Their deletions will not be propagated, so that neither pass sends the "
+        "other's files to the trash; their files are still sent. To avoid it, "
+        "change the destination of one mapping of each pair, or use the same "
+        "mappings file for both services.\n\nInstall anyway?"
+        ).format(list=cross_file_conflict_lines(found, maps)),
+        title=_("Mappings sharing a Proton folder with the other file"),
+        kind="warning", ok_text=_("Install anyway"), cancel_text=_("Cancel"))
 
 
 def mapping_remote_path(dest_parent, source):
@@ -2470,6 +2563,7 @@ class MappingEditor(tk.Tk):
             self._warn_revisions_unsupported()
             self._warn_permanent_delete_unsupported()
             self._warn_arrival_conflicts()
+            self._warn_cross_file_conflicts()
         except Exception as e:
             dlg_error(self, str(e), title=_("Load error"))
 
@@ -2508,6 +2602,37 @@ class MappingEditor(tk.Tk):
                 "so that each mapping arrives in a folder of its own on Proton."
                 ).format(list=liste),
                 title=_("Mappings sharing a Proton folder"))
+        except Exception:
+            # Un avis ne doit jamais empêcher un fichier de se charger.
+            pass
+
+    def _warn_cross_file_conflicts(self):
+        """Avertit UNE FOIS par chargement si des mappings de ce fichier
+        arrivent sur Proton dans le même dossier qu'un mapping de l'AUTRE
+        fichier en service (planification ou temps réel), ou l'un dans
+        l'autre. Le moteur retient leurs suppressions ; rien n'est bloqué.
+        Seulement pour un fichier lui-même en service : un fichier en
+        préparation est contrôlé à son installation."""
+        try:
+            running = running_mappings_files()
+            if not file_in_service(self.config_path, running):
+                return
+            found = cross_file_conflicts(self.config_path, self.mappings,
+                                         self.global_exclusions, running)
+            if not found:
+                return
+            dlg_warning(self, _(
+                "The scheduled pass and real time do not use the same mappings "
+                "file, and on Proton some mappings of this file put their content "
+                "in the same folder as a mapping of the other file, or one inside "
+                "the other:\n\n{list}\n\n"
+                "When deletions are propagated, each pass would send the other "
+                "file's files to the trash. To prevent that, deletions are not "
+                "propagated for these mappings; their files are still sent.\n\n"
+                "To fix it, change the destination of one mapping of each pair, "
+                "or use the same mappings file for both services."
+                ).format(list=cross_file_conflict_lines(found, self.mappings)),
+                title=_("Mappings sharing a Proton folder with the other file"))
         except Exception:
             # Un avis ne doit jamais empêcher un fichier de se charger.
             pass
@@ -3133,6 +3258,42 @@ class MappingEditor(tk.Tk):
                 dlg_warning(dlg, msg + "\n\n" + _("Choose another destination."),
                             title=_("Proton folder already used"))
                 return
+            # Même contrôle contre l'AUTRE fichier en service (planification ou
+            # temps réel). Un conflit qui existait déjà pour ce mapping ne
+            # bloque pas sa modification ; seul un conflit nouveau est refusé.
+            cand = dict(new_m)
+            if is_edit and mapping.get("exclusions"):
+                cand["exclusions"] = mapping["exclusions"]
+            try:
+                running = running_mappings_files()
+                # Seulement pour un fichier en service : un fichier en
+                # préparation se contrôle à son installation (confirmation),
+                # et un passage manuel dessus retient quand même les
+                # suppressions dans le moteur.
+                found = (cross_file_conflicts(self.config_path, [cand],
+                                              self.global_exclusions, running)
+                         if file_in_service(self.config_path, running) else [])
+                if is_edit and found:
+                    def _key(c):
+                        return (c[1], c[2].get("source"), c[2].get("dest_parent"))
+                    already = {_key(c) for c in cross_file_conflicts(
+                        self.config_path, [mapping], self.global_exclusions, running)}
+                    found = [c for c in found if _key(c) not in already]
+            except Exception:
+                found = []
+            if found:
+                _i, other_file, theirs, kind, mine, theirs_folder = found[0]
+                dlg_warning(dlg, _(
+                    "This mapping would put its content in {r} on Proton. In {f}, "
+                    "a mappings file in service, the mapping of {o} puts its own "
+                    "in {t}: the same folder, or one nested with it.\n\nThe two "
+                    "passes would send each other's files to the trash when "
+                    "deletions are propagated.").format(
+                        r=mine, f=os.path.basename(other_file),
+                        o=theirs.get("source", "?"), t=theirs_folder)
+                    + "\n\n" + _("Choose another destination."),
+                    title=_("Proton folder already used"))
+                return
             # Conserver les exclusions existantes si on édite
             if is_edit and mapping.get("exclusions"):
                 new_m["exclusions"] = mapping["exclusions"]
@@ -3571,6 +3732,29 @@ class MappingEditor(tk.Tk):
                 "one of them first.").format(
                     f=os.path.basename(dest), o=other.get("source", "?"),
                     t=theirs, r=mine),
+                title=_("Proton folder already used"))
+            self.status.set(_("Move cancelled."))
+            return
+        # Si la destination est en service : contre les AUTRES fichiers en
+        # service, avec lesquels le mapping tournera une fois déplacé. Le mapping lui-même, encore
+        # dans ce fichier-ci, est identique à lui-même et ne compte pas.
+        try:
+            running = running_mappings_files()
+            found = (cross_file_conflicts(dest, [mapping], self.global_exclusions,
+                                          running)
+                     if file_in_service(dest, running) else [])
+        except Exception:
+            found = []
+        if found:
+            _i, other_file, theirs, _kind, mine, theirs_folder = found[0]
+            dlg_warning(self, _(
+                "Once moved, this mapping would put its content in {r} on Proton. "
+                "In {f}, a mappings file in service, the mapping of {o} puts its "
+                "own in {t}: the same folder, or one nested with it.\n\nThe two "
+                "passes would send each other's files to the trash when deletions "
+                "are propagated. Change the destination of one of them first."
+                ).format(r=mine, f=os.path.basename(other_file),
+                         o=theirs.get("source", "?"), t=theirs_folder),
                 title=_("Proton folder already used"))
             self.status.set(_("Move cancelled."))
             return
@@ -6572,6 +6756,9 @@ class ScheduleDialog(tk.Toplevel):
                 ok_text=_("Confirm the change"),
                 cancel_text=_("Cancel (keep the current file)")):
                 return
+        if not confirm_cross_file_install(
+                self, self.mappings_path, [running_mappings_files()[1]]):
+            return
         ok, msg = schedule_manager.install_or_update(
             self.mappings_path, on_calendar=cal, delete=delete, enable=True)
         if ok:
@@ -7536,6 +7723,9 @@ class RealtimeDialog(tk.Toplevel):
                                ok_text=_("Confirm the change"),
                                cancel_text=_("Cancel (keep the current file)")):
                 return
+        if not confirm_cross_file_install(
+                self, self.mappings_path, [running_mappings_files()[0]]):
+            return
         ok, msg, cmd = realtime_manager.install_or_update_units(self.mappings_path, enable=True)
         (dlg_success if ok else dlg_error)(self, msg, title=_("Daemons"), command=cmd)
         self._refresh()

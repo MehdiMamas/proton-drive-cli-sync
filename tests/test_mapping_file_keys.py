@@ -69,6 +69,7 @@ def _editor_stub():
         _update_excl_summary=lambda: None, _auto_push_mappings=lambda *_a: None,
         _warn_revisions_unsupported=lambda: None,
         _warn_permanent_delete_unsupported=lambda: None,
+        _warn_cross_file_conflicts=lambda: None,
     )
     stub._warn_arrival_conflicts = lambda: ed.MappingEditor._warn_arrival_conflicts(stub)
     return ed, stub, warnings
