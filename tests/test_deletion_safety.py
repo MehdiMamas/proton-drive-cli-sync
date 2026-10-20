@@ -510,7 +510,7 @@ def test_twoway_global_exclusion_trashes_without_downloading(
     src = local_tree({"Docs/keep.txt": (b"keep", 1_000_000_000)})
     fake_drive.seed_file(REMOTE + "/secret.txt", b"hide")
     cfg = write_mappings(
-        [], twoway_mappings=[_mapping(src / "Docs")],
+        [], sync_mappings=[_mapping(src / "Docs", direction="twoway")],
         exclusions=_exclude("secret.txt"))
     result = engine.reconcile(cfg, "--delete")
     assert result.returncode == 0, result.stdout + result.stderr
