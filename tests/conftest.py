@@ -248,14 +248,27 @@ def local_tree(tmp_path):
 
 @pytest.fixture
 def write_mappings(tmp_path):
-    def _write(mappings, exclusions=None):
+    def _write(mappings, exclusions=None, twoway_mappings=None):
         document = {"mappings": mappings}
+        if twoway_mappings is not None:
+            document["twoway_mappings"] = twoway_mappings
         if exclusions is not None:
             document["exclusions"] = exclusions
         path = tmp_path / "mappings.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         return path
     return _write
+
+
+_TRIGGER_DRIVER = """
+import sys
+repo = sys.argv.pop(1)
+sys.path.insert(0, repo)
+sys.argv[0] = repo + "/proton_sync.py"
+import proton_sync, twoway
+proton_sync.TWOWAY_TRIGGERS["test"] = twoway.sync_mapping
+proton_sync.main()
+"""
 
 
 class EngineRunner:
@@ -271,7 +284,16 @@ class EngineRunner:
         data.update(values)
         self.settings.write_text(json.dumps(data), encoding="utf-8")
 
-    def __call__(self, mappings, *args, settings_doc=None):
+    def reconcile(self, mappings, *args):
+        """Run a pass with a test trigger that reconciles two-way mappings.
+
+        The shipped trigger is "none", which skips them. This registers a
+        trigger that calls twoway.sync_mapping directly, so tests can drive
+        the reconcile itself."""
+        self.update_settings(twoway_trigger="test")
+        return self(mappings, *args, driver=_TRIGGER_DRIVER)
+
+    def __call__(self, mappings, *args, settings_doc=None, driver=None):
         if settings_doc is not None:
             self.settings.write_text(json.dumps(settings_doc) + "\n", encoding="utf-8")
         cli = os.environ.get("PROTON_DRIVE_CLI")
@@ -292,7 +314,9 @@ class EngineRunner:
         env["LC_ALL"] = "C.UTF-8"
         env.pop("PROTON_SYNC_DEBUG", None)
         return subprocess.run(
-            [sys.executable, str(REPO / "proton_sync.py"), str(mappings), *map(str, args)],
+            ([sys.executable, str(REPO / "proton_sync.py")] if driver is None
+             else [sys.executable, "-c", driver, str(REPO)])
+            + [str(mappings), *map(str, args)],
             cwd=str(REPO),
             env=env,
             capture_output=True,
