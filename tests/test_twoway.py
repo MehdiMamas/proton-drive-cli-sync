@@ -1,4 +1,4 @@
-"""Two-way mappings (the twoway_mappings key) round-trip and resolve conflicts.
+"""Two-way mappings (the sync_mappings key) round-trip and resolve conflicts.
 
 The reconcile tests drive twoway.sync_mapping through engine.reconcile. A
 one-way mapping in the same file never downloads.
@@ -48,10 +48,11 @@ def _set_remote(fake_drive, path, data, mtime):
 
 @pytest.fixture
 def write_mappings(write_mappings):
-    """Entries go to twoway_mappings; one_way entries stay in mappings."""
+    """Entries go to sync_mappings; one_way entries stay in mappings."""
     def _write(twoway, one_way=None, exclusions=None):
         return write_mappings(one_way or [], exclusions=exclusions,
-                              twoway_mappings=twoway)
+                              sync_mappings=[dict(m, direction="twoway")
+                                             for m in twoway])
     return _write
 
 

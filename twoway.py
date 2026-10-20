@@ -1,4 +1,4 @@
-"""Two-way reconcile for one entry of the ``twoway_mappings`` key.
+"""Two-way reconcile for one entry of the ``sync_mappings`` key (direction "twoway").
 
 Entries of ``mappings`` stay one-way and never reach this module. Downloads go through the engine's ``run_cli``. A failed
 download does not replace the local file and does not rewrite its sync row.
