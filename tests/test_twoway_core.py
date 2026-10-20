@@ -1,10 +1,78 @@
-"""Tests for the sync database (syncdb): folders table and schema migration."""
+"""Engine core of two-way sync (#17 PR-1): key, trigger setting, folders table.
 
+PR-2 and PR-3 tests are strict xfails: they describe the wanted behaviour and
+fail today, so they flip loudly when the feature lands.
+"""
+
+import os
 import sqlite3
 
 import pytest
 
+import proton_sync
+import remote_state
 import syncdb
+
+
+def _mapping(source, dest, **extra):
+    mapping = {"type": "folder", "source": str(source), "dest_parent": dest}
+    mapping.update(extra)
+    return mapping
+
+
+def _downloads(calls):
+    return [c for c in calls
+            if len(c) >= 2 and c[0] == "filesystem" and c[1] == "download"]
+
+
+def _db(isolated_home, cfg):
+    return syncdb.database_path(
+        os.path.basename(str(cfg)),
+        data_dir=str(isolated_home / ".proton-drive-sync"))
+
+
+def test_load_twoway_mappings_reads_only_its_own_key(tmp_path):
+    cfg = tmp_path / "m.json"
+    cfg.write_text('{"mappings": [{"source": "a"}], '
+                   '"twoway_mappings": [{"source": "b"}]}')
+    assert proton_sync.load_twoway_mappings(str(cfg)) == [{"source": "b"}]
+    cfg.write_text('{"mappings": [{"source": "a"}]}')
+    assert proton_sync.load_twoway_mappings(str(cfg)) == []
+    cfg.write_text('{"twoway_mappings": "nope"}')
+    assert proton_sync.load_twoway_mappings(str(cfg)) == []
+
+
+def test_trigger_none_skips_twoway_mappings_and_uploads_the_rest(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({
+        "Two/a.txt": (b"AAAA", 1_000_000_000),
+        "One/b.txt": (b"BBBB", 1_000_000_000),
+    })
+    cfg = write_mappings([_mapping(src / "One", "/my-files/OneWay")],
+                         twoway_mappings=[_mapping(src / "Two", "/my-files/TwoWay")])
+    fake_drive.seed_file("/my-files/TwoWay/Two/web.txt", b"WEB")
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Two-way mapping skipped" in result.stdout
+    assert "'none'" in result.stdout
+    assert fake_drive.content("/my-files/OneWay/One/b.txt") == b"BBBB"
+    assert fake_drive.content("/my-files/TwoWay/Two/a.txt") is None
+    assert _downloads(fake_drive.calls()) == []
+    assert not (src / "Two" / "web.txt").exists()
+
+
+def test_reconcile_remembers_the_synced_folders(
+        fake_drive, local_tree, write_mappings, engine, isolated_home):
+    src = local_tree({"Docs/sub/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([], twoway_mappings=[_mapping(src / "Docs", "/my-files/B")])
+    result = engine.reconcile(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        row = database.get_folder(str(src / "Docs" / "sub"))
+        assert row is not None
+        assert row["remote_path"] == "/my-files/B/Docs/sub"
+        assert row["local_seen"] == 1 and row["remote_seen"] == 1
+        assert str(src / "Docs") in {f["local_path"] for f in database.folders()}
 
 
 def test_folder_rows_upsert_and_validate(tmp_path):
@@ -40,3 +108,41 @@ def test_old_databases_migrate_to_folders(tmp_path, version):
                         ).fetchone()[0] == "3"
     conn.close()
 
+
+@pytest.mark.xfail(strict=True, reason="#17 PR-2/PR-3")
+def test_folder_deleted_on_proton_is_moved_aside_not_recreated(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/sub/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([], twoway_mappings=[_mapping(src / "Docs", "/my-files/B")])
+    assert engine.reconcile(cfg).returncode == 0
+    base = remote_state.normalize("/my-files/B/Docs/sub")
+
+    def mutate(state):
+        for path in [p for p in state["nodes"] if p == base or p.startswith(base + "/")]:
+            state["nodes"].pop(path)
+    fake_drive._update(mutate)
+    result = engine.reconcile(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (src / "Docs" / "sub").exists()
+    assert fake_drive.content("/my-files/B/Docs/sub/a.txt") is None
+    assert "sub" not in fake_drive.listing("/my-files/B/Docs")
+
+
+@pytest.mark.xfail(strict=True, reason="#17 PR-2/PR-3")
+def test_file_renamed_on_proton_renames_the_local_file(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([], twoway_mappings=[_mapping(src / "Docs", "/my-files/B")])
+    assert engine.reconcile(cfg).returncode == 0
+    old = remote_state.normalize("/my-files/B/Docs/a.txt")
+    new = remote_state.normalize("/my-files/B/Docs/b.txt")
+
+    def mutate(state):
+        state["nodes"][new] = state["nodes"].pop(old)
+    fake_drive._update(mutate)
+    before = len(_downloads(fake_drive.calls()))
+    result = engine.reconcile(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (src / "Docs" / "b.txt").read_bytes() == b"AAAA"
+    assert not (src / "Docs" / "a.txt").exists()
+    assert len(_downloads(fake_drive.calls())) == before

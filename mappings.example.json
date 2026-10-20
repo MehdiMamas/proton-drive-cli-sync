@@ -83,5 +83,15 @@
       "delete_mode": "trash",
       "source_kind": "nfs"
     }
+  ],
+  "twoway_mappings": [
+    {
+      "type": "folder",
+      "source": "/home/myuser/Shared",
+      "dest_parent": "/my-files",
+      "allow_delete": false,
+      "delete_mode": "trash",
+      "source_kind": "local"
+    }
   ]
 }
