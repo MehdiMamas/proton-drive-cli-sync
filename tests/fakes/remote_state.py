@@ -77,7 +77,16 @@ def load(path):
     return data
 
 
+def assign_uids(state):
+    """Give every node a stable id, as Proton does; a moved node keeps it."""
+    for node in state["nodes"].values():
+        if isinstance(node, dict) and not node.get("uid"):
+            state["uid_seq"] = int(state.get("uid_seq") or 0) + 1
+            node["uid"] = "uid-auto-{n}".format(n=state["uid_seq"])
+
+
 def save(path, state):
+    assign_uids(state)
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -197,8 +206,10 @@ def store_file(state, remote_path, data, mtime):
     ensure_folders(state, remote_path)
     previous = state["nodes"].get(remote_path)
     revisions = 1
+    uid = None
     if isinstance(previous, dict) and previous.get("type") == "file":
         revisions = int(previous.get("revisions") or 1) + 1
+        uid = previous.get("uid")
     state["nodes"][remote_path] = {
         "type": "file",
         "content_b64": base64.b64encode(data).decode("ascii"),
@@ -206,6 +217,8 @@ def store_file(state, remote_path, data, mtime):
         "revisions": revisions,
         "trashed": False,
     }
+    if uid:
+        state["nodes"][remote_path]["uid"] = uid
     state.setdefault("uploads", []).append(remote_path)
     return remote_path
 

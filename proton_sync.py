@@ -817,8 +817,13 @@ def load_twoway_mappings(path):
 # changé côté Proton : les mappings deux sens sont alors ignorés (pas de
 # parcours périodique de l'arbre distant). Une valeur appelable remplace le
 # parcours : fn(mapping, config_path, cache, exclusions, **opts) -> complet.
-# Seul "none" existe pour l'instant ; la sonde d'événements viendra ensuite.
-TWOWAY_TRIGGERS = {"none": None}
+# "events" lit le journal d'événements via la sonde (réglage twoway_probe_cmd).
+def _twoway_events(*args, **kwargs):
+    import twoway
+    return twoway.sync_events(*args, **kwargs)
+
+
+TWOWAY_TRIGGERS = {"none": None, "events": _twoway_events}
 
 
 def twoway_runner():
@@ -826,6 +831,8 @@ def twoway_runner():
     name = "none"
     if _HAS_CONFIG:
         name = appconfig.twoway_trigger()
+    if name == "events" and not (_HAS_CONFIG and appconfig.twoway_probe_cmd()):
+        return name, None  # pas de sonde : ignoré comme "none"
     return name, TWOWAY_TRIGGERS.get(name)
 
 
