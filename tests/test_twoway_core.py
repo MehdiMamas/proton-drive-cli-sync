@@ -1,8 +1,5 @@
-"""Engine core of two-way sync (#17 PR-1): key, trigger setting, folders table.
-
-The PR-3 test is a strict xfail: it describes the wanted behaviour and
-fails today, so it flips loudly when the feature lands.
-"""
+"""Engine core of two-way sync (#17 PR-1): key, trigger setting, folders table,
+plus the remote rename case that PR-2/PR-3 made work."""
 
 import os
 import shutil
@@ -227,7 +224,6 @@ def test_mass_delete_guard_holds_folder_deletions(
     assert not (src / "Docs" / "one").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="#17 PR-2/PR-3")
 def test_file_renamed_on_proton_renames_the_local_file(
         fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
