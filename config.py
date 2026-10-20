@@ -641,6 +641,13 @@ def set_twoway_trigger(value):
     return _put("twoway_trigger", str(value or "none").strip().lower())
 
 
+def set_twoway_probe_cmd(value):
+    """Save the events probe command line; an empty entry stores the default
+    (the getter falls back to it either way)."""
+    v = str(value or "").strip()
+    return _put("twoway_probe_cmd", v or DEFAULTS["twoway_probe_cmd"])
+
+
 def parse_min(value):
     """Nombre entier, 0 ou plus. Retourne l'int, ou None si la valeur est
     illisible ou négative."""

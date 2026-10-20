@@ -4578,6 +4578,10 @@ class MappingEditor(tk.Tk):
             ttk.Label(twrow, text=_("Trigger:")).pack(side="left")
             ttk.Combobox(twrow, textvariable=trigger_var, values=tw_names,
                          state="readonly", width=14).pack(side="left", padx=(6, 0))
+            probe_var = tk.StringVar(value=appconfig.twoway_probe_cmd())
+            prow = ttk.Frame(tw_frame); prow.pack(anchor="w", fill="x", pady=(8, 0))
+            ttk.Label(prow, text=_("Probe command:")).pack(side="left")
+            ttk.Entry(prow, textvariable=probe_var, width=36).pack(side="left", padx=(6, 0))
 
             # Garde-fou de masse : éteint par défaut. Les deux seuils sont
             # toujours éditables, y compris quand la case est décochée, pour
@@ -5007,6 +5011,7 @@ class MappingEditor(tk.Tk):
                 appconfig.set_cli_stall_max_kills(kills_var.get())
                 appconfig.set_create_thumbnails(thumb_var.get())
                 appconfig.set_twoway_trigger(trigger_var.get())
+                appconfig.set_twoway_probe_cmd(probe_var.get())
                 # Garde-fou de masse : seuils déjà validés dans apply().
                 appconfig.set_mass_delete_guard(guard_var.get())
                 appconfig.set_max_delete_min(gmin_var.get())

@@ -100,6 +100,38 @@ def test_set_twoway_trigger(tmp_path, monkeypatch):
     assert store == {"twoway_trigger": "none"}
 
 
+def test_set_twoway_probe_cmd(monkeypatch):
+    import config
+    store = {}
+    monkeypatch.setattr(config, "_write_raw", lambda k, v: store.update({k: v}) or True)
+    config.set_twoway_probe_cmd("  my-probe --fast ")
+    assert store == {"twoway_probe_cmd": "my-probe --fast"}
+    config.set_twoway_probe_cmd("   ")   # empty -> default
+    assert store == {"twoway_probe_cmd": "proton-sync-events"}
+    config.set_twoway_probe_cmd(None)
+    assert store == {"twoway_probe_cmd": "proton-sync-events"}
+
+
+def test_probe_cmd_roundtrip_and_empty_falls_back(monkeypatch):
+    import config
+    data = {}
+    monkeypatch.setattr(config, "_write_raw", lambda k, v: data.update({k: v}) or True)
+    monkeypatch.setattr(config, "get", lambda k, d=None: data.get(k, d))
+    config.set_twoway_probe_cmd("x --y")
+    assert config.twoway_probe_cmd() == "x --y"
+    config.set_twoway_probe_cmd("")
+    assert config.twoway_probe_cmd() == "proton-sync-events"
+
+
+def test_settings_dialog_has_probe_field_wired_to_config():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "proton_mapping_editor.py").read_text(encoding="utf-8")
+    assert '_("Probe command:")' in src
+    assert "appconfig.twoway_probe_cmd()" in src
+    assert "appconfig.set_twoway_probe_cmd(probe_var.get())" in src
+
+
 def test_trigger_choices_come_from_the_engine():
     import proton_sync
     assert "none" in proton_sync.TWOWAY_TRIGGERS
