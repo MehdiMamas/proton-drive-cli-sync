@@ -264,6 +264,8 @@ TWO accepted formats (backward compatibility):
 }
 ```
 
+Other top-level keys, written by a newer version of the application, are kept as they are when the editor saves the file; this version ignores them otherwise.
+
 - `type: folder` -> the folder's entire content is synchronized recursively.
 - `type: file` -> a single file (useful for VeraCrypt containers — a deliberate per-file whitelist choice, so a new sensitive container added later never ends up on Proton by accident).
 
@@ -385,6 +387,8 @@ This double level is deliberate: the JSON declares the intent, the command line 
 **`mount_check.py` MUST live next to `proton_sync.py`** (same folder). Without it, all deletions are refused (safety guard).
 
 The mount guard also runs again right before each folder's deletions. A healthy verdict is reused for 5 seconds; a refusal is never reused. If the check fails in the middle of a pass, later deletions in that mapping stop, and uploads continue. A refusal is counted in `deletions_refused`, whether the check fails at the start of the pass or in the middle of it, so the pass ends with code 5.
+
+**Mappings that share a Proton folder.** Each mapping puts its content in `dest_parent/<source name>` on Proton: its arrival folder. When two mappings have the same arrival folder, or one arrives inside the other's, a `--delete` pass would send the other mapping's files to the trash, since everything in a mapping's folder with no counterpart in *its* source is an orphan. For such mappings the engine does not propagate deletions, in scheduled passes, resets and real time alike, for both mappings of each pair. Their files are still sent. The engine logs one line per mapping, starting with `[arrival-conflict]` and naming the other mapping, and the pass ends normally. A reset with remote wipe is refused for these mappings too. The setting in the file is not changed: deletions resume by themselves once the conflict is fixed. The first pass after the fix then sends to the trash the copies that the moved mapping left in the old folder; they are uploaded again in its new folder, and stay recoverable from the trash. When it opens such a file, the editor lists the pairs; it refuses to add, edit or move a mapping into a new conflict. A mapping already in conflict can still be edited, so that its other settings can be changed. To fix it, change the destination of one mapping of each pair so that each one arrives in a folder of its own. Names are compared as written, case included, as Proton does: it keeps `Photos` and `photos` as two separate folders. `mapping_keys.py` must live next to `proton_sync.py`; without it, all deletions are refused (safety guard).
 
 **Cache interaction (the `delete_synced` flag)** — to keep the cache's speed in `--delete` mode, each cache entry carries a flag saying whether the remote side has already been reconciled (orphans handled) during a `--delete` pass. Consequences:
 

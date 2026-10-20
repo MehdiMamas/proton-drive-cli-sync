@@ -267,6 +267,8 @@ DEUX formats acceptés (rétrocompatibilité) :
 }
 ```
 
+Les autres clés de premier niveau, écrites par une version plus récente de l'application, sont conservées telles quelles quand l'éditeur enregistre le fichier ; cette version les ignore pour le reste.
+
 - `type: folder` -> tout le contenu du dossier est synchronisé récursivement.
 - `type: file` -> un fichier unique (utile pour les conteneurs VeraCrypt — choix délibéré de liste blanche par fichier individuel, pour éviter qu'un nouveau conteneur sensible ajouté plus tard ne se retrouve par erreur sur Proton).
 
@@ -388,6 +390,8 @@ Ce double niveau est délibéré : le JSON déclare l'intention, la ligne de com
 **`mount_check.py` DOIT être placé à côté de `proton_sync.py`** (même dossier). Sans lui, toutes les suppressions sont refusées (garde-fou).
 
 Le garde-fou de montage s'exécute aussi de nouveau juste avant les suppressions de chaque dossier. Un verdict sain est réutilisé pendant 5 secondes ; un refus ne l'est jamais. Si le contrôle échoue au milieu d'un passage, les suppressions suivantes de ce mapping s'arrêtent, et les envois continuent. Un refus est compté dans `deletions_refused`, que le contrôle échoue au début du passage ou en son milieu : le passage se termine donc avec le code 5.
+
+**Mappings qui partagent un dossier sur Proton.** Chaque mapping dépose son contenu dans `dest_parent/<nom de la source>` sur Proton : son dossier d'arrivée. Quand deux mappings ont le même dossier d'arrivée, ou que l'un arrive dans celui de l'autre, un passage `--delete` mettrait à la corbeille les fichiers de l'autre mapping, puisque tout ce qui, dans le dossier d'un mapping, n'a pas d'équivalent dans *sa* source est un orphelin. Pour ces mappings, le moteur ne propage pas les suppressions, en passage planifié, en réinitialisation comme en temps réel, pour les deux mappings de chaque paire. Leurs fichiers continuent d'être envoyés. Le moteur écrit une ligne par mapping, qui commence par `[arrival-conflict]` et nomme l'autre mapping, et le passage se termine normalement. Une réinitialisation avec vidage distant est refusée elle aussi pour ces mappings. Le réglage du fichier n'est pas modifié : les suppressions reprennent d'elles-mêmes une fois le conflit corrigé. Le premier passage après la correction met alors à la corbeille les copies que le mapping déplacé a laissées dans l'ancien dossier ; elles sont renvoyées dans son nouveau dossier et restent récupérables dans la corbeille. À l'ouverture d'un tel fichier, l'éditeur liste les paires ; il refuse d'ajouter, de modifier ou de déplacer un mapping vers un nouveau conflit. Un mapping déjà en conflit reste modifiable, pour qu'on puisse changer ses autres réglages. Pour corriger, changez la destination d'un mapping de chaque paire, afin que chacun arrive dans un dossier à lui. Les noms sont comparés tels qu'écrits, casse comprise, comme le fait Proton : il garde `Photos` et `photos` comme deux dossiers distincts. `mapping_keys.py` doit être placé à côté de `proton_sync.py` ; sans lui, toutes les suppressions sont refusées (garde-fou).
 
 **Interaction avec le cache (drapeau `delete_synced`)** — pour ne pas perdre la vitesse du cache en mode `--delete`, chaque entrée de cache porte un drapeau indiquant si le distant a déjà été réconcilié (orphelins traités) lors d'un passage `--delete`. Conséquence :
 
