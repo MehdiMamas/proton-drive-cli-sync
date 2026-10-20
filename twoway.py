@@ -1263,19 +1263,96 @@ def _apply_events(events, ctx):
         if ev.type == "folder" and ev.event in ("modified", "created"):
             if ev.node_id not in affected:
                 affected.append(ev.node_id)
-    complete = True
-    done = set()
+    paths = []
     for pid in affected:
         row = _folder_by_id(ctx, pid)
+        if row is not None:
+            paths.append(row["local_path"])
+    # Local edits in folders the probe did not report: the disk walk is cheap,
+    # only the remote listings are not, and those stay limited to this set.
+    paths.extend(sorted(_local_changed_folders(ctx)))
+    complete = True
+    done = set()
+    for path in paths:
+        row = _nearest_known_folder(path, ctx)
         if row is None or row["local_path"] in done:
             continue
         done.add(row["local_path"])
-        if not os.path.isdir(row["local_path"]):
-            continue
         parent = posixpath.dirname(row["remote_path"]) or "/"
         if not _sync_dir(row["local_path"], parent, ctx):
             complete = False
     return complete
+
+
+def _nearest_known_folder(path, ctx):
+    """Closest existing folder at or above `path` the baseline knows."""
+    root = ctx.source_root
+    while path:
+        if os.path.isdir(path):
+            row = ctx.db.get_folder(path)
+            if row is not None:
+                return row
+        if path == root or len(path) <= len(root):
+            return None
+        path = os.path.dirname(path)
+    return None
+
+
+def _file_row_unchanged(path, row):
+    """Size, mtime and inode against the baseline row; no hashing."""
+    if row.get("state") != "synced":
+        return False
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    size, mtime = row.get("claimed_size"), row.get("local_mtime")
+    if size is None or mtime is None:
+        return False
+    if st.st_size != size or float(st.st_mtime) != float(mtime):
+        return False
+    inode = row.get("local_inode")
+    return not inode or st.st_ino == inode
+
+
+def _local_changed_folders(ctx):
+    """Folders under the mapping with a local change since the baseline.
+
+    A new, edited, deleted or renamed file or folder puts its folder in the
+    set, and for a rename both the old and the new parent."""
+    root = ctx.source_root
+    changed = set()
+    seen_files, seen_dirs = set(), {root}
+    excluded = ctx.exclusions.is_excluded if ctx.exclusions else (lambda n: False)
+    for parent, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not excluded(d)]
+        for name in dirs:
+            path = os.path.join(parent, name)
+            seen_dirs.add(path)
+            if os.path.islink(path):
+                continue
+            if ctx.db.get_folder(path) is None:
+                changed.add(parent)
+                changed.add(path)
+        for name in files:
+            if excluded(name) or _is_conflict_copy(name):
+                continue
+            path = os.path.join(parent, name)
+            seen_files.add(path)
+            row = ctx.db.get(path)
+            if row is None or not _file_row_unchanged(path, row):
+                changed.add(parent)
+    for row in ctx.db.rows():
+        path = row["local_path"]
+        if (path.startswith(root + os.sep) and path not in seen_files
+                and not excluded(os.path.basename(path))):
+            changed.add(os.path.dirname(path))
+    for row in ctx.db.folders():
+        path = row["local_path"]
+        if (path.startswith(root + os.sep) and path not in seen_dirs
+                and not excluded(os.path.basename(path))):
+            changed.add(os.path.dirname(path))
+    return changed
 
 
 def _apply_moved_event(ev, ctx):

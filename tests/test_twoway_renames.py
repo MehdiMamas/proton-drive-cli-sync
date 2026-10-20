@@ -254,3 +254,66 @@ def test_events_trigger_without_a_probe_command_is_skipped(
     result = engine(cfg)
     assert "skipped" in result.stdout.lower(), result.stdout
     assert fake_drive.uploads() == []
+
+
+def _events_baseline(engine, cfg, tmp_path, **extra):
+    probe = _probe(tmp_path, [{"cursor": "c1"}])
+    assert _events_run(engine, cfg, probe, *extra.get("args", ())).returncode == 0
+    return probe
+
+
+def test_events_pass_syncs_a_local_edit_in_an_unreported_folder(
+        fake_drive, local_tree, write_mappings, engine, isolated_home, tmp_path):
+    src = local_tree({"Docs/one/a.txt": b"AAAA", "Docs/two/b.txt": b"BBBB",
+                      "Docs/three/c.txt": b"CCCC"})
+    cfg = write_mappings([], twoway_mappings=[_mapping(src / "Docs")])
+    probe = _events_baseline(engine, cfg, tmp_path)
+    one = _folder_ids(isolated_home, cfg)[str(src / "Docs" / "one")]
+    fake_drive.seed_file(REMOTE + "/Docs/one/new.txt", b"NEW")
+    (src / "Docs" / "two" / "b.txt").write_bytes(b"BBBB-edited")
+    probe([{"event": "created", "node_id": "n-new", "parent_id": one,
+            "name": "new.txt", "type": "file"}, {"cursor": "c2"}])
+    mark = len(fake_drive.calls())
+    result = _events_run(engine, cfg, probe)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.content(REMOTE + "/Docs/two/b.txt") == b"BBBB-edited"
+    listed = _lists(fake_drive.calls()[mark:])
+    inside = sorted(p for p in listed if p.startswith(_norm(REMOTE + "/Docs")))
+    assert inside == [_norm(REMOTE + "/Docs/one"),
+                      _norm(REMOTE + "/Docs/two")], listed
+
+
+def test_events_pass_without_changes_lists_nothing_remote(
+        fake_drive, local_tree, write_mappings, engine, tmp_path):
+    src = local_tree({"Docs/one/a.txt": b"AAAA", "Docs/two/b.txt": b"BBBB"})
+    cfg = write_mappings([], twoway_mappings=[_mapping(src / "Docs")])
+    probe = _events_baseline(engine, cfg, tmp_path)
+    probe([{"cursor": "c2"}])
+    mark = len(fake_drive.calls())
+    result = _events_run(engine, cfg, probe)
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The startup checks list the drive root; nothing under the mapping.
+    listed = _lists(fake_drive.calls()[mark:])
+    assert [p for p in listed if p.startswith(_norm(REMOTE))] == [], listed
+
+
+def test_events_pass_local_folder_deletion_goes_through_the_gates(
+        fake_drive, local_tree, write_mappings, engine, tmp_path):
+    src = local_tree({"Docs/one/a.txt": b"AAAA", "Docs/two/b.txt": b"BBBB",
+                      "Docs/keep.txt": b"KEEP"})
+    cfg = write_mappings([], twoway_mappings=[_mapping(
+        src / "Docs", allow_delete=True, delete_mode="trash",
+        source_kind="local")])
+    probe = _events_baseline(engine, cfg, tmp_path)
+    import shutil
+    shutil.rmtree(src / "Docs" / "two")
+    probe([{"cursor": "c2"}])
+    # Without --delete the remote copy stays.
+    result = _events_run(engine, cfg, probe)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not fake_drive.trashed(REMOTE + "/Docs/two/b.txt")
+    probe([{"cursor": "c3"}])
+    result = _events_run(engine, cfg, probe, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.trashed(REMOTE + "/Docs/two/b.txt")
+    assert fake_drive.content(REMOTE + "/Docs/one/a.txt") == b"AAAA"
