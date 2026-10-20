@@ -149,11 +149,17 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     local_names = set()
     dir_failed = False
     all_children = True
+    gone_dirs = _folders_gone_on_proton(entries, listing, ctx)
+    if gone_dirs and not _handle_folders_gone_on_proton(
+            gone_dirs, listing, remote_folder, ctx):
+        dir_failed = True
     for entry in entries:
         if ctx.exclusions and ctx.exclusions.is_excluded(entry.name):
             continue
         local_names.add(entry.name)
         if _is_conflict_copy(entry.name):
+            continue
+        if entry.path in gone_dirs:
             continue
         if entry.is_dir(follow_symlinks=False):
             if not _sync_dir(entry.path, remote_folder, ctx,
@@ -177,8 +183,113 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     return complete
 
 
+def _folders_gone_on_proton(entries, listing, ctx):
+    """Local folders the baseline saw on Proton that Proton no longer lists.
+
+    A folder with files edited or added here since the baseline is not in
+    the result: the newer edit wins, so it is synced as a normal folder and
+    recreated on Proton. Returns {local path: remote path}.
+    """
+    gone = {}
+    for entry in entries:
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        if ctx.exclusions and ctx.exclusions.is_excluded(entry.name):
+            continue
+        if listing.get(entry.name) is not None:
+            continue
+        base = ctx.db.get_folder(entry.path)
+        if not base or not base.get("remote_seen"):
+            continue
+        if _local_tree_changed(entry.path, ctx):
+            print("[restore] " + _(
+                "folder removed on Proton but changed here since, sending it "
+                "again: {p}").format(p=entry.path))
+            continue
+        gone[entry.path] = base.get("remote_path") or ""
+    return gone
+
+
+def _local_tree_changed(local_dir, ctx):
+    """True when anything under this folder is new or edited since the baseline."""
+    for parent, dirs, files in os.walk(local_dir):
+        dirs[:] = [d for d in dirs
+                   if not (ctx.exclusions and ctx.exclusions.is_excluded(d))]
+        for name in dirs:
+            if not ctx.db.get_folder(os.path.join(parent, name)):
+                return True
+        for name in files:
+            if ctx.exclusions and ctx.exclusions.is_excluded(name):
+                continue
+            path = os.path.join(parent, name)
+            row = ctx.db.get(path)
+            if (not row or row.get("state") != "synced"
+                    or _ps._local_differs_from_row(path, row) is not False):
+                return True
+    return False
+
+
+def _handle_folders_gone_on_proton(gone_dirs, listing, remote_folder, ctx):
+    """Move aside local folders that were removed on Proton. True when clean.
+
+    Same gates as a file removed on Proton: only on a pass with ``--delete``,
+    after the mount check and the mass-delete guard. Nothing is deleted, the
+    folder goes to the holding folder, and nothing recreates it on Proton.
+    """
+    if not ctx.delete:
+        for path in gone_dirs:
+            print("[kept] " + _(
+                "folder removed on Proton; local folder kept because "
+                "deletions are off for this pass: {p}").format(p=path))
+        return True
+    if not _mount_ok(ctx, _("local folder kept")):
+        return False
+    if _refusing_mass_delete(list(gone_dirs), list(listing) + list(gone_dirs), ctx):
+        print("[delete-guard] " + _(
+            "refusing to move aside {n} of {t} folder(s) in {p}").format(
+                n=len(gone_dirs), t=len(listing) + len(gone_dirs), p=remote_folder))
+        _ps._RUN.add("deletions_refused")
+        return False
+    ok = True
+    for path in gone_dirs:
+        if _hold(path, ctx):
+            if not ctx.dry_run:
+                ctx.db.delete_folder_tree(path)
+        else:
+            ok = False
+    return ok
+
+
+def _remote_tree_changed(remote_path, local_path, ctx):
+    """True when Proton holds anything new or edited below this folder.
+
+    A listing that fails counts as changed: nothing is trashed on a guess.
+    """
+    listing = _ps.get_remote_listing(remote_path, verbose=ctx.verbose)
+    if not listing.ok:
+        return True
+    for name, info in listing.items():
+        if ctx.exclusions and ctx.exclusions.is_excluded(name):
+            continue
+        child_local = os.path.join(local_path, name)
+        child_remote = remote_path.rstrip("/") + "/" + name
+        rtype = info.get("type") if isinstance(info, dict) else None
+        if rtype == "folder":
+            if (not ctx.db.get_folder(child_local)
+                    or _remote_tree_changed(child_remote, child_local, ctx)):
+                return True
+        elif rtype in _DOC_TYPES:
+            continue
+        else:
+            row = ctx.db.get(child_local)
+            if (not row or row.get("state") != "synced"
+                    or _remote_changed_since(info, row) is not False):
+                return True
+    return False
+
+
 def _remember_folder(local_dir, remote_folder, remote_info, ctx):
-    """Baseline row for a folder seen on both sides (no deletion logic yet)."""
+    """Baseline row for a folder seen on both sides."""
     if ctx.dry_run:
         return
     node_id = remote_info.get("node_id") if isinstance(remote_info, dict) else None
@@ -193,6 +304,7 @@ def _remember_folder(local_dir, remote_folder, remote_info, ctx):
 
 def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
     gone = []
+    folders_gone = []
     restores = []
     ok = True
     for name, info in listing.items():
@@ -211,6 +323,15 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
         remote_path = remote_folder.rstrip("/") + "/" + name
         rtype = info.get("type") if isinstance(info, dict) else None
         if rtype == "folder":
+            base = ctx.db.get_folder(local_path)
+            if base and base.get("local_seen"):
+                if _remote_tree_changed(remote_path, local_path, ctx):
+                    print("[restore] " + _(
+                        "folder removed here but changed on Proton since, "
+                        "downloading it again: {p}").format(p=local_path))
+                else:
+                    folders_gone.append((local_path, remote_path))
+                    continue
             if not ctx.dry_run:
                 os.makedirs(local_path, exist_ok=True)
             if not _sync_dir(local_path, remote_folder, ctx, info):
@@ -237,7 +358,7 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
         else:
             restores.append((local_path, remote_path, info))
 
-    if _refusing_mass_delete(gone, listing, ctx):
+    if _refusing_mass_delete(gone + folders_gone, listing, ctx):
         print("[delete-guard] " + _(
             "refusing to trash {n} of {t} remote item(s) in {p}").format(
                 n=len(gone), t=len(listing), p=remote_folder))
@@ -245,6 +366,21 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
         for local_path, remote_path, info, row in gone:
             _set_state(row, "pending-down", ctx)
         return False
+
+    for local_path, remote_path in folders_gone:
+        if _can_trash(ctx, remote_path):
+            if _ps.remote_trash(
+                    remote_path, permanent=False, dry_run=ctx.dry_run):
+                if not ctx.dry_run:
+                    ctx.db.delete_folder_tree(local_path)
+            else:
+                ok = False
+        else:
+            print("[kept] " + _(
+                "folder removed here; Proton folder kept because deletions "
+                "are off for this pass: {p}").format(p=remote_path))
+            if ctx.opts.get("mount_lost"):
+                ok = False
 
     for local_path, remote_path, info, row in gone:
         if _can_trash(ctx, remote_path):
@@ -550,6 +686,11 @@ def _can_trash(ctx, remote_path):
     if (str(remote_path).startswith("/shared-with-me")
             and ctx.mapping.get("shared_delete_confirmed") is not True):
         return False
+    return _mount_ok(ctx, _("remote file kept"))
+
+
+def _mount_ok(ctx, kept):
+    """The mount check shared by every deletion. A refusal holds for the pass."""
     if ctx.opts.get("mount_lost"):
         return False
     guard = ctx.opts.get("delete_guard")
@@ -560,7 +701,7 @@ def _can_trash(ctx, remote_path):
         return True
     ctx.opts["mount_lost"] = True
     print("[delete-guard] " + _(
-        "mount check failed, remote file kept: {r}").format(r=reason))
+        "mount check failed, {k}: {r}").format(k=kept, r=reason))
     _ps._RUN.add("deletions_refused")
     return False
 
