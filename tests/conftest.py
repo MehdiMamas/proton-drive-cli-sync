@@ -248,10 +248,19 @@ def local_tree(tmp_path):
 
 @pytest.fixture
 def write_mappings(tmp_path):
-    def _write(mappings, exclusions=None, twoway_mappings=None):
-        document = {"mappings": mappings}
-        if twoway_mappings is not None:
-            document["twoway_mappings"] = twoway_mappings
+    def _write(mappings, exclusions=None, sync_mappings=None):
+        """Upload mappings go under "mappings"; entries with direction
+        "twoway" (or passed as sync_mappings) go under "sync_mappings"."""
+        sync = list(sync_mappings or [])
+        plain = []
+        for m in mappings:
+            if isinstance(m, dict) and m.get("direction") == "twoway":
+                sync.append(m)
+            else:
+                plain.append(m)
+        document = {"mappings": plain}
+        if sync:
+            document["sync_mappings"] = sync
         if exclusions is not None:
             document["exclusions"] = exclusions
         path = tmp_path / "mappings.json"
@@ -296,12 +305,15 @@ def finish(exit_code, mode, dry_run, completed):
     args = seen.get("args")
     if completed and mode != "subpath" and "cache" in seen and not args.reset_source:
         with open(seen["config"], encoding="utf-8") as f:
-            found = json.load(f).get("twoway_mappings", [])
+            found = json.load(f).get("sync_mappings", [])
         if args.only_source:
             wanted = {os.path.normpath(s) for s in args.only_source}
             found = [m for m in found
                      if os.path.normpath(m.get("source", "")) in wanted]
         for m in found:
+            if m.get("direction") != "twoway":
+                print("unknown sync direction, skipped: %r" % (m.get("direction"),))
+                continue
             _RUN = proton_sync._RUN
             _RUN.mappings_total += 1
             if not os.path.exists(m["source"]):
