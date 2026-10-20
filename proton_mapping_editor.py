@@ -12,7 +12,7 @@ Usage :
     python3 proton_mapping_editor.py                # ouvre un sélecteur de fichier
     python3 proton_mapping_editor.py mappings-user1.json
 """
-__version__ = "1.32.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.33.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import json
 import os
@@ -71,7 +71,8 @@ except ImportError:
     _HAS_CONFIG = False
 
 # Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
-from mapping_keys import carry_unknown_keys
+from mapping_keys import (carry_unknown_keys, arrival_conflicts, first_arrival_conflict,
+                          unknown_top_level)
 
 # Relance après mise à jour du code (import tolérant : sans le module,
 # l'éditeur fonctionne comme avant, sans rappel ni relance).
@@ -1306,6 +1307,10 @@ class MappingEditor(tk.Tk):
 
         self.config_path = config_path
         self.mappings = []  # liste de dicts {type, source, dest_parent, [exclusions]}
+        # Clés de premier niveau que cette version ne gère pas (écrites par une
+        # version plus récente, ex. "sync_mappings") : conservées telles quelles
+        # à l'enregistrement, sans autre effet.
+        self._extra_top = {}
         # Sonde d'auth : verrou de sérialisation (voir _check_auth_settled) et
         # marqueur « un message d'erreur d'auth est affiché en barre d'état »
         # (pour l'EFFACER dès que la session redevient bonne — sinon témoin vert
@@ -2456,6 +2461,7 @@ class MappingEditor(tk.Tk):
                     raise ValueError(_("Each entry must have: type, source, dest_parent."))
             self.mappings = mappings
             self.global_exclusions = global_ex
+            self._extra_top = unknown_top_level(data)
             self.config_path = path
             self._set_dirty(False)
             self._refresh_tree()
@@ -2463,8 +2469,48 @@ class MappingEditor(tk.Tk):
             self.status.set(_("Loaded: {p} ({n} entries)").format(p=path, n=len(self.mappings)))
             self._warn_revisions_unsupported()
             self._warn_permanent_delete_unsupported()
+            self._warn_arrival_conflicts()
         except Exception as e:
             dlg_error(self, str(e), title=_("Load error"))
+
+    def _warn_arrival_conflicts(self):
+        """Avertit UNE FOIS par chargement si des mappings déposent leur
+        contenu dans le même dossier du Drive, ou l'un dans le dossier de
+        l'autre. Le moteur retient alors leurs suppressions (il les mettrait à
+        la corbeille l'un l'autre) ; les fichiers continuent d'être envoyés.
+
+        Ne bloque rien, ne modifie rien : l'utilisateur corrige quand il veut.
+        N'apparaît que s'il y a un conflit."""
+        try:
+            pairs = arrival_conflicts(self.mappings)
+            if not pairs:
+                return
+            lines = []
+            for outer, inner, kind, f_out, f_in in pairs[:10]:
+                a = self.mappings[outer].get("source", "?")
+                b = self.mappings[inner].get("source", "?")
+                if kind == "same":
+                    lines.append(_("  • {a}\n    and {b}\n    both arrive in {r}").format(
+                        a=a, b=b, r=f_out))
+                else:
+                    lines.append(_("  • {b}\n    arrives in {r},\n    inside the folder of {a}").format(
+                        a=a, b=b, r=f_in))
+            liste = "\n\n".join(lines)
+            if len(pairs) > 10:
+                liste += "\n\n  " + _("…and {n} more").format(n=len(pairs) - 10)
+            dlg_warning(self, _(
+                "On Proton, some mappings put their content in the same folder, "
+                "or one inside the folder of another:\n\n{list}\n\n"
+                "When deletions are propagated, the mappings of each pair would send "
+                "each other's files to the trash. To prevent that, deletions are not "
+                "propagated for these mappings; their files are still sent.\n\n"
+                "To fix it, change the destination of one mapping of each pair, "
+                "so that each mapping arrives in a folder of its own on Proton."
+                ).format(list=liste),
+                title=_("Mappings sharing a Proton folder"))
+        except Exception:
+            # Un avis ne doit jamais empêcher un fichier de se charger.
+            pass
 
     def _warn_permanent_delete_unsupported(self):
         """Avertit UNE FOIS par chargement si des mappings sont encore réglés en
@@ -2555,7 +2601,11 @@ class MappingEditor(tk.Tk):
                               self.global_exclusions.get("patterns"))
             has_mapping_excl = any(m.get("exclusions") for m in self.mappings)
 
-            if has_global or has_mapping_excl:
+            # Des clés que cette version ne gère pas (écrites par une version
+            # plus récente) imposent le format objet : elles sont réécrites
+            # telles quelles, après les nôtres.
+            extra = getattr(self, "_extra_top", None) or {}
+            if has_global or has_mapping_excl or extra:
                 out = {
                     "exclusions": {
                         "names": self.global_exclusions.get("names", []),
@@ -2563,6 +2613,8 @@ class MappingEditor(tk.Tk):
                     },
                     "mappings": self.mappings,
                 }
+                for key, value in extra.items():
+                    out.setdefault(key, value)
             else:
                 out = self.mappings  # format liste simple
 
@@ -3043,6 +3095,44 @@ class MappingEditor(tk.Tk):
                     title=_("Invalid destination"))
                 return
             new_m = {"type": m_type, "source": source, "dest_parent": dest}
+            # Dossier d'arrivée sur Proton (destination + nom de la source) déjà
+            # occupé par un autre mapping, ou imbriqué avec le sien : refusé.
+            # Les deux se mettraient à la corbeille l'un l'autre quand les
+            # suppressions sont propagées. Le mapping édité ne compte pas.
+            # En édition, un conflit qui existait DÉJÀ avec ce mapping ne bloque
+            # pas : on peut encore changer ses autres réglages (le conflit est
+            # signalé au chargement). Seul un conflit NOUVEAU est refusé.
+            others = [o for o in self.mappings if o is not mapping]
+            if is_edit:
+                already = {id(o) for o in others
+                           if first_arrival_conflict(mapping, [o]) is not None}
+                others = [o for o in others if id(o) not in already]
+            clash = first_arrival_conflict(new_m, others)
+            if clash is not None:
+                other, kind, mine, theirs = clash
+                o_src = other.get("source", "?")
+                if kind == "same":
+                    msg = _("This mapping would put its content in {r} on Proton, "
+                            "where the mapping of {o} already puts its own.\n\n"
+                            "Their files would mix there, and each mapping would "
+                            "send the other's files to the trash when deletions "
+                            "are propagated.").format(r=mine, o=o_src)
+                elif kind == "inside":
+                    msg = _("This mapping would put its content in {r} on Proton, "
+                            "inside {t}, where the mapping of {o} puts its own.\n\n"
+                            "That mapping would send this content to the trash "
+                            "when its deletions are propagated.").format(
+                                r=mine, t=theirs, o=o_src)
+                else:
+                    msg = _("This mapping would put its content in {r} on Proton, "
+                            "and the mapping of {o} already puts its own inside "
+                            "it, in {t}.\n\n"
+                            "This mapping would send that content to the trash "
+                            "when its deletions are propagated.").format(
+                                r=mine, t=theirs, o=o_src)
+                dlg_warning(dlg, msg + "\n\n" + _("Choose another destination."),
+                            title=_("Proton folder already used"))
+                return
             # Conserver les exclusions existantes si on édite
             if is_edit and mapping.get("exclusions"):
                 new_m["exclusions"] = mapping["exclusions"]
@@ -3458,6 +3548,32 @@ class MappingEditor(tk.Tk):
                 title=_("Destination identity unknown"))
             return
         # Autres cas (B vide/neuf, ou B au même compte, ou A sans cache) : autorisé.
+
+        # Dossier d'arrivée sur Proton déjà occupé (ou imbriqué) par un mapping
+        # du fichier de destination : refusé, comme à l'ajout.
+        dst_maps = []
+        if dest_exists:
+            try:
+                with open(dest, "r", encoding="utf-8") as f:
+                    _raw = json.load(f)
+                dst_maps = _raw if isinstance(_raw, list) else (
+                    _raw.get("mappings", []) if isinstance(_raw, dict) else [])
+            except (OSError, ValueError):
+                dst_maps = []
+        clash = first_arrival_conflict(mapping, dst_maps)
+        if clash is not None:
+            other, _kind, mine, theirs = clash
+            dlg_warning(self, _(
+                "In “{f}”, the mapping of {o} puts its content in {t} on Proton, "
+                "which is the same folder as this mapping's ({r}), or nested with "
+                "it.\n\nThe two mappings would send each other's files to the "
+                "trash when deletions are propagated. Change the destination of "
+                "one of them first.").format(
+                    f=os.path.basename(dest), o=other.get("source", "?"),
+                    t=theirs, r=mine),
+                title=_("Proton folder already used"))
+            self.status.set(_("Move cancelled."))
+            return
 
         # ── Exclusions globales : elles font partie de l'empreinte qui rend un
         #    mapping « prêt ». Un mapping amorcé dans A ne reste ✅ dans B que si
