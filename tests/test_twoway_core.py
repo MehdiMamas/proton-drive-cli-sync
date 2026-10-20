@@ -61,3 +61,11 @@ def test_unknown_schema_version_is_refused(tmp_path):
     conn.close()
     with pytest.raises(ValueError):
         syncdb.SyncDB(path)
+
+
+def test_database_path_follows_the_mappings_file(tmp_path):
+    assert syncdb.database_path("/x/mappings-user1.json", tmp_path) == str(
+        tmp_path / "mappings-user1.sync.sqlite"
+    )
+    with pytest.raises(ValueError):
+        syncdb.database_path("/x/.json", tmp_path)
