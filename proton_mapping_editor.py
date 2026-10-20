@@ -71,7 +71,8 @@ except ImportError:
     _HAS_CONFIG = False
 
 # Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
-from mapping_keys import carry_unknown_keys
+from mapping_keys import (carry_unknown_keys, split_loaded, build_output,
+                          sync_mode, set_sync_mode, MODE_TWOWAY, MODE_UPLOAD)
 
 # Relance après mise à jour du code (import tolérant : sans le module,
 # l'éditeur fonctionne comme avant, sans rappel ni relance).
@@ -1306,6 +1307,8 @@ class MappingEditor(tk.Tk):
 
         self.config_path = config_path
         self.mappings = []  # liste de dicts {type, source, dest_parent, [exclusions]}
+        # Clés inconnues du niveau supérieur du fichier, réécrites telles quelles.
+        self._top_extras = {}
         # Sonde d'auth : verrou de sérialisation (voir _check_auth_settled) et
         # marqueur « un message d'erreur d'auth est affiché en barre d'état »
         # (pour l'EFFACER dès que la session redevient bonne — sinon témoin vert
@@ -2230,6 +2233,8 @@ class MappingEditor(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         for i, m in enumerate(self.mappings):
             label = _("Folder") if m["type"] == "folder" else _("File")
+            if sync_mode(m) == MODE_TWOWAY:
+                label += " ⇄"   # deux sens
             excl = m.get("exclusions") or {}
             n_names = len(excl.get("names", []) or [])
             n_pat = len(excl.get("patterns", []) or [])
@@ -2438,24 +2443,19 @@ class MappingEditor(tk.Tk):
                 data = json.load(f)
             # Deux formats acceptés :
             #  - ancien : liste simple de mappings
-            #  - nouveau : objet { exclusions: {...}, mappings: [...] }
-            if isinstance(data, list):
-                mappings = data
-                global_ex = {"names": [], "patterns": []}
-            elif isinstance(data, dict):
-                mappings = data.get("mappings", [])
-                ex = data.get("exclusions", {}) or {}
-                global_ex = {
-                    "names": list(ex.get("names", []) or []),
-                    "patterns": list(ex.get("patterns", []) or []),
-                }
-            else:
+            #  - nouveau : objet { exclusions: {...}, mappings: [...],
+            #    twoway_mappings: [...] } ; les mappings deux sens sont
+            #    chargés à la suite, marqués (mapping_keys.split_loaded).
+            try:
+                mappings, global_ex, extras = split_loaded(data)
+            except ValueError:
                 raise ValueError(_("The file must contain a list or an object."))
             for entry in mappings:
                 if "type" not in entry or "source" not in entry or "dest_parent" not in entry:
                     raise ValueError(_("Each entry must have: type, source, dest_parent."))
             self.mappings = mappings
             self.global_exclusions = global_ex
+            self._top_extras = extras
             self.config_path = path
             self._set_dirty(False)
             self._refresh_tree()
@@ -2547,24 +2547,11 @@ class MappingEditor(tk.Tk):
 
     def _save(self, path):
         try:
-            # Décider du format de sortie :
-            #  - si aucune exclusion (ni globale, ni par mapping), on garde le
-            #    format « liste simple » historique (compatibilité maximale).
-            #  - sinon, format objet { exclusions, mappings }.
-            has_global = bool(self.global_exclusions.get("names") or
-                              self.global_exclusions.get("patterns"))
-            has_mapping_excl = any(m.get("exclusions") for m in self.mappings)
-
-            if has_global or has_mapping_excl:
-                out = {
-                    "exclusions": {
-                        "names": self.global_exclusions.get("names", []),
-                        "patterns": self.global_exclusions.get("patterns", []),
-                    },
-                    "mappings": self.mappings,
-                }
-            else:
-                out = self.mappings  # format liste simple
+            # Format de sortie (mapping_keys.build_output) : liste simple
+            # historique s'il n'y a ni exclusion, ni mapping deux sens, ni clé
+            # inconnue ; sinon objet { exclusions, mappings, twoway_mappings }.
+            out = build_output(self.mappings, self.global_exclusions,
+                               self._top_extras)
 
             # Écriture ATOMIQUE (tmp + os.replace), comme partout ailleurs dans
             # le projet (cache, déplacement de mapping, .desktop, push NAS). Le
@@ -2709,6 +2696,39 @@ class MappingEditor(tk.Tk):
         ttk.Button(dest_row, text=_("🔍 Browse Proton…"),
                    command=lambda: RemoteFolderPicker(dlg, self, dest_var)
                    ).pack(side="left", padx=(6, 0))
+
+        # --- Mode de synchro : envoi seul ou deux sens ---
+        mode_frame = ttk.LabelFrame(body, text=_("Sync mode"), padding=8)
+        mode_frame.pack(fill="x", pady=(0, 8))
+        sync_var = tk.StringVar(
+            value=sync_mode(mapping) if is_edit else MODE_UPLOAD)
+        ttk.Radiobutton(mode_frame, variable=sync_var, value=MODE_UPLOAD,
+                        text=_("Upload only — local changes are sent to Proton")
+                        ).pack(anchor="w")
+        ttk.Radiobutton(mode_frame, variable=sync_var, value=MODE_TWOWAY,
+                        text=_("Two-way — changes on Proton are also brought back "
+                               "to this computer")).pack(anchor="w")
+        twoway_note = ttk.Label(mode_frame, text="", wraplength=600,
+                                foreground="#7a5c00", justify="left")
+
+        def show_twoway_note(*_a):
+            # Sans déclencheur d'événements, le moteur ignore les mappings deux sens.
+            trigger = "none"
+            if _HAS_CONFIG:
+                try:
+                    trigger = appconfig.twoway_trigger()
+                except Exception:
+                    trigger = "none"
+            if sync_var.get() == MODE_TWOWAY and trigger == "none":
+                twoway_note.config(text=_(
+                    "Two-way mappings are skipped until an event trigger is "
+                    "configured. This mapping is saved but will not sync yet."))
+                twoway_note.pack(anchor="w", pady=(4, 0))
+            else:
+                twoway_note.pack_forget()
+
+        sync_var.trace_add("write", show_twoway_note)
+        show_twoway_note()
 
         # --- Zone Fichiers modifiés (mode de conflit) ---
         conf_frame = ttk.LabelFrame(body, text=_("Modified files"), padding=8)
@@ -3043,6 +3063,7 @@ class MappingEditor(tk.Tk):
                     title=_("Invalid destination"))
                 return
             new_m = {"type": m_type, "source": source, "dest_parent": dest}
+            set_sync_mode(new_m, sync_var.get())
             # Conserver les exclusions existantes si on édite
             if is_edit and mapping.get("exclusions"):
                 new_m["exclusions"] = mapping["exclusions"]
@@ -3681,7 +3702,11 @@ class MappingEditor(tk.Tk):
         if copy_excl and src_excl is not None:
             dst_map["exclusions"] = {"names": list(src_excl.get("names", [])),
                                      "patterns": list(src_excl.get("patterns", []))}
-        dst_map["mappings"].append(mapping)
+        if sync_mode(mapping) == MODE_TWOWAY:
+            dst_map.setdefault("twoway_mappings", []).append(
+                {k: v for k, v in mapping.items() if k != "_sync_mode"})
+        else:
+            dst_map["mappings"].append(mapping)
         tmp = dest + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dst_map, f, ensure_ascii=False, indent=2)

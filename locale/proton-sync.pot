@@ -3976,3 +3976,15 @@ msgstr ""
 
 msgid "Press “Install”."
 msgstr ""
+
+msgid "Sync mode"
+msgstr ""
+
+msgid "Upload only — local changes are sent to Proton"
+msgstr ""
+
+msgid "Two-way — changes on Proton are also brought back to this computer"
+msgstr ""
+
+msgid "Two-way mappings are skipped until an event trigger is configured. This mapping is saved but will not sync yet."
+msgstr ""
