@@ -9,7 +9,7 @@ import os
 DIALOG_KEYS = frozenset({
     "type", "source", "dest_parent", "exclusions",
     "conflict_mode", "allow_delete", "delete_mode", "source_kind",
-    "excluded_remote",
+    "excluded_remote", "_sync_mode",
 })
 
 
@@ -133,7 +133,7 @@ def first_arrival_conflict(candidate, others):
 # doivent survivre à un enregistrement fait par cette version, sans que
 # celle-ci en tienne compte autrement.
 
-FILE_KEYS = frozenset({"exclusions", "mappings"})
+FILE_KEYS = frozenset({"exclusions", "mappings", "sync_mappings"})
 
 
 def unknown_top_level(document):
@@ -210,3 +210,109 @@ def sync_mapping_conflicts(sync_mappings, upload_mappings=()):
         if found:
             out[i] = found
     return out
+
+
+# ── Sync mode in the editor (upload vs two-way) ──────────────────────────────
+# In memory the editor holds one flat list. A two-way mapping carries the marker
+# _sync_mode = "twoway"; the marker is never written. In the file the mode is
+# given by the list: "mappings" (upload) or "sync_mappings" (two-way, with
+# "direction": "twoway"). Every other key of a mapping travels untouched.
+
+MODE_KEY = "_sync_mode"
+MODE_UPLOAD = "upload"
+MODE_TWOWAY = "twoway"
+DIRECTION_KEY = "direction"
+
+
+def sync_mode(mapping):
+    """MODE_TWOWAY or MODE_UPLOAD (default) for an in-memory mapping."""
+    return MODE_TWOWAY if mapping.get(MODE_KEY) == MODE_TWOWAY else MODE_UPLOAD
+
+
+def set_sync_mode(mapping, mode):
+    """Set the mode on `mapping` in place (upload = no marker). Returns it.
+    Moving to upload also drops direction "twoway", which only belongs in
+    sync_mappings; a mapping moving to two-way gets it when saved."""
+    if mode == MODE_TWOWAY:
+        mapping[MODE_KEY] = MODE_TWOWAY
+    else:
+        mapping.pop(MODE_KEY, None)
+        if mapping.get(DIRECTION_KEY) == "twoway":
+            mapping.pop(DIRECTION_KEY, None)
+    return mapping
+
+
+def split_loaded(data):
+    """Split the JSON of a mappings file.
+
+    Returns (mappings, global_exclusions, extras): `mappings` is "mappings"
+    followed by "sync_mappings" (marked MODE_TWOWAY), `extras` the top-level
+    keys the editor does not manage, to be written back as they are (a
+    "sync_mappings" that is not a list stays in extras, untouched).
+    Raises ValueError for an unknown format."""
+    if isinstance(data, list):
+        return list(data), {"names": [], "patterns": []}, {}
+    if not isinstance(data, dict):
+        raise ValueError("The file must contain a list or an object.")
+    up = data.get("mappings", []) or []
+    tw = data.get("sync_mappings", []) or []
+    extras = unknown_top_level(data)
+    if not isinstance(tw, list):
+        extras["sync_mappings"] = data["sync_mappings"]
+        tw = []
+    mappings = list(up)
+    for entry in tw:
+        if isinstance(entry, dict):
+            entry = dict(entry)
+            entry[MODE_KEY] = MODE_TWOWAY
+        mappings.append(entry)
+    ex = data.get("exclusions", {}) or {}
+    global_ex = {"names": list(ex.get("names", []) or []),
+                 "patterns": list(ex.get("patterns", []) or [])}
+    return mappings, global_ex, extras
+
+
+def split_by_mode(mappings):
+    """(upload, twoway) lists of clean copies (marker removed, direction set)."""
+    upload, twoway = [], []
+    for m in mappings:
+        clean = {k: v for k, v in m.items() if k != MODE_KEY}
+        if sync_mode(m) == MODE_TWOWAY:
+            clean.setdefault(DIRECTION_KEY, "twoway")
+            twoway.append(clean)
+        else:
+            if clean.get(DIRECTION_KEY) == "twoway":
+                del clean[DIRECTION_KEY]
+            upload.append(clean)
+    return upload, twoway
+
+
+def build_output(mappings, global_ex=None, extras=None):
+    """JSON content to write. Keeps the historic plain-list format while there
+    is no exclusion, no two-way mapping and no unknown top-level key; otherwise
+    an object. Relative order is kept inside each list."""
+    global_ex = global_ex or {}
+    extras = extras or {}
+    upload, twoway = split_by_mode(mappings)
+    has_global = bool(global_ex.get("names") or global_ex.get("patterns"))
+    has_mapping_excl = any(m.get("exclusions") for m in mappings)
+    if not (has_global or has_mapping_excl or twoway or extras):
+        return upload
+    out = {"exclusions": {"names": global_ex.get("names", []),
+                          "patterns": global_ex.get("patterns", [])}}
+    out["mappings"] = upload
+    if twoway:
+        out["sync_mappings"] = twoway
+    for k, v in extras.items():
+        out.setdefault(k, v)
+    return out
+
+
+def twoway_conflicts(mappings):
+    """Run sync_mapping_conflicts on the editor's flat list. Returns a list of
+    (index in `mappings`, reason, other_mapping, detail), in list order."""
+    tw_idx = [i for i, m in enumerate(mappings)
+              if isinstance(m, dict) and sync_mode(m) == MODE_TWOWAY]
+    up = [m for m in mappings if isinstance(m, dict) and sync_mode(m) != MODE_TWOWAY]
+    found = sync_mapping_conflicts([mappings[i] for i in tw_idx], up)
+    return [(tw_idx[k], *found[k]) for k in sorted(found)]

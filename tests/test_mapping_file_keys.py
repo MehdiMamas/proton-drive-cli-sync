@@ -52,7 +52,7 @@ def test_first_arrival_conflict_kinds():
 
 def test_unknown_top_level_keys():
     doc = {"exclusions": {}, "mappings": [], "sync_mappings": [1], "zz": {"a": 1}}
-    assert mk.unknown_top_level(doc) == {"sync_mappings": [1], "zz": {"a": 1}}
+    assert mk.unknown_top_level(doc) == {"zz": {"a": 1}}
     assert mk.unknown_top_level([]) == {}
 
 
@@ -63,7 +63,7 @@ def _editor_stub():
     warnings = []
     stub = types.SimpleNamespace(
         mappings=[], global_exclusions={"names": [], "patterns": []},
-        _extra_top={}, config_path=None,
+        _extra_top={}, config_path=None, _warn_twoway_conflicts=lambda: False,
         status=types.SimpleNamespace(set=lambda *_a: None),
         _set_dirty=lambda *_a: None, _refresh_tree=lambda: None,
         _update_excl_summary=lambda: None, _auto_push_mappings=lambda *_a: None,
@@ -87,8 +87,8 @@ def test_save_keeps_keys_it_does_not_know(tmp_path, monkeypatch):
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["sync_mappings"] == later
     assert [m["source"] for m in saved["mappings"]] == ["/h/Docs", "/h/More"]
-    # The editor itself still shows only its own mappings.
-    assert [m["source"] for m in stub.mappings] == ["/h/Docs", "/h/More"]
+    # The two-way entry is held in memory too, marked, after the upload ones.
+    assert [m["source"] for m in stub.mappings] == ["/h/Docs", "/h/Share", "/h/More"]
 
 
 def test_save_keeps_the_plain_list_format_without_extra_keys(tmp_path):

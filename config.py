@@ -637,6 +637,10 @@ def twoway_probe_cmd():
     return DEFAULTS["twoway_probe_cmd"]
 
 
+def set_twoway_trigger(value):
+    return _put("twoway_trigger", str(value or "none").strip().lower())
+
+
 def parse_min(value):
     """Nombre entier, 0 ou plus. Retourne l'int, ou None si la valeur est
     illisible ou négative."""

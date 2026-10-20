@@ -72,7 +72,8 @@ except ImportError:
 
 # Clés de mapping inconnues du dialogue : préservées à l'édition (mapping_keys.py).
 from mapping_keys import (carry_unknown_keys, arrival_conflicts, first_arrival_conflict,
-                          unknown_top_level)
+                          split_loaded, build_output, split_by_mode, sync_mode, set_sync_mode,
+                          twoway_conflicts, MODE_TWOWAY, MODE_UPLOAD)
 
 # Relance après mise à jour du code (import tolérant : sans le module,
 # l'éditeur fonctionne comme avant, sans rappel ni relance).
@@ -2235,6 +2236,8 @@ class MappingEditor(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         for i, m in enumerate(self.mappings):
             label = _("Folder") if m["type"] == "folder" else _("File")
+            if sync_mode(m) == MODE_TWOWAY:
+                label += " ⇄"   # two-way
             excl = m.get("exclusions") or {}
             n_names = len(excl.get("names", []) or [])
             n_pat = len(excl.get("patterns", []) or [])
@@ -2444,24 +2447,18 @@ class MappingEditor(tk.Tk):
             # Deux formats acceptés :
             #  - ancien : liste simple de mappings
             #  - nouveau : objet { exclusions: {...}, mappings: [...] }
-            if isinstance(data, list):
-                mappings = data
-                global_ex = {"names": [], "patterns": []}
-            elif isinstance(data, dict):
-                mappings = data.get("mappings", [])
-                ex = data.get("exclusions", {}) or {}
-                global_ex = {
-                    "names": list(ex.get("names", []) or []),
-                    "patterns": list(ex.get("patterns", []) or []),
-                }
-            else:
+            #  - "sync_mappings" (two-way) are loaded after "mappings" and
+            #    marked in memory (mapping_keys.split_loaded).
+            try:
+                mappings, global_ex, extras = split_loaded(data)
+            except ValueError:
                 raise ValueError(_("The file must contain a list or an object."))
             for entry in mappings:
                 if "type" not in entry or "source" not in entry or "dest_parent" not in entry:
                     raise ValueError(_("Each entry must have: type, source, dest_parent."))
             self.mappings = mappings
             self.global_exclusions = global_ex
-            self._extra_top = unknown_top_level(data)
+            self._extra_top = extras
             self.config_path = path
             self._set_dirty(False)
             self._refresh_tree()
@@ -2470,6 +2467,7 @@ class MappingEditor(tk.Tk):
             self._warn_revisions_unsupported()
             self._warn_permanent_delete_unsupported()
             self._warn_arrival_conflicts()
+            self._warn_twoway_conflicts()
         except Exception as e:
             dlg_error(self, str(e), title=_("Load error"))
 
@@ -2482,13 +2480,15 @@ class MappingEditor(tk.Tk):
         Ne bloque rien, ne modifie rien : l'utilisateur corrige quand il veut.
         N'apparaît que s'il y a un conflit."""
         try:
-            pairs = arrival_conflicts(self.mappings)
+            # Two-way mappings have their own check (_warn_twoway_conflicts).
+            ups = [m for m in self.mappings if sync_mode(m) != MODE_TWOWAY]
+            pairs = arrival_conflicts(ups)
             if not pairs:
                 return
             lines = []
             for outer, inner, kind, f_out, f_in in pairs[:10]:
-                a = self.mappings[outer].get("source", "?")
-                b = self.mappings[inner].get("source", "?")
+                a = ups[outer].get("source", "?")
+                b = ups[inner].get("source", "?")
                 if kind == "same":
                     lines.append(_("  • {a}\n    and {b}\n    both arrive in {r}").format(
                         a=a, b=b, r=f_out))
@@ -2511,6 +2511,53 @@ class MappingEditor(tk.Tk):
         except Exception:
             # Un avis ne doit jamais empêcher un fichier de se charger.
             pass
+
+    def _twoway_conflict_lines(self):
+        """One plain sentence per two-way mapping that overlaps another mapping
+        (same check as the engine: mapping_keys.sync_mapping_conflicts)."""
+        lines = []
+        for idx, reason, other, detail in twoway_conflicts(self.mappings):
+            src = self.mappings[idx].get("source", "?")
+            o = other.get("source", "?")
+            if reason == "local-same":
+                why = _("uses the same local folder as {o}")
+            elif reason == "local-parent":
+                why = _("contains the local folder of {o}")
+            elif reason == "local-child":
+                why = _("is inside the local folder of {o}")
+            elif reason == "arrival-same":
+                why = _("arrives in the same Proton folder as {o} ({d})")
+            elif reason == "arrival-inside":
+                why = _("arrives inside the Proton folder of {o} ({d})")
+            elif reason == "arrival-contains":
+                why = _("contains the Proton folder where {o} arrives ({d})")
+            else:
+                why = _("overlaps {o}")
+            lines.append("  • " + src + "\n    " + why.format(o=o, d=detail))
+        return lines
+
+    def _warn_twoway_conflicts(self):
+        """Warn when a two-way mapping overlaps another mapping, naming it and
+        why. The mapping is kept in the file (never dropped); the engine will
+        not sync it until the overlap is fixed. Returns True if a warning was
+        shown. Never raises."""
+        try:
+            lines = self._twoway_conflict_lines()
+            if not lines:
+                return False
+            shown = lines[:10]
+            if len(lines) > 10:
+                shown.append("  " + _("…and {n} more").format(n=len(lines) - 10))
+            dlg_warning(self, _(
+                "These two-way mappings overlap another mapping:\n\n{list}\n\n"
+                "A two-way mapping must not overlap any other mapping, on this "
+                "computer or on Proton. It stays in the file but will not sync "
+                "until you change one of the two."
+                ).format(list="\n\n".join(shown)),
+                title=_("Two-way mapping overlaps"))
+            return True
+        except Exception:
+            return False
 
     def _warn_permanent_delete_unsupported(self):
         """Avertit UNE FOIS par chargement si des mappings sont encore réglés en
@@ -2593,30 +2640,15 @@ class MappingEditor(tk.Tk):
 
     def _save(self, path):
         try:
-            # Décider du format de sortie :
-            #  - si aucune exclusion (ni globale, ni par mapping), on garde le
-            #    format « liste simple » historique (compatibilité maximale).
-            #  - sinon, format objet { exclusions, mappings }.
-            has_global = bool(self.global_exclusions.get("names") or
-                              self.global_exclusions.get("patterns"))
-            has_mapping_excl = any(m.get("exclusions") for m in self.mappings)
+            # Same overlap check as on load, before anything is written.
+            self._warn_twoway_conflicts()
 
-            # Des clés que cette version ne gère pas (écrites par une version
-            # plus récente) imposent le format objet : elles sont réécrites
-            # telles quelles, après les nôtres.
-            extra = getattr(self, "_extra_top", None) or {}
-            if has_global or has_mapping_excl or extra:
-                out = {
-                    "exclusions": {
-                        "names": self.global_exclusions.get("names", []),
-                        "patterns": self.global_exclusions.get("patterns", []),
-                    },
-                    "mappings": self.mappings,
-                }
-                for key, value in extra.items():
-                    out.setdefault(key, value)
-            else:
-                out = self.mappings  # format liste simple
+            # Output format (mapping_keys.build_output): the historic plain list
+            # without exclusions, two-way mappings or unknown top-level keys;
+            # otherwise an object { exclusions, mappings, sync_mappings, ... }.
+            # Keys this version does not manage are written back as they are.
+            out = build_output(self.mappings, self.global_exclusions,
+                               getattr(self, "_extra_top", None) or {})
 
             # Écriture ATOMIQUE (tmp + os.replace), comme partout ailleurs dans
             # le projet (cache, déplacement de mapping, .desktop, push NAS). Le
@@ -2761,6 +2793,16 @@ class MappingEditor(tk.Tk):
         ttk.Button(dest_row, text=_("🔍 Browse Proton…"),
                    command=lambda: RemoteFolderPicker(dlg, self, dest_var)
                    ).pack(side="left", padx=(6, 0))
+
+        # --- Sync mode: upload only or two-way ---
+        mode_frame = ttk.LabelFrame(body, text=_("Sync mode"), padding=8)
+        mode_frame.pack(fill="x", pady=(0, 8))
+        sync_var = tk.StringVar(
+            value=sync_mode(mapping) if is_edit else MODE_UPLOAD)
+        ttk.Radiobutton(mode_frame, variable=sync_var, value=MODE_UPLOAD,
+                        text=_("Upload")).pack(anchor="w")
+        ttk.Radiobutton(mode_frame, variable=sync_var, value=MODE_TWOWAY,
+                        text=_("Two-way")).pack(anchor="w")
 
         # --- Zone Fichiers modifiés (mode de conflit) ---
         conf_frame = ttk.LabelFrame(body, text=_("Modified files"), padding=8)
@@ -3095,6 +3137,9 @@ class MappingEditor(tk.Tk):
                     title=_("Invalid destination"))
                 return
             new_m = {"type": m_type, "source": source, "dest_parent": dest}
+            # Other keys of the mapping (unknown ones too) are carried over
+            # below; the mode only moves it between upload and two-way.
+            set_sync_mode(new_m, sync_var.get())
             # Dossier d'arrivée sur Proton (destination + nom de la source) déjà
             # occupé par un autre mapping, ou imbriqué avec le sien : refusé.
             # Les deux se mettraient à la corbeille l'un l'autre quand les
@@ -3102,7 +3147,11 @@ class MappingEditor(tk.Tk):
             # En édition, un conflit qui existait DÉJÀ avec ce mapping ne bloque
             # pas : on peut encore changer ses autres réglages (le conflit est
             # signalé au chargement). Seul un conflit NOUVEAU est refusé.
-            others = [o for o in self.mappings if o is not mapping]
+            # Upload mappings are checked against upload mappings here; a
+            # two-way mapping is checked on its own rules (_warn_twoway_conflicts).
+            others = [o for o in self.mappings if o is not mapping
+                      and sync_mode(new_m) == MODE_UPLOAD
+                      and sync_mode(o) == MODE_UPLOAD]
             if is_edit:
                 already = {id(o) for o in others
                            if first_arrival_conflict(mapping, [o]) is not None}
@@ -3233,6 +3282,7 @@ class MappingEditor(tk.Tk):
             # APRÈS la copie, sinon une case décochée restaurerait l'ancienne clé.
             if is_edit:
                 carry_unknown_keys(mapping, new_m)
+                set_sync_mode(new_m, sync_var.get())   # drops a stale direction
             if keep_excluded_var.get():
                 new_m["excluded_remote"] = "keep"
             else:
@@ -3480,7 +3530,8 @@ class MappingEditor(tk.Tk):
         if isinstance(raw, list):
             return len(raw) > 0
         if isinstance(raw, dict):
-            return len(raw.get("mappings", [])) > 0
+            return (len(raw.get("mappings", []) or []) > 0
+                    or len(raw.get("sync_mappings", []) or []) > 0)
         return False
 
     def on_move_mapping(self):
@@ -3557,7 +3608,8 @@ class MappingEditor(tk.Tk):
                 with open(dest, "r", encoding="utf-8") as f:
                     _raw = json.load(f)
                 dst_maps = _raw if isinstance(_raw, list) else (
-                    _raw.get("mappings", []) if isinstance(_raw, dict) else [])
+                    (_raw.get("mappings", []) or []) + (_raw.get("sync_mappings", []) or [])
+                    if isinstance(_raw, dict) else [])
             except (OSError, ValueError):
                 dst_maps = []
         clash = first_arrival_conflict(mapping, dst_maps)
@@ -3699,8 +3751,9 @@ class MappingEditor(tk.Tk):
                 raw = json.load(f)
         except (OSError, ValueError):
             return []
-        maps = raw if isinstance(raw, list) else (raw.get("mappings", [])
-               if isinstance(raw, dict) else [])
+        maps = raw if isinstance(raw, list) else (
+            (raw.get("mappings", []) or []) + (raw.get("sync_mappings", []) or [])
+            if isinstance(raw, dict) else [])
         excl_norm = os.path.normpath(exclude_source) if exclude_source else None
         hit = []
         for m in maps:
@@ -3797,7 +3850,12 @@ class MappingEditor(tk.Tk):
         if copy_excl and src_excl is not None:
             dst_map["exclusions"] = {"names": list(src_excl.get("names", [])),
                                      "patterns": list(src_excl.get("patterns", []))}
-        dst_map["mappings"].append(mapping)
+        # A two-way mapping lands in the destination's sync_mappings; other
+        # fields (and unknown keys) go along unchanged.
+        if sync_mode(mapping) == MODE_TWOWAY:
+            dst_map.setdefault("sync_mappings", []).append(split_by_mode([mapping])[1][0])
+        else:
+            dst_map["mappings"].append(split_by_mode([mapping])[0][0])
         tmp = dest + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dst_map, f, ensure_ascii=False, indent=2)
@@ -4507,6 +4565,20 @@ class MappingEditor(tk.Tk):
                             variable=thumb_var).pack(side="left")
             help_btn(trow, "create-thumbnails")
 
+            # Two-way: trigger used to detect changes on Proton ("none" = full
+            # listing). Choices are the engine's TWOWAY_TRIGGERS.
+            tw_frame = ttk.LabelFrame(frm, text=_("Two-way"), padding=10)
+            tw_frame.pack(fill="x", pady=(0, 10))
+            tw_names = sorted(getattr(_ENGINE, "TWOWAY_TRIGGERS", {"none": None}))
+            tw_cur = appconfig.twoway_trigger()
+            if tw_cur not in tw_names:
+                tw_names.append(tw_cur)   # keep an unknown saved value as is
+            trigger_var = tk.StringVar(value=tw_cur)
+            twrow = ttk.Frame(tw_frame); twrow.pack(anchor="w", fill="x")
+            ttk.Label(twrow, text=_("Trigger:")).pack(side="left")
+            ttk.Combobox(twrow, textvariable=trigger_var, values=tw_names,
+                         state="readonly", width=14).pack(side="left", padx=(6, 0))
+
             # Garde-fou de masse : éteint par défaut. Les deux seuils sont
             # toujours éditables, y compris quand la case est décochée, pour
             # qu'on puisse les préparer avant d'allumer le garde-fou.
@@ -4934,6 +5006,7 @@ class MappingEditor(tk.Tk):
                 appconfig.set_cli_stall_minutes(stall_var.get())
                 appconfig.set_cli_stall_max_kills(kills_var.get())
                 appconfig.set_create_thumbnails(thumb_var.get())
+                appconfig.set_twoway_trigger(trigger_var.get())
                 # Garde-fou de masse : seuils déjà validés dans apply().
                 appconfig.set_mass_delete_guard(guard_var.get())
                 appconfig.set_max_delete_min(gmin_var.get())
