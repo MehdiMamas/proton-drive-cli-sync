@@ -281,6 +281,10 @@ DEUX formats acceptés (rétrocompatibilité) :
 - `source_kind` : `"nfs"` ou `"local"`. Détecté automatiquement par le GUI, confirmé à l'édition. Sert au garde-fou : une source `nfs` ne supprime que si le montage réseau est vivant.
 - `excluded_remote` : absent (le défaut) ou `"prune"` envoie à la corbeille Proton, au prochain passage `--delete`, la copie déjà téléversée d'un nom exclu **sur ce mapping**. `"keep"` est un choix (la case du dialogue de mapping) et ne concerne que les exclusions écrites sur ce mapping. Un nom qui correspond à une exclusion **globale** part quand même à la corbeille. Toute autre valeur vaut `"prune"` avec un avertissement. S'applique aux passages complets, aux réinitialisations et à `--subpath`.
 
+### Mappings bidirectionnels (`twoway_mappings`, noyau du moteur)
+
+Une seconde clé de premier niveau, `twoway_mappings`, liste les dossiers à synchroniser dans les deux sens (mêmes champs que `mappings`). `mappings` reste en envoi seul et ne change pas. Un mapping bidirectionnel ne tourne que si le réglage `twoway_trigger` (settings.json) nomme un déclencheur capable de voir ce qui a changé sur Proton. La seule valeur aujourd'hui est `"none"` : elle ne voit pas les changements côté Proton, donc les mappings bidirectionnels sont ignorés avec une ligne de journal (`Two-way mapping skipped`), sans interrogation périodique de tout l'arbre. Les mappings en envoi seul se comportent comme avant. La base de synchronisation garde aussi une table `folders` pour les dossiers synchronisés.
+
 ### Exclusions
 
 Deux mécanismes combinés, s'appliquant aux **dossiers ET fichiers**, par **nom** (pas chemin complet) :

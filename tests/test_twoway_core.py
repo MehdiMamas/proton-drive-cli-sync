@@ -1,4 +1,4 @@
-"""Engine core of two-way sync (#17 PR-1): reconcile driver, folders table.
+"""Engine core of two-way sync (#17 PR-1): key, trigger setting, folders table.
 
 PR-2 and PR-3 tests are strict xfails: they describe the wanted behaviour and
 fail today, so they flip loudly when the feature lands.
@@ -9,6 +9,7 @@ import sqlite3
 
 import pytest
 
+import proton_sync
 import remote_state
 import syncdb
 
@@ -28,6 +29,36 @@ def _db(isolated_home, cfg):
     return syncdb.database_path(
         os.path.basename(str(cfg)),
         data_dir=str(isolated_home / ".proton-drive-sync"))
+
+
+def test_load_twoway_mappings_reads_only_its_own_key(tmp_path):
+    cfg = tmp_path / "m.json"
+    cfg.write_text('{"mappings": [{"source": "a"}], '
+                   '"twoway_mappings": [{"source": "b"}]}')
+    assert proton_sync.load_twoway_mappings(str(cfg)) == [{"source": "b"}]
+    cfg.write_text('{"mappings": [{"source": "a"}]}')
+    assert proton_sync.load_twoway_mappings(str(cfg)) == []
+    cfg.write_text('{"twoway_mappings": "nope"}')
+    assert proton_sync.load_twoway_mappings(str(cfg)) == []
+
+
+def test_trigger_none_skips_twoway_mappings_and_uploads_the_rest(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({
+        "Two/a.txt": (b"AAAA", 1_000_000_000),
+        "One/b.txt": (b"BBBB", 1_000_000_000),
+    })
+    cfg = write_mappings([_mapping(src / "One", "/my-files/OneWay")],
+                         twoway_mappings=[_mapping(src / "Two", "/my-files/TwoWay")])
+    fake_drive.seed_file("/my-files/TwoWay/Two/web.txt", b"WEB")
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Two-way mapping skipped" in result.stdout
+    assert "'none'" in result.stdout
+    assert fake_drive.content("/my-files/OneWay/One/b.txt") == b"BBBB"
+    assert fake_drive.content("/my-files/TwoWay/Two/a.txt") is None
+    assert _downloads(fake_drive.calls()) == []
+    assert not (src / "Two" / "web.txt").exists()
 
 
 def test_reconcile_remembers_the_synced_folders(

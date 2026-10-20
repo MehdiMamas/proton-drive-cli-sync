@@ -278,6 +278,10 @@ TWO accepted formats (backward compatibility):
 - `source_kind`: `"nfs"` or `"local"`. Auto-detected by the GUI, confirmed when editing. Used by the safety guard: an `nfs` source only deletes if the network mount is alive.
 - `excluded_remote`: absent (the default) or `"prune"` sends the already-uploaded remote copy of a name excluded **on this mapping** to the Proton trash on the next `--delete` pass. `"keep"` is opt-in — the checkbox in the mapping dialog — and covers only exclusions written on that mapping. A name that matches a **global** exclusion is still trashed. Any other value is treated as `"prune"` with a warning. Applies to full passes, resets and `--subpath`.
 
+### Two-way mappings (`twoway_mappings`, engine core)
+
+A second top-level key, `twoway_mappings`, lists folders meant to sync both ways (same fields as `mappings`). `mappings` stays upload-only and is unchanged. A two-way mapping runs only when the `twoway_trigger` setting (settings.json) names a trigger that can see what changed on Proton. The only value today is `"none"`: it has no way to see Proton-side changes, so two-way mappings are skipped with a log line (`Two-way mapping skipped`) and there is no periodic full-tree poll. Upload-only mappings behave as before. The sync database also keeps a `folders` table for the folders it has synced.
+
 ### Exclusions
 
 Two combined mechanisms, applying to **folders AND files**, by **name** (not full path):

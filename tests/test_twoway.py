@@ -1,7 +1,8 @@
 """Two-way mappings (the twoway_mappings key) round-trip and resolve conflicts.
 
-The reconcile tests drive twoway.sync_mapping through engine.reconcile. A
-one-way mapping in the same file never downloads.
+The shipped trigger is "none", which skips them (see the first tests). The
+reconcile tests register a test trigger through engine.reconcile. A one-way
+mapping in the same file never downloads.
 """
 
 import os

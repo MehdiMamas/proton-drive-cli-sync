@@ -261,65 +261,12 @@ def write_mappings(tmp_path):
 
 
 _TRIGGER_DRIVER = """
-import argparse, json, os, sys
+import sys
 repo = sys.argv.pop(1)
 sys.path.insert(0, repo)
 sys.argv[0] = repo + "/proton_sync.py"
 import proton_sync, twoway
 proton_sync.TWOWAY_TRIGGERS["test"] = twoway.sync_mapping
-seen = {}
-
-# main() does not reconcile two-way mappings yet, so capture what is needed
-# and reconcile them just before the pass ends.
-_parse = argparse.ArgumentParser.parse_args
-def parse_args(self, *a, **kw):
-    seen["args"] = _parse(self, *a, **kw)
-    return seen["args"]
-argparse.ArgumentParser.parse_args = parse_args
-
-_load = proton_sync.load_config
-def load_config(path):
-    seen["config"] = path
-    seen["loaded"] = _load(path)
-    return seen["loaded"]
-proton_sync.load_config = load_config
-
-_Cache = proton_sync.Cache
-class Cache(_Cache):
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        seen["cache"] = self
-proton_sync.Cache = Cache
-
-_finish = proton_sync._finish_pass
-def finish(exit_code, mode, dry_run, completed):
-    args = seen.get("args")
-    if completed and mode != "subpath" and "cache" in seen and not args.reset_source:
-        with open(seen["config"], encoding="utf-8") as f:
-            found = json.load(f).get("twoway_mappings", [])
-        if args.only_source:
-            wanted = {os.path.normpath(s) for s in args.only_source}
-            found = [m for m in found
-                     if os.path.normpath(m.get("source", "")) in wanted]
-        for m in found:
-            _RUN = proton_sync._RUN
-            _RUN.mappings_total += 1
-            if not os.path.exists(m["source"]):
-                _RUN.add("sources_missing")
-                continue
-            complete = proton_sync.TWOWAY_TRIGGERS["test"](
-                m, seen["config"], seen["cache"],
-                proton_sync.mapping_exclusions(m, seen["loaded"][1]),
-                dry_run=args.dry_run, verbose=args.verbose,
-                allow_mass_delete=args.allow_mass_delete,
-                global_ex=seen["loaded"][1], delete=args.delete)
-            if complete:
-                _RUN.add("mappings_complete")
-            seen["cache"].save()
-        if exit_code == 0 and proton_sync._RUN.has_failures():
-            exit_code = 5
-    return _finish(exit_code, mode, dry_run, completed)
-proton_sync._finish_pass = finish
 proton_sync.main()
 """
 
@@ -340,9 +287,10 @@ class EngineRunner:
     def reconcile(self, mappings, *args):
         """Run a pass with a test trigger that reconciles two-way mappings.
 
-        main() does not run them on its own yet. The driver script runs
-        twoway.sync_mapping on each entry, so tests can drive the reconcile
-        itself."""
+        The shipped trigger is "none", which skips them. This registers a
+        trigger that calls twoway.sync_mapping directly, so tests can drive
+        the reconcile itself."""
+        self.update_settings(twoway_trigger="test")
         return self(mappings, *args, driver=_TRIGGER_DRIVER)
 
     def __call__(self, mappings, *args, settings_doc=None, driver=None):

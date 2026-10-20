@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Moteur de synchro Proton Drive (NAS -> Proton, à sens unique).
+Moteur de synchro Proton Drive (NAS -> Proton, à sens unique). Les entrées
+de la clé "twoway_mappings" du fichier de mappings se synchronisent dans les
+deux sens (twoway.py), mais seulement quand un déclencheur est configuré
+(réglage twoway_trigger ; "none" par défaut : ces mappings sont ignorés).
 
 Lit un fichier JSON de mappings (voir proton_mapping_editor.py) et, pour
 chaque entrée, n'envoie que les fichiers nouveaux ou modifiés plutôt que
@@ -795,12 +798,35 @@ def load_config(path):
     raise ValueError("Format de config non reconnu (ni liste, ni objet).")
 
 
+def load_twoway_mappings(path):
+    """Mappings deux sens : la clé "twoway_mappings" du fichier de mappings.
+
+    "mappings" reste à sens unique, inchangé. Ancien format (liste) ou clé
+    absente : aucun mapping deux sens.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        found = data.get("twoway_mappings", [])
+        if isinstance(found, list):
+            return found
+    return []
+
+
 # Déclencheurs du deux sens, par nom. None = aucun moyen de savoir ce qui a
 # changé côté Proton : les mappings deux sens sont alors ignorés (pas de
 # parcours périodique de l'arbre distant). Une valeur appelable remplace le
 # parcours : fn(mapping, config_path, cache, exclusions, **opts) -> complet.
 # Seul "none" existe pour l'instant ; la sonde d'événements viendra ensuite.
 TWOWAY_TRIGGERS = {"none": None}
+
+
+def twoway_runner():
+    """(nom, exécuteur) du déclencheur configuré ; exécuteur None = ignorer."""
+    name = "none"
+    if _HAS_CONFIG:
+        name = appconfig.twoway_trigger()
+    return name, TWOWAY_TRIGGERS.get(name)
 
 
 def mapping_exclusions(mapping, global_ex):
@@ -3537,7 +3563,8 @@ def main():
     except (AttributeError, ValueError):
         pass  # vieux Python ou flux non reconfigurable : sans gravité
 
-    parser = argparse.ArgumentParser(description="Moteur de synchro Proton Drive (NAS -> Proton, sens unique)")
+    parser = argparse.ArgumentParser(description="Moteur de synchro Proton Drive (NAS -> Proton, sens unique ; "
+                                                 "deux sens pour les 'twoway_mappings' avec un déclencheur)")
     parser.add_argument("config", nargs="?", default=None,
                         help="Fichier JSON de mappings (optionnel pour les sondes "
                              "--check-auth / --check-lock qui ne lisent pas les mappings)")
@@ -3800,6 +3827,7 @@ def main():
         _finish_pass(2, _pass_mode(args), args.dry_run, completed=False)
 
     mappings, global_ex = load_config(args.config)
+    twoway_mappings = load_twoway_mappings(args.config)
     # Liste COMPLÈTE, avant toute restriction (--only-source, --reset-source) :
     # la reprise des vérifications d'après les journaux porte sur tous les
     # mappings du fichier, pas seulement sur ceux de ce passage.
@@ -4007,6 +4035,14 @@ def main():
                 target = m
                 break
         if target is None:
+            for m in twoway_mappings:
+                if os.path.normpath(m["source"]) == target_source:
+                    # Pas de sous-arbre en temps réel pour le deux sens ici :
+                    # il attend le déclencheur d'événements.
+                    print(_("  ⏭ Two-way mapping skipped (no event trigger): {s}")
+                          .format(s=m["source"]))
+                    _finish_pass(0, "subpath", args.dry_run, completed=True)
+        if target is None:
             print(_("❌ No mapping with source = {s}").format(s=args.mapping_source))
             sys.exit(1)
         if target["type"] != "folder":
@@ -4151,6 +4187,37 @@ def main():
         # mappings déjà entièrement traités. L'écriture atomique (tmp+rename)
         # garantit qu'on ne se retrouve jamais avec un cache corrompu.
         cache.save()
+
+    # Mappings deux sens : seulement avec un déclencheur configuré. Sans lui,
+    # on le dit et on ne touche à rien (aucun parcours périodique de l'arbre).
+    if twoway_mappings and not args.reset_source:
+        if args.only_source:
+            wanted_tw = {os.path.normpath(s) for s in args.only_source}
+            twoway_mappings = [m for m in twoway_mappings
+                               if os.path.normpath(m.get("source", "")) in wanted_tw]
+        trigger_name, runner = twoway_runner()
+        for m in twoway_mappings:
+            if runner is None:
+                print(_("\n⏭ Two-way mapping skipped (trigger '{t}': no way to "
+                        "see what changed on Proton): {s}  =>  {d}").format(
+                        t=trigger_name, s=m.get("source", ""), d=m.get("dest_parent", "")))
+                continue
+            print(_("\n▶ Two-way mapping: {s}  =>  {d}").format(
+                s=m["source"], d=m["dest_parent"]))
+            _RUN.mappings_total += 1
+            if not os.path.exists(m["source"]):
+                print(_("  ❌ Source not found, skipped: {s}").format(s=m["source"]))
+                _RUN.add("sources_missing")
+                continue
+            complete = runner(
+                m, args.config, cache, mapping_exclusions(m, global_ex),
+                dry_run=args.dry_run, verbose=args.verbose,
+                allow_mass_delete=args.allow_mass_delete,
+                global_ex=global_ex, delete=args.delete)
+            if complete:
+                _RUN.add("mappings_complete")
+            health.append((m["source"], bool(complete), _take_unreadable()))
+            cache.save()
 
     # Publication de l'état de santé : ce que ce passage a constaté, réécrit
     # même quand tout va bien (une liste vide EST l'information « plus rien
