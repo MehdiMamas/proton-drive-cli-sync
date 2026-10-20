@@ -179,3 +179,28 @@ def test_hang_releases_the_state_lock(fake_drive, tmp_path):
     finally:
         proc.kill()
         proc.wait(timeout=5)
+
+
+def test_rename_and_move_keep_uid_and_children(fake_drive):
+    fake_drive.seed_folder("/my-files/A")
+    fake_drive.seed_folder("/my-files/B")
+    fake_drive.seed_file("/my-files/A/x.txt", b"hi")
+    before = json.loads(fake_drive.run("filesystem", "list", "/my-files/A", "-j").stdout)
+    uid = proton_sync._unwrap(before[0]["uid"])
+    assert fake_drive.run("filesystem", "rename", "/my-files/A/x.txt", "y.txt").returncode == 0
+    assert fake_drive.run("filesystem", "move", "/my-files/A/y.txt", "/my-files/B").returncode == 0
+    assert fake_drive.content("/my-files/B/y.txt") == b"hi"
+    assert fake_drive.content("/my-files/A/x.txt") is None
+    after = json.loads(fake_drive.run("filesystem", "list", "/my-files/B", "-j").stdout)
+    assert proton_sync._unwrap(after[0]["uid"]) == uid
+    assert fake_drive.run("filesystem", "move", "/my-files/B", "/my-files/A").returncode == 0
+    assert fake_drive.content("/my-files/A/B/y.txt") == b"hi"
+    assert fake_drive.uploads() == []
+
+
+def test_rename_refuses_missing_and_existing(fake_drive):
+    fake_drive.seed_file("/my-files/a.txt", b"1")
+    fake_drive.seed_file("/my-files/b.txt", b"2")
+    assert fake_drive.run("filesystem", "rename", "/my-files/zz", "q").returncode == 1
+    result = fake_drive.run("filesystem", "rename", "/my-files/a.txt", "b.txt")
+    assert result.returncode == 1 and "already exists" in result.stderr

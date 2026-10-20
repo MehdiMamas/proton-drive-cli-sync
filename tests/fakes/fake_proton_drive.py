@@ -373,6 +373,41 @@ def _trash(state, path):
     return 0
 
 
+def _parent_of(path):
+    return os.path.dirname(path) or "/"
+
+
+def _rename(state, path, new_name):
+    path = remote_state.normalize(path)
+    new_name = remote_state.unescape_glob(new_name)
+    if remote_state.consume_faults(state, "rename", path):
+        return _fail("rename failed", 1)
+    if "/" in new_name or not new_name:
+        return _fail("invalid name", 1)
+    target = remote_state.normalize(_parent_of(path).rstrip("/") + "/" + new_name)
+    error = remote_state.move_node(state, path, target)
+    if error:
+        return _fail(error, 1)
+    return 0
+
+
+def _move(state, sources, target_parent):
+    target_parent = remote_state.normalize(target_parent)
+    node = state["nodes"].get(target_parent)
+    if target_parent != "/" and (not isinstance(node, dict) or node.get("trashed")
+                                 or node.get("type") != "folder"):
+        return _fail("not found", 1)
+    for source in sources:
+        source = remote_state.normalize(source)
+        if remote_state.consume_faults(state, "move", source):
+            return _fail("move failed", 1)
+        target = remote_state.normalize(target_parent.rstrip("/") + "/" + os.path.basename(source))
+        error = remote_state.move_node(state, source, target)
+        if error:
+            return _fail(error, 1)
+    return 0
+
+
 def dispatch(state, argv):
     state.setdefault("calls", []).append(list(argv))
     if not argv:
@@ -401,6 +436,10 @@ def dispatch(state, argv):
         return _download(state, argv[2:])
     if verb == "trash" and rest:
         return _trash(state, rest[0])
+    if verb == "rename" and len(rest) == 2:
+        return _rename(state, rest[0], rest[1])
+    if verb == "move" and len(rest) >= 2:
+        return _move(state, rest[:-1], rest[-1])
     return _fail("fake: unsupported command", 2)
 
 

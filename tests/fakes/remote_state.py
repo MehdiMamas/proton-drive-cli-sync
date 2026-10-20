@@ -77,7 +77,17 @@ def load(path):
     return data
 
 
+def assign_uids(state):
+    """Give every node a stable uid; a node that already has one keeps it."""
+    for path in sorted(state.get("nodes", {})):
+        node = state["nodes"][path]
+        if isinstance(node, dict) and not node.get("uid"):
+            state["uid_seq"] = int(state.get("uid_seq") or 0) + 1
+            node["uid"] = "uid-auto-%d" % state["uid_seq"]
+
+
 def save(path, state):
+    assign_uids(state)
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -199,6 +209,7 @@ def store_file(state, remote_path, data, mtime):
     revisions = 1
     if isinstance(previous, dict) and previous.get("type") == "file":
         revisions = int(previous.get("revisions") or 1) + 1
+    uid = previous.get("uid") if isinstance(previous, dict) else None
     state["nodes"][remote_path] = {
         "type": "file",
         "content_b64": base64.b64encode(data).decode("ascii"),
@@ -206,8 +217,32 @@ def store_file(state, remote_path, data, mtime):
         "revisions": revisions,
         "trashed": False,
     }
+    if uid:
+        state["nodes"][remote_path]["uid"] = uid
     state.setdefault("uploads", []).append(remote_path)
     return remote_path
+
+
+def move_node(state, old_path, new_path):
+    """Move a node and everything below it, keeping uids. Returns an error
+    string ("not found" / "already exists") or None."""
+    old_path = normalize(old_path)
+    new_path = normalize(new_path)
+    node = state["nodes"].get(old_path)
+    if not isinstance(node, dict) or node.get("trashed"):
+        return "not found"
+    target = state["nodes"].get(new_path)
+    if isinstance(target, dict) and not target.get("trashed"):
+        return "already exists"
+    ensure_folders(state, new_path)
+    prefix = old_path + "/"
+    moved = [(p, n) for p, n in state["nodes"].items()
+             if p == old_path or p.startswith(prefix)]
+    for p, _n in moved:
+        del state["nodes"][p]
+    for p, n in moved:
+        state["nodes"][new_path + p[len(old_path):]] = n
+    return None
 
 
 def trash_tree(state, remote_path):
