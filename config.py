@@ -22,6 +22,7 @@ Two concerns:
        - max_delete_ratio              (float)
        - create_thumbnails             (bool, on by default)
        - twoway_trigger                (str, "none" = two-way mappings skipped)
+       - twoway_probe_cmd              (str, command of the "events" trigger)
        - nas_service_account           (str, "" = no service file built)
 
   2. DATA_DIR and its subpaths (cache, queue, logs): a single computed
@@ -129,6 +130,9 @@ DEFAULTS = {
     # Déclencheur du deux sens (clé "twoway_mappings" des mappings). "none" :
     # aucune sonde d'événements, ces mappings sont ignorés.
     "twoway_trigger": "none",
+    # Commande de la sonde d'événements (déclencheur "events"). Vide : pas de
+    # sonde, les mappings deux sens sont ignorés comme avec "none".
+    "twoway_probe_cmd": "",
     "tray_enabled": False,            # icône d'état dans la barre des tâches (tray_indicator.py)
     "account_name": None,             # identité NAS stable (None = auto : amorçage intelligent)
     # Correspondance des chemins de DONNÉES entre cette machine (desktop) et le
@@ -624,6 +628,14 @@ def twoway_trigger():
     if isinstance(v, str) and v.strip():
         return v.strip().lower()
     return DEFAULTS["twoway_trigger"]
+
+
+def twoway_probe_cmd():
+    """Commande de la sonde d'événements ; "" si absente."""
+    v = get("twoway_probe_cmd")
+    if isinstance(v, str):
+        return v.strip()
+    return ""
 
 
 def parse_min(value):

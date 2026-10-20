@@ -311,3 +311,59 @@ class SyncDB:
             "OR substr(local_path, 1, ?) = ?",
             (local_path, len(prefix), prefix))
         self._conn.commit()
+
+    def get_meta(self, key):
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return None if row is None else row[0]
+
+    def set_meta(self, key, value):
+        self._conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)))
+        self._conn.commit()
+
+    def move_tree(self, old_local, new_local, old_remote, new_remote):
+        """Rewrite the paths of a moved folder and of every row below it.
+
+        The folder row itself and the file rows keep their node ids; only
+        local_path and remote_path change."""
+        old_local = old_local.rstrip(os.sep)
+        new_local = new_local.rstrip(os.sep)
+        old_remote = old_remote.rstrip("/")
+        new_remote = new_remote.rstrip("/")
+        for table in ("folders", "files"):
+            found = self._conn.execute(
+                "SELECT local_path, remote_path FROM {t}".format(t=table)
+            ).fetchall()
+            for local_path, remote_path in found:
+                if local_path == old_local or local_path.startswith(
+                        old_local + os.sep):
+                    local_new = new_local + local_path[len(old_local):]
+                else:
+                    continue
+                if remote_path == old_remote or remote_path.startswith(
+                        old_remote + "/"):
+                    remote_new = new_remote + remote_path[len(old_remote):]
+                else:
+                    remote_new = remote_path
+                self._conn.execute(
+                    "UPDATE {t} SET local_path = ?, remote_path = ? "
+                    "WHERE local_path = ?".format(t=table),
+                    (local_new, remote_new, local_path))
+        self._conn.commit()
+
+    def move_file_row(self, old_local, new_local, new_remote, inode=None):
+        """Re-key a file row to its new place, keeping its sha1 and node id."""
+        row = self.get(old_local)
+        if row is None:
+            return
+        self._conn.execute("DELETE FROM files WHERE local_path = ?",
+                           (old_local,))
+        row["local_path"] = new_local
+        row["remote_path"] = new_remote
+        if inode is not None:
+            row["local_inode"] = inode
+        self._conn.commit()
+        self.upsert(row)
