@@ -1,5 +1,7 @@
 """Pure helpers for mapping dictionaries (no GUI imports, testable without a display)."""
-__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+
+import os
 
 # Keys the mapping dialog builds itself on every save. A key in this set that the
 # dialog leaves out was deliberately switched off by the user and must NOT come back.
@@ -140,3 +142,71 @@ def unknown_top_level(document):
     if not isinstance(document, dict):
         return {}
     return {k: v for k, v in document.items() if k not in FILE_KEYS}
+
+
+# ── Mappings deux sens (clé "sync_mappings") ─────────────────────────────────
+# Un mapping deux sens ne doit chevaucher AUCUN autre mapping (à sens unique ou
+# deux sens), ni en local (même dossier, parent, sous-dossier), ni sur Proton
+# (règle des dossiers d'arrivée ci-dessus). Les mappings à sens unique, eux,
+# gardent leur comportement : ils peuvent se chevaucher entre eux.
+
+SYNC_DIRECTIONS = ("twoway",)
+SYNC_TYPES = ("folder", "file")
+
+
+def _local_path(mapping):
+    src = (mapping.get("source") or "").strip() if isinstance(mapping, dict) else ""
+    if not src:
+        return None
+    return os.path.normpath(src)
+
+
+def local_overlap(a, b):
+    """Relation locale entre deux mappings : "same", "parent" (a contient b),
+    "child" (a est dans b) ou None. Comparaison à frontière de segment."""
+    pa, pb = _local_path(a), _local_path(b)
+    if pa is None or pb is None:
+        return None
+    if pa == pb:
+        return "same"
+    if pb.startswith(pa.rstrip("/") + "/"):
+        return "parent"
+    if pa.startswith(pb.rstrip("/") + "/"):
+        return "child"
+    return None
+
+
+def sync_mapping_conflicts(sync_mappings, upload_mappings=()):
+    """Mappings deux sens en conflit, à vérifier à chaque chargement du fichier.
+
+    `sync_mappings` : la liste de la clé "sync_mappings" ; `upload_mappings` :
+    celle de "mappings". Retourne {indice dans sync_mappings: (raison, autre
+    mapping, détail)}, au premier conflit trouvé pour chaque mapping. La raison
+    vaut "local-same", "local-parent" (ce mapping contient l'autre),
+    "local-child" (il est dans l'autre), ou "arrival-same", "arrival-inside",
+    "arrival-contains" (dossiers d'arrivée sur Proton) ; le détail est le
+    dossier d'arrivée de l'autre pour ces trois dernières, "" sinon.
+    Un élément qui n'est pas un dict est ignoré."""
+    out = {}
+    pool = [(("sync", i), m) for i, m in enumerate(sync_mappings or ())
+            if isinstance(m, dict)]
+    pool += [(("up", i), m) for i, m in enumerate(upload_mappings or ())
+             if isinstance(m, dict)]
+    for (kind, i), m in pool:
+        if kind != "sync":
+            continue
+        others = [o for key, o in pool if key != (kind, i)]
+        found = None
+        for o in others:
+            rel = local_overlap(m, o)
+            if rel:
+                found = ("local-" + rel, o, "")
+                break
+        if found is None:
+            hit = first_arrival_conflict(m, others)
+            if hit:
+                other, rel, _mine, theirs = hit
+                found = ("arrival-" + rel, other, theirs)
+        if found:
+            out[i] = found
+    return out
