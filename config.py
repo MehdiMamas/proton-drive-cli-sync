@@ -21,6 +21,7 @@ Two concerns:
        - max_delete_min                (int)
        - max_delete_ratio              (float)
        - create_thumbnails             (bool, on by default)
+       - twoway_trigger                (str, "none" = two-way mappings skipped)
        - nas_service_account           (str, "" = no service file built)
 
   2. DATA_DIR and its subpaths (cache, queue, logs): a single computed
@@ -125,6 +126,9 @@ DEFAULTS = {
     # par défaut (comportement du CLI) ; décochées, chaque envoi passe
     # --skip-thumbnails. Ne touche pas aux fichiers déjà sur Proton.
     "create_thumbnails": True,
+    # Déclencheur du deux sens (clé "twoway_mappings" des mappings). "none" :
+    # aucune sonde d'événements, ces mappings sont ignorés.
+    "twoway_trigger": "none",
     "tray_enabled": False,            # icône d'état dans la barre des tâches (tray_indicator.py)
     "account_name": None,             # identité NAS stable (None = auto : amorçage intelligent)
     # Correspondance des chemins de DONNÉES entre cette machine (desktop) et le
@@ -612,6 +616,14 @@ def create_thumbnails():
 
 def set_create_thumbnails(value):
     return _put("create_thumbnails", bool(value))
+
+
+def twoway_trigger():
+    """Nom du déclencheur du deux sens ; "none" si absent ou illisible."""
+    v = get("twoway_trigger")
+    if isinstance(v, str) and v.strip():
+        return v.strip().lower()
+    return DEFAULTS["twoway_trigger"]
 
 
 def parse_min(value):

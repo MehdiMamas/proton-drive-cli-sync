@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Moteur de synchro Proton Drive (NAS -> Proton, à sens unique).
+Moteur de synchro Proton Drive (NAS -> Proton, à sens unique). Les entrées
+de la clé "twoway_mappings" du fichier de mappings se synchronisent dans les
+deux sens (twoway.py), mais seulement quand un déclencheur est configuré
+(réglage twoway_trigger ; "none" par défaut : ces mappings sont ignorés).
 
 Lit un fichier JSON de mappings (voir proton_mapping_editor.py) et, pour
 chaque entrée, n'envoie que les fichiers nouveaux ou modifiés plutôt que
@@ -793,6 +796,37 @@ def load_config(path):
         return mappings, global_ex
 
     raise ValueError("Format de config non reconnu (ni liste, ni objet).")
+
+
+def load_twoway_mappings(path):
+    """Mappings deux sens : la clé "twoway_mappings" du fichier de mappings.
+
+    "mappings" reste à sens unique, inchangé. Ancien format (liste) ou clé
+    absente : aucun mapping deux sens.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        found = data.get("twoway_mappings", [])
+        if isinstance(found, list):
+            return found
+    return []
+
+
+# Déclencheurs du deux sens, par nom. None = aucun moyen de savoir ce qui a
+# changé côté Proton : les mappings deux sens sont alors ignorés (pas de
+# parcours périodique de l'arbre distant). Une valeur appelable remplace le
+# parcours : fn(mapping, config_path, cache, exclusions, **opts) -> complet.
+# Seul "none" existe pour l'instant ; la sonde d'événements viendra ensuite.
+TWOWAY_TRIGGERS = {"none": None}
+
+
+def twoway_runner():
+    """(nom, exécuteur) du déclencheur configuré ; exécuteur None = ignorer."""
+    name = "none"
+    if _HAS_CONFIG:
+        name = appconfig.twoway_trigger()
+    return name, TWOWAY_TRIGGERS.get(name)
 
 
 def mapping_exclusions(mapping, global_ex):
@@ -1626,6 +1660,8 @@ class RemoteListing(dict):
 
 def get_remote_listing(remote_path, verbose=False):
     """Retourne {nom: {"size", "mtime", "sha1", "type"}} pour un dossier distant.
+
+    `mtime` est claimedModificationTime en secondes POSIX, ou None.
     Le champ "type" ("file"/"folder") permet de choisir la bonne opération de
     suppression (trash/delete) et de descendre dans les dossiers orphelins.
 
@@ -1651,9 +1687,32 @@ def get_remote_listing(remote_path, verbose=False):
         size, mtime, sha1 = _extract_remote_meta(item)
         # Le type peut être enveloppé {ok, value} comme les autres champs.
         rtype = _unwrap(item.get("type"))
-        listing[name] = {"size": size, "mtime": mtime, "sha1": sha1, "type": rtype}
+        # claimed_size reste None si le CLI n'a pas envoyé claimedSize.
+        # `size` peut alors être totalStorageSize (taille chiffrée) : la
+        # décision de téléchargement ne doit pas s'en servir. L'envoi, lui,
+        # continue de lire `size` comme avant.
+        claimed_size = None
+        active_rev = _unwrap(item.get("activeRevision"))
+        if isinstance(active_rev, dict):
+            raw_claimed = active_rev.get("claimedSize")
+            if raw_claimed is not None and not isinstance(raw_claimed, bool):
+                try:
+                    claimed_size = int(raw_claimed)
+                except (TypeError, ValueError):
+                    claimed_size = None
+        node_id = _unwrap(item.get("uid"))
+        if not isinstance(node_id, str) or not node_id:
+            node_id = None
+        listing[name] = {
+            "size": size,
+            "mtime": mtime,
+            "sha1": sha1,
+            "type": rtype,
+            "claimed_size": claimed_size,
+            "node_id": node_id,
+        }
         if rtype == "folder":
-            _REMOTE_KNOWN.add(remote_path.rstrip("/") + "/" + name)
+            _remember_remote(remote_path.rstrip("/") + "/" + name)
     _remember_remote(remote_path)
     return RemoteListing(listing, ok=True)
 
@@ -1784,6 +1843,152 @@ def needs_upload(local_path, remote_info, verbose=False, verify_hash=False):
                                    verify_hash=verify_hash)
     _report_decision(local_path, reason, verbose)
     return send
+
+
+def _optional_sha1(value):
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _claimed_size_of(remote_info):
+    """Taille claimedSize uniquement. Ignore `size` (peut être chiffrée)."""
+    if not isinstance(remote_info, dict):
+        return None
+    raw = remote_info.get("claimed_size")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_differs_from_row(local_path, sync_row):
+    """True si le fichier local n'est plus celui de la ligne synchronisée.
+
+    None si on ne peut pas le savoir. Le SHA-1 tranche. Sans SHA-1 : taille
+    claimed et mtime local exact (même règle que le baseline d'envoi).
+    L'inode n'est pas un signal de contenu.
+    """
+    row_sha = _optional_sha1(sync_row.get("sha1"))
+    if row_sha:
+        try:
+            return _local_sha1(local_path) != row_sha
+        except OSError:
+            return None
+    raw_size = sync_row.get("claimed_size")
+    raw_mtime = sync_row.get("local_mtime")
+    if raw_size is None or isinstance(raw_size, bool) or raw_mtime is None:
+        return None
+    try:
+        row_size = int(raw_size)
+        row_mtime = float(raw_mtime)
+        st = os.stat(local_path)
+    except (TypeError, ValueError, OSError):
+        return None
+    if row_mtime != row_mtime:
+        return None
+    if st.st_size != row_size:
+        return True
+    return float(st.st_mtime) != row_mtime
+
+
+def _remote_differs_from_row(claimed_size, remote_sha, remote_mtime, sync_row):
+    """True si le distant n'est plus la ligne. None si métadonnées insuffisantes.
+
+    SHA-1 claimed s'il est des deux côtés. Sinon claimedSize et
+    claimedModificationTime (tolérance _MTIME_TOLERANCE_SECONDS). Jamais la
+    taille chiffrée.
+    """
+    row_sha = _optional_sha1(sync_row.get("sha1"))
+    if row_sha and remote_sha:
+        return remote_sha != row_sha
+    raw_size = sync_row.get("claimed_size")
+    raw_mtime = sync_row.get("claimed_mtime")
+    if raw_size is None or isinstance(raw_size, bool) or claimed_size is None:
+        return None
+    try:
+        row_size = int(raw_size)
+    except (TypeError, ValueError):
+        return None
+    if claimed_size != row_size:
+        return True
+    if remote_mtime is None or raw_mtime is None or isinstance(raw_mtime, bool):
+        return None
+    try:
+        row_mtime = float(raw_mtime)
+    except (TypeError, ValueError):
+        return None
+    if row_mtime != row_mtime:
+        return None
+    return abs(remote_mtime - row_mtime) > _MTIME_TOLERANCE_SECONDS
+
+
+def download_decision(local_path, remote_info, sync_row=None):
+    """Décide si un fichier distant doit être téléchargé.
+
+    Retourne (action, raison). action est ``download``, ``skip`` ou
+    ``conflict``. La comparaison utilise claimedSize, claimedDigests.sha1
+    et claimedModificationTime. Elle ne lit pas ``size`` : ce champ peut
+    être la taille chiffrée (totalStorageSize) quand claimedSize manque.
+
+    Sans ligne de synchro, un fichier local déjà présent n'est pas écrasé :
+    contenus identiques → skip, sinon conflict. Un fichier local absent
+    est téléchargé.
+    """
+    if remote_info is not None and not isinstance(remote_info, dict):
+        return "conflict", "remote-unverifiable"
+    if sync_row is not None and not isinstance(sync_row, dict):
+        sync_row = None
+    if remote_info is None:
+        return "skip", "remote-missing"
+
+    rtype = remote_info.get("type")
+    if rtype not in (None, "file"):
+        return "skip", "not-a-file"
+
+    claimed_size = _claimed_size_of(remote_info)
+    remote_sha = _optional_sha1(remote_info.get("sha1"))
+    remote_mtime = _remote_mtime_seconds(remote_info.get("mtime"))
+
+    if not os.path.lexists(local_path):
+        if claimed_size is None and not remote_sha:
+            return "conflict", "remote-unverifiable"
+        return "download", "local-missing"
+    if not os.path.isfile(local_path):
+        return "conflict", "local-not-file"
+
+    if sync_row is None:
+        if not remote_sha:
+            return "conflict", "no-baseline"
+        try:
+            same = _local_sha1(local_path) == remote_sha
+        except OSError:
+            return "conflict", "local-unreadable"
+        if same:
+            return "skip", "hash-equal"
+        return "conflict", "no-baseline"
+
+    local_changed = _local_differs_from_row(local_path, sync_row)
+    remote_changed = _remote_differs_from_row(
+        claimed_size, remote_sha, remote_mtime, sync_row)
+    if local_changed is None or remote_changed is None:
+        return "conflict", "unverifiable"
+    if not local_changed and not remote_changed:
+        return "skip", "unchanged"
+    if local_changed and not remote_changed:
+        return "skip", "local-only"
+    if remote_changed and not local_changed:
+        return "download", "remote-only"
+    if remote_sha:
+        try:
+            if _local_sha1(local_path) == remote_sha:
+                return "skip", "hash-equal"
+        except OSError:
+            return "conflict", "local-unreadable"
+    return "conflict", "both-changed"
+
 
 
 def _glob_escape_local_path(path):
@@ -2201,19 +2406,14 @@ def delete_orphans(local_dir, remote_folder, remote_items, local_names,
     n_deleted = 0
     n_failed = 0
     opts = delete_opts or {}
-    # Clé absente, "prune", ou toute autre valeur : la copie déjà envoyée part
-    # à la corbeille. "keep" ne conserve un nom QUE s'il est exclu sur CE
-    # mapping et PAS par les exclusions globales (celles-ci nettoient toujours).
-    keep = opts.get("excluded_remote", "prune") == "keep"
-    mapping_ex = opts.get("mapping_exclusions")
-    global_ex = opts.get("global_exclusions")
+    # Un nom exclu sur CE mapping reste sur Drive seulement sous "keep" :
+    # voir _keep_excluded_remote.
 
     orphans = []
     for name, info in remote_items.items():
         if name in local_names:
             continue  # existe encore localement -> on garde
-        if (keep and mapping_ex and mapping_ex.is_excluded(name)
-                and not (global_ex and global_ex.is_excluded(name))):
+        if _keep_excluded_remote(name, opts):
             if verbose:
                 print(_("    kept (excluded): {p}").format(
                     p=remote_folder.rstrip("/") + "/" + name))
@@ -2350,6 +2550,22 @@ def build_delete_opts(mapping, guard_path, global_ex=None, allow_mass_delete=Fal
             p.rstrip("/") for p in (allow_mass_delete or ())),
     })
     return opts
+
+
+def _keep_excluded_remote(name, opts):
+    """True : ce nom reste sur Drive bien qu'il n'existe plus localement.
+
+    Clé absente, "prune", ou toute autre valeur : non. "keep" ne conserve un
+    nom QUE s'il est exclu sur CE mapping et PAS par les exclusions globales
+    (celles-ci nettoient toujours). Même règle pour delete_orphans et pour le
+    passage deux sens (twoway.py)."""
+    if opts.get("excluded_remote", "prune") != "keep":
+        return False
+    mapping_ex = opts.get("mapping_exclusions")
+    global_ex = opts.get("global_exclusions")
+    return bool(mapping_ex and mapping_ex.is_excluded(name)
+                and not (global_ex and global_ex.is_excluded(name)))
+
 
 
 def _wipe_mapping_remote(mapping, dry_run=False, verbose=False):
@@ -3347,7 +3563,8 @@ def main():
     except (AttributeError, ValueError):
         pass  # vieux Python ou flux non reconfigurable : sans gravité
 
-    parser = argparse.ArgumentParser(description="Moteur de synchro Proton Drive (NAS -> Proton, sens unique)")
+    parser = argparse.ArgumentParser(description="Moteur de synchro Proton Drive (NAS -> Proton, sens unique ; "
+                                                 "deux sens pour les 'twoway_mappings' avec un déclencheur)")
     parser.add_argument("config", nargs="?", default=None,
                         help="Fichier JSON de mappings (optionnel pour les sondes "
                              "--check-auth / --check-lock qui ne lisent pas les mappings)")
@@ -3610,6 +3827,7 @@ def main():
         _finish_pass(2, _pass_mode(args), args.dry_run, completed=False)
 
     mappings, global_ex = load_config(args.config)
+    twoway_mappings = load_twoway_mappings(args.config)
     # Liste COMPLÈTE, avant toute restriction (--only-source, --reset-source) :
     # la reprise des vérifications d'après les journaux porte sur tous les
     # mappings du fichier, pas seulement sur ceux de ce passage.
@@ -3817,6 +4035,14 @@ def main():
                 target = m
                 break
         if target is None:
+            for m in twoway_mappings:
+                if os.path.normpath(m["source"]) == target_source:
+                    # Pas de sous-arbre en temps réel pour le deux sens ici :
+                    # il attend le déclencheur d'événements.
+                    print(_("  ⏭ Two-way mapping skipped (no event trigger): {s}")
+                          .format(s=m["source"]))
+                    _finish_pass(0, "subpath", args.dry_run, completed=True)
+        if target is None:
             print(_("❌ No mapping with source = {s}").format(s=args.mapping_source))
             sys.exit(1)
         if target["type"] != "folder":
@@ -3961,6 +4187,37 @@ def main():
         # mappings déjà entièrement traités. L'écriture atomique (tmp+rename)
         # garantit qu'on ne se retrouve jamais avec un cache corrompu.
         cache.save()
+
+    # Mappings deux sens : seulement avec un déclencheur configuré. Sans lui,
+    # on le dit et on ne touche à rien (aucun parcours périodique de l'arbre).
+    if twoway_mappings and not args.reset_source:
+        if args.only_source:
+            wanted_tw = {os.path.normpath(s) for s in args.only_source}
+            twoway_mappings = [m for m in twoway_mappings
+                               if os.path.normpath(m.get("source", "")) in wanted_tw]
+        trigger_name, runner = twoway_runner()
+        for m in twoway_mappings:
+            if runner is None:
+                print(_("\n⏭ Two-way mapping skipped (trigger '{t}': no way to "
+                        "see what changed on Proton): {s}  =>  {d}").format(
+                        t=trigger_name, s=m.get("source", ""), d=m.get("dest_parent", "")))
+                continue
+            print(_("\n▶ Two-way mapping: {s}  =>  {d}").format(
+                s=m["source"], d=m["dest_parent"]))
+            _RUN.mappings_total += 1
+            if not os.path.exists(m["source"]):
+                print(_("  ❌ Source not found, skipped: {s}").format(s=m["source"]))
+                _RUN.add("sources_missing")
+                continue
+            complete = runner(
+                m, args.config, cache, mapping_exclusions(m, global_ex),
+                dry_run=args.dry_run, verbose=args.verbose,
+                allow_mass_delete=args.allow_mass_delete,
+                global_ex=global_ex, delete=args.delete)
+            if complete:
+                _RUN.add("mappings_complete")
+            health.append((m["source"], bool(complete), _take_unreadable()))
+            cache.save()
 
     # Publication de l'état de santé : ce que ce passage a constaté, réécrit
     # même quand tout va bien (une liste vide EST l'information « plus rien
