@@ -4,6 +4,8 @@ The path comes from ``config.DATA_DIR`` (or an explicit directory). This
 module does not call the Proton CLI and does not decide uploads or downloads.
 """
 
+__version__ = "1.0.0"
+
 import os
 import sqlite3
 
