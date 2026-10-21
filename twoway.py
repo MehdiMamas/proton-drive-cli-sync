@@ -5,7 +5,7 @@ download does not replace the local file and does not rewrite its sync row.
 A failed remote listing does not update the sync database for that folder.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import os
 import re
