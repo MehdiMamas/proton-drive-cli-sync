@@ -19,7 +19,7 @@ Ouverture : seul au premier lancement (aucun settings.json), sinon par le
 bouton « Setup assistant… » de l'éditeur, ou proposé aux pages du NAS quand
 on coche « Use a NAS » dans la Configuration.
 """
-__version__ = "1.0.2"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.1.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import getpass
 import os
@@ -956,6 +956,15 @@ class SetupWizard(tk.Toplevel):
         path, delete, rt = self.mappings_path, self.delete_var.get(), self.rt_var.get()
         if rt and not self._cold_cache_ok(path):
             return
+        # Planification seule : le temps réel garde son fichier. S'il en a un
+        # autre, des mappings des deux fichiers peuvent arriver dans le même
+        # dossier du Drive — même avertissement que dans l'éditeur.
+        if not rt:
+            ok = self.ui.confirm_cross_file_install(
+                self, path, [realtime_manager.services_mappings_files()[1]])
+            self.ui._safe_grab(self)
+            if not ok:
+                return
         nas = appconfig.nas_enabled()
         self.inst_dot.set(BLUE)
         self.inst_msg.set(_("Installing…"))

@@ -4072,3 +4072,103 @@ msgid ""
 "The two mappings would send each other's files to the trash when deletions "
 "are propagated. Change the destination of one of them first."
 msgstr ""
+
+#, python-brace-format
+msgid ""
+"deletions held for {s}: {o}, in the mappings file {f}, puts its content in "
+"the same Proton folder, {r}; files are still sent."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"deletions held for {s}: its Proton folder {r} and the one of {o}, in the "
+"mappings file {f}, are nested, one inside the other; files are still sent."
+msgstr ""
+
+msgid ""
+"   ⚠  the mappings files of the installed services could not be read: ALL "
+"deletions will be refused (safety guard)."
+msgstr ""
+
+msgid ""
+"  ⛔ Remote wipe REFUSED: the mappings that share Proton folders could not "
+"be determined (safety guard)."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"  ⛔ Remote wipe REFUSED: this mapping's Proton folder is the same as the "
+"one of {o}, in the mappings file {f}, or nested with it."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"  • {a}\n"
+"    and {b} (in {f})\n"
+"    both arrive in {r}"
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"  • {a}\n"
+"    and {b} (in {f})\n"
+"    arrive in {r} and {t}, one inside the other"
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"The other service uses another mappings file, and on Proton some mappings of "
+"the two files put their content in the same folder, or one inside the "
+"other:\n"
+"\n"
+"{list}\n"
+"\n"
+"Their deletions will not be propagated, so that neither pass sends the "
+"other's files to the trash; their files are still sent. To avoid it, change "
+"the destination of one mapping of each pair, or use the same mappings file "
+"for both services.\n"
+"\n"
+"Install anyway?"
+msgstr ""
+
+msgid "Mappings sharing a Proton folder with the other file"
+msgstr ""
+
+msgid "Install anyway"
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"The scheduled pass and real time do not use the same mappings file, and on "
+"Proton some mappings of this file put their content in the same folder as a "
+"mapping of the other file, or one inside the other:\n"
+"\n"
+"{list}\n"
+"\n"
+"When deletions are propagated, each pass would send the other file's files "
+"to the trash. To prevent that, deletions are not propagated for these "
+"mappings; their files are still sent.\n"
+"\n"
+"To fix it, change the destination of one mapping of each pair, or use the "
+"same mappings file for both services."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"This mapping would put its content in {r} on Proton. In {f}, a mappings file "
+"in service, the mapping of {o} puts its own in {t}: the same folder, or one "
+"nested with it.\n"
+"\n"
+"The two passes would send each other's files to the trash when deletions are "
+"propagated."
+msgstr ""
+
+#, python-brace-format
+msgid ""
+"Once moved, this mapping would put its content in {r} on Proton. In {f}, a "
+"mappings file in service, the mapping of {o} puts its own in {t}: the same "
+"folder, or one nested with it.\n"
+"\n"
+"The two passes would send each other's files to the trash when deletions are "
+"propagated. Change the destination of one of them first."
+msgstr ""

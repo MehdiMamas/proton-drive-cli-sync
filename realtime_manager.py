@@ -24,7 +24,7 @@ Tout est centré sur l'utilisateur courant et son fichier de mappings actif.
 Conçu pour tourner SANS privilèges (session utilisateur). Le linger (sudo) est
 seulement LU et rappelé, jamais modifié ici.
 """
-__version__ = "1.8.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.9.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 import re
@@ -1031,6 +1031,42 @@ def read_units_mappings_path():
         return None
     m = re.search(r"^ExecStart=.*realtime_consumer\.py\s+(\S+)", content, re.MULTILINE)
     return m.group(1) if m else None
+
+
+# États de `systemctl is-enabled` qui sortent un service du jeu : désactivé
+# (« Désactiver » dans la Planification) ou masqué. Tout le reste — activé,
+# statique, « not-found » (fichier présent mais pas encore relu par systemd),
+# ou une réponse impossible à obtenir (pas de session systemd, commande
+# absente, délai dépassé) — le laisse compter : en cas de doute, on reste du
+# côté prudent. Un arrêt simple (la pause pendant un
+# amorçage, « Arrêter » dans le Temps réel) ne désactive rien : le service
+# compte toujours, puisqu'il reprend tout seul.
+_OUT_OF_SERVICE_STATES = ("disabled", "masked")
+
+
+def _unit_in_service(unit):
+    try:
+        r = subprocess.run(["systemctl", "--user", "is-enabled", unit],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    lines = (r.stdout or "").strip().splitlines()
+    return not (lines and lines[0].strip() in _OUT_OF_SERVICE_STATES)
+
+
+def services_mappings_files():
+    """Fichiers de mappings des services EN SERVICE : [planification, temps
+    réel], None pour un service absent ou désactivé. Point unique, réutilisé
+    par le moteur et l'éditeur pour les conflits de dossiers d'arrivée entre
+    les deux fichiers."""
+    import schedule_manager
+    sched = schedule_manager.read_service_mappings_path()
+    if sched and not _unit_in_service(schedule_manager.TIMER_NAME):
+        sched = None
+    rt = read_units_mappings_path()
+    if rt and not _unit_in_service(CONSUME_NAME):
+        rt = None
+    return [sched, rt]
 
 
 def mappings_ready_count(mappings_path):

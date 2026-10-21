@@ -29,7 +29,7 @@ Variable d'environnement :
     PROTON_DRIVE_CLI   chemin vers le binaire proton-drive
                         (sinon : réglage, binaire à côté des scripts, puis PATH)
 """
-__version__ = "1.19.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.20.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import argparse
 import atexit
@@ -2378,7 +2378,9 @@ def _hold_arrival_conflicts(mappings):
     en conflit avec ceux qu'on ne traite pas.
 
     Retourne {id(mapping): (source de l'autre, dossier d'arrivée, allow_delete
-    d'origine, même dossier ?)} pour chaque mapping retenu."""
+    d'origine, même dossier ?, None)} pour chaque mapping retenu ; la 5e place
+    porte l'autre fichier quand le conflit vient d'un autre fichier en service
+    (_hold_cross_file_conflicts)."""
     held = {}
     if not _HAS_MAPPING_KEYS:
         for m in mappings:
@@ -2390,9 +2392,67 @@ def _hold_arrival_conflicts(mappings):
         mine = mapping_keys.arrival_folder(m)
         same = mapping_keys.conflict_kind(mine, mapping_keys.arrival_folder(other)) == "same"
         held[id(m)] = (other.get("source", "?"), mine,
-                       bool(m.get("allow_delete")), same)
+                       bool(m.get("allow_delete")), same, None)
         m["allow_delete"] = False
     return held
+
+
+def _running_mappings_files():
+    """Fichiers de mappings des services en service : celui de la planification
+    et celui du temps réel (None quand le service est absent ou désactivé). Lus
+    par le gestionnaire du temps réel, jamais réimplémentés ici. Lève ImportError
+    si un gestionnaire manque (toute autre erreur remonte aussi)."""
+    import realtime_manager
+    return realtime_manager.services_mappings_files()
+
+
+def _hold_cross_file_conflicts(config_path, mappings, held):
+    """Même retenue que _hold_arrival_conflicts, mais contre les mappings des
+    AUTRES fichiers en service (planification, temps réel) : un mapping d'un
+    fichier et un mapping de l'autre qui arrivent dans le même dossier du
+    Drive, ou l'un dans l'autre, se mettraient à la corbeille l'un l'autre.
+
+    Seuls les fichiers réellement en service comptent, et seulement s'ils
+    diffèrent du fichier traité : avec un seul fichier pour les deux services,
+    rien n'est lu. Le même mapping présent dans les deux fichiers (même source,
+    même destination, mêmes exclusions effectives) n'est pas un conflit. Un
+    autre fichier absent ou illisible ne peut rien exécuter : il est ignoré.
+    Si les fichiers en service ne peuvent pas être connus (gestionnaire absent,
+    erreur en le chargeant), on ne peut pas savoir : toutes les suppressions
+    sont refusées, comme sans mount_check.
+
+    Complète `held` (mêmes entrées, l'autre fichier en 5e position) et
+    retourne False seulement si le contrôle n'a pas pu se faire."""
+    try:
+        running = _running_mappings_files()
+    except Exception:  # module absent, ou erreur inattendue en le chargeant
+        for m in mappings:
+            if isinstance(m, dict) and m.get("allow_delete"):
+                m["allow_delete"] = False
+        return False
+    if not _HAS_MAPPING_KEYS:
+        return False
+    others = mapping_keys.other_running_files(config_path, running)
+    if not others:
+        return True
+    mine = mapping_keys.read_mappings_document(config_path)
+    if mine is None:
+        return True
+    _maps, global_mine = mine
+    for other_path in others:
+        doc = mapping_keys.read_mappings_document(other_path)
+        if doc is None:
+            continue
+        theirs, global_theirs = doc
+        for i, j, kind, folder, _f in mapping_keys.cross_conflicts(
+                mappings, global_mine, theirs, global_theirs):
+            m = mappings[i]
+            if id(m) in held:
+                continue
+            held[id(m)] = (theirs[j].get("source", "?"), folder,
+                           bool(m.get("allow_delete")), kind == "same", other_path)
+            m["allow_delete"] = False
+    return True
 
 
 def _print_arrival_holds(scope, held, delete):
@@ -2402,7 +2462,18 @@ def _print_arrival_holds(scope, held, delete):
         return
     for m in scope:
         info = held.get(id(m))
-        if info and info[2]:
+        if info and info[2] and info[4]:
+            if info[3]:
+                text = _("deletions held for {s}: {o}, in the mappings file {f}, "
+                         "puts its content in the same Proton folder, {r}; files "
+                         "are still sent.")
+            else:
+                text = _("deletions held for {s}: its Proton folder {r} and the one "
+                         "of {o}, in the mappings file {f}, are nested, one inside "
+                         "the other; files are still sent.")
+            print("  ⚠  [arrival-conflict] " + text.format(
+                s=m.get("source", "?"), r=info[1], o=info[0], f=info[4]))
+        elif info and info[2]:
             if info[3]:
                 text = _("deletions held for {s}: {o} puts its content in the same "
                          "Proton folder, {r}; files are still sent.")
@@ -3679,6 +3750,7 @@ def main():
     # Conflits de dossiers d'arrivée : suppressions retenues en mémoire pour
     # tout le passage, AVANT toute restriction de portée.
     arrival_held = _hold_arrival_conflicts(mappings)
+    cross_checked = _hold_cross_file_conflicts(args.config, mappings, arrival_held)
 
     # Le cache est indexé par le nom du fichier de mappings (sans son chemin).
     # Comme ça, déplacer le JSON ne casse pas le cache.
@@ -3868,6 +3940,9 @@ def main():
         if not _HAS_MAPPING_KEYS:
             print(_("   ⚠  mapping_keys.py missing: ALL deletions will be "
                     "refused (safety guard)."))
+        elif not cross_checked:
+            print(_("   ⚠  the mappings files of the installed services could not "
+                    "be read: ALL deletions will be refused (safety guard)."))
 
     # ── Mode TEMPS RÉEL (--subpath) ────────────────────────────────────────
     # Si --subpath est fourni, on synchronise UNIQUEMENT ce sous-dossier dans le
@@ -3956,12 +4031,25 @@ def main():
             #     s'applique qu'aux mappings de type dossier ; un mapping fichier
             #     n'a pas de « dossier distant » propre à vider.
             if args.wipe_remote and m.get("type") == "folder":
-                if id(m) in arrival_held:
+                if not cross_checked or not _HAS_MAPPING_KEYS:
+                    # Sans savoir quels mappings se marchent dessus, vider le
+                    # dossier distant pourrait jeter ce qu'un autre y a déposé.
+                    print(_("  ⛔ Remote wipe REFUSED: the mappings that share "
+                            "Proton folders could not be determined (safety guard)."))
+                    print(_("     Nothing deleted remotely — this mapping was NOT reset."))
+                elif id(m) in arrival_held:
                     # Vider ce dossier jetterait aussi ce qu'un autre mapping y
                     # a déposé : même règle que les suppressions.
-                    print(_("  ⛔ Remote wipe REFUSED: this mapping's Proton folder "
-                            "is the same as the one of {o}, or nested with it.").format(
-                                o=arrival_held[id(m)][0]))
+                    info = arrival_held[id(m)]
+                    if info[4]:
+                        print(_("  ⛔ Remote wipe REFUSED: this mapping's Proton "
+                                "folder is the same as the one of {o}, in the "
+                                "mappings file {f}, or nested with it.").format(
+                                    o=info[0], f=info[4]))
+                    else:
+                        print(_("  ⛔ Remote wipe REFUSED: this mapping's Proton folder "
+                                "is the same as the one of {o}, or nested with it.").format(
+                                    o=info[0]))
                     print(_("     Nothing deleted remotely — this mapping was NOT reset."))
                 else:
                     _wipe_mapping_remote(m, dry_run=args.dry_run, verbose=args.verbose)
