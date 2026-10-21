@@ -1,5 +1,5 @@
 """Pure helpers for mapping dictionaries (no GUI imports, testable without a display)."""
-__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.3.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 
