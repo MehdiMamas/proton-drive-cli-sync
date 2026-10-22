@@ -74,14 +74,23 @@ class FakeDrive:
     def _load(self):
         return remote_state.load(str(self.state_path))
 
-    def seed_file(self, remote_path, data, mtime=1_000_000_000):
+    def seed_file(self, remote_path, data, mtime=1_000_000_000, digest=True):
         def mutate(state):
-            remote_state.store_file(state, remote_path, data, int(mtime))
+            remote_state.store_file(state, remote_path, data, mtime)
             # seed is not an upload the engine performed
             if state["uploads"] and state["uploads"][-1] == remote_state.normalize(remote_path):
                 state["uploads"].pop()
             node = state["nodes"][remote_state.normalize(remote_path)]
             node["revisions"] = 1
+            if not digest:
+                node["remove_digest"] = True
+        self._update(mutate)
+
+    def omit_digest(self, remote_path):
+        """Drop claimedDigests on the next listing. The stored bytes stay."""
+        def mutate(state):
+            node = state["nodes"][remote_state.normalize(remote_path)]
+            node["remove_digest"] = True
         self._update(mutate)
 
     def seed_folder(self, remote_path):
@@ -239,14 +248,94 @@ def local_tree(tmp_path):
 
 @pytest.fixture
 def write_mappings(tmp_path):
-    def _write(mappings, exclusions=None):
-        document = {"mappings": mappings}
+    def _write(mappings, exclusions=None, sync_mappings=None):
+        """Upload mappings go under "mappings"; entries with direction
+        "twoway" (or passed as sync_mappings) go under "sync_mappings"."""
+        sync = list(sync_mappings or [])
+        plain = []
+        for m in mappings:
+            if isinstance(m, dict) and m.get("direction") == "twoway":
+                sync.append(m)
+            else:
+                plain.append(m)
+        document = {"mappings": plain}
+        if sync:
+            document["sync_mappings"] = sync
         if exclusions is not None:
             document["exclusions"] = exclusions
         path = tmp_path / "mappings.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         return path
     return _write
+
+
+_TRIGGER_DRIVER = """
+import argparse, json, os, sys
+repo = sys.argv.pop(1)
+sys.path.insert(0, repo)
+sys.argv[0] = repo + "/proton_sync.py"
+import proton_sync, twoway
+proton_sync.TWOWAY_TRIGGERS["test"] = twoway.sync_mapping
+# A test can patch the engine in the child process through this variable.
+exec(os.environ.get("ENGINE_TEST_PATCH", ""))
+seen = {}
+
+# main() does not reconcile two-way mappings yet, so capture what is needed
+# and reconcile them just before the pass ends.
+_parse = argparse.ArgumentParser.parse_args
+def parse_args(self, *a, **kw):
+    seen["args"] = _parse(self, *a, **kw)
+    return seen["args"]
+argparse.ArgumentParser.parse_args = parse_args
+
+_load = proton_sync.load_config
+def load_config(path):
+    seen["config"] = path
+    seen["loaded"] = _load(path)
+    return seen["loaded"]
+proton_sync.load_config = load_config
+
+_Cache = proton_sync.Cache
+class Cache(_Cache):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        seen["cache"] = self
+proton_sync.Cache = Cache
+
+_finish = proton_sync._finish_pass
+def finish(exit_code, mode, dry_run, completed):
+    args = seen.get("args")
+    if completed and mode != "subpath" and "cache" in seen and not args.reset_source:
+        with open(seen["config"], encoding="utf-8") as f:
+            found = json.load(f).get("sync_mappings", [])
+        if args.only_source:
+            wanted = {os.path.normpath(s) for s in args.only_source}
+            found = [m for m in found
+                     if os.path.normpath(m.get("source", "")) in wanted]
+        for m in found:
+            if m.get("direction") != "twoway":
+                print("unknown sync direction, skipped: %r" % (m.get("direction"),))
+                continue
+            _RUN = proton_sync._RUN
+            _RUN.mappings_total += 1
+            if not os.path.exists(m["source"]):
+                _RUN.add("sources_missing")
+                continue
+            complete = proton_sync.TWOWAY_TRIGGERS["test"](
+                m, seen["config"], seen["cache"],
+                proton_sync.mapping_exclusions(m, seen["loaded"][1]),
+                dry_run=args.dry_run, verbose=args.verbose,
+                allow_mass_delete=args.allow_mass_delete,
+                global_ex=seen["loaded"][1], delete=args.delete)
+            if complete:
+                _RUN.add("mappings_complete")
+            seen["cache"].save()
+        if exit_code == 0 and proton_sync._RUN.has_failures():
+            exit_code = 5
+    return _finish(exit_code, mode, dry_run, completed)
+proton_sync._finish_pass = finish
+proton_sync.main()
+"""
 
 
 class EngineRunner:
@@ -262,7 +351,15 @@ class EngineRunner:
         data.update(values)
         self.settings.write_text(json.dumps(data), encoding="utf-8")
 
-    def __call__(self, mappings, *args, settings_doc=None):
+    def reconcile(self, mappings, *args):
+        """Run a pass with a test trigger that reconciles two-way mappings.
+
+        main() does not run them on its own yet. The driver script runs
+        twoway.sync_mapping on each entry, so tests can drive the reconcile
+        itself."""
+        return self(mappings, *args, driver=_TRIGGER_DRIVER)
+
+    def __call__(self, mappings, *args, settings_doc=None, driver=None):
         if settings_doc is not None:
             self.settings.write_text(json.dumps(settings_doc) + "\n", encoding="utf-8")
         cli = os.environ.get("PROTON_DRIVE_CLI")
@@ -283,7 +380,9 @@ class EngineRunner:
         env["LC_ALL"] = "C.UTF-8"
         env.pop("PROTON_SYNC_DEBUG", None)
         return subprocess.run(
-            [sys.executable, str(REPO / "proton_sync.py"), str(mappings), *map(str, args)],
+            ([sys.executable, str(REPO / "proton_sync.py")] if driver is None
+             else [sys.executable, "-c", driver, str(REPO)])
+            + [str(mappings), *map(str, args)],
             cwd=str(REPO),
             env=env,
             capture_output=True,

@@ -4,7 +4,7 @@ The path comes from ``config.DATA_DIR`` (or an explicit directory). This
 module does not call the Proton CLI and does not decide uploads or downloads.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import os
 import sqlite3
@@ -205,6 +205,16 @@ class SyncDB:
             values,
         )
         self._conn.commit()
+
+    def has_synced_under(self, local_dir):
+        """True when a synced file row lies anywhere below ``local_dir``."""
+        prefix = local_dir.rstrip(os.sep) + os.sep
+        found = self._conn.execute(
+            "SELECT 1 FROM files WHERE state = 'synced' "
+            "AND substr(local_path, 1, ?) = ? LIMIT 1",
+            (len(prefix), prefix),
+        ).fetchone()
+        return found is not None
 
     def get_folder(self, local_path):
         row = self._conn.execute(
