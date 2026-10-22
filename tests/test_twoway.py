@@ -577,3 +577,119 @@ def test_a_download_under_another_name_is_still_used(tmp_path, monkeypatch):
     assert "wrote 0 files" in reason
 
 
+
+
+def test_emptied_remote_folder_does_not_hold_every_local_file(
+        fake_drive, local_tree, write_mappings, engine):
+    files = {"Docs/f%02d.txt" % i: (b"x%d" % i, 1_000_000_000) for i in range(40)}
+    src = local_tree(files)
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    prefix = remote_state.normalize("/my-files/Backups/Docs")
+
+    def wipe(state):
+        for key in list(state["nodes"]):
+            if key.startswith(prefix):
+                state["nodes"].pop(key)
+    fake_drive._update(wipe)
+    result = engine(cfg, "--delete")
+    assert "[delete-guard]" in result.stdout, result.stdout
+    assert len(os.listdir(src / "Docs")) == 40
+
+
+def _drop_remote(fake_drive, remote):
+    fake_drive._update(
+        lambda state: state["nodes"].pop(remote_state.normalize(remote), None))
+
+
+def test_held_file_goes_into_the_holding_folder_inside_the_source(
+        fake_drive, local_tree, write_mappings, engine, monkeypatch):
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.setenv("LOGNAME", "ann smith@x")
+    src = local_tree({"Docs/sub/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    _drop_remote(fake_drive, "/my-files/Backups/Docs/sub/a.txt")
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    held = src / "Docs" / ".proton-sync-holding-ann_smith_x" / "sub" / "a.txt"
+    assert held.read_bytes() == b"AAAA"
+    assert not (src / "Docs" / "sub" / "a.txt").exists()
+    # The holding folder is never uploaded or touched by later passes.
+    again = engine(cfg, "--delete")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert held.read_bytes() == b"AAAA"
+    assert not [p for p in fake_drive.uploads() if ".proton-sync-" in p]
+
+
+def test_hold_across_filesystems_leaves_the_file_and_copies_nothing(
+        fake_drive, local_tree, write_mappings, engine, monkeypatch,
+        isolated_home, tmp_path):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    _drop_remote(fake_drive, "/my-files/Backups/Docs/a.txt")
+
+    marker = tmp_path / "copied"
+    monkeypatch.setenv("ENGINE_TEST_PATCH", """
+import shutil
+twoway._device_of_nearest_parent = lambda path: -1
+def _copied(*a, **k):
+    open(%r, "a").write("copy\\n")
+for _name in ("copy", "copy2", "copyfile", "move"):
+    setattr(shutil, _name, _copied)
+""" % str(marker))
+    for _ in range(3):
+        result = engine(cfg, "--delete")
+        assert "[held-failed]" in result.stdout, result.stdout
+        assert result.returncode == 5, result.stdout + result.stderr
+        assert '"files_failed": 1' in result.stdout
+        assert (src / "Docs" / "a.txt").read_bytes() == b"AAAA"
+    assert not marker.exists()
+    # Nothing was moved aside, so no ".kept2" style leftovers either.
+    assert os.listdir(src / "Docs") == ["a.txt"]
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        assert database.get(str(src / "Docs" / "a.txt"))["state"] == "synced"
+
+
+def test_failed_rename_leaves_the_file_and_counts_a_failure(
+        fake_drive, local_tree, write_mappings, engine, monkeypatch):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    _drop_remote(fake_drive, "/my-files/Backups/Docs/a.txt")
+
+    monkeypatch.setenv("ENGINE_TEST_PATCH", """
+def _refuse(a, b):
+    raise PermissionError("no")
+twoway.os = type("_os", (), {"__getattr__": lambda self, n: getattr(__import__("os"), n)})()
+twoway.os.rename = _refuse
+""")
+    result = engine(cfg, "--delete")
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "[held-failed]" in result.stdout
+    assert (src / "Docs" / "a.txt").read_bytes() == b"AAAA"
+    assert os.listdir(src / "Docs") == ["a.txt"] or all(
+        n == "a.txt" or n.startswith(".proton-sync-holding-")
+        for n in os.listdir(src / "Docs"))
+
+
+def test_builtin_exclusion_covers_proton_sync_names(
+        fake_drive, local_tree, write_mappings, engine):
+    import proton_sync
+    assert proton_sync.Exclusions().is_excluded(".proton-sync-holding-x")
+    assert proton_sync.Exclusions().is_excluded(".Proton-Sync-download-abc")
+    assert proton_sync._name_excluded(None, ".proton-sync-marker-tmp")
+    assert not proton_sync.Exclusions().is_excluded("proton-sync-x")
+    # An empty exclusion set does not change the cache fingerprint.
+    assert proton_sync.Exclusions().fingerprint() == proton_sync.Exclusions([], []).fingerprint()
+    src = local_tree({
+        "Docs/a.txt": (b"AAAA", 1_000_000_000),
+        "Docs/.proton-sync-holding-bob/b.txt": (b"BBBB", 1_000_000_000),
+        "Docs/.proton-sync-download-xyz/c.txt": (b"CCCC", 1_000_000_000),
+    })
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert all(".proton-sync-" not in p for p in fake_drive.uploads())
+    assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"AAAA"

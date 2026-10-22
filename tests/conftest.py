@@ -276,6 +276,8 @@ sys.path.insert(0, repo)
 sys.argv[0] = repo + "/proton_sync.py"
 import proton_sync, twoway
 proton_sync.TWOWAY_TRIGGERS["test"] = twoway.sync_mapping
+# A test can patch the engine in the child process through this variable.
+exec(os.environ.get("ENGINE_TEST_PATCH", ""))
 seen = {}
 
 # main() does not reconcile two-way mappings yet, so capture what is needed

@@ -505,7 +505,7 @@ def cfg_source(cfg):
         return json.load(f)["mappings"][0]["source"]
 
 
-def test_twoway_global_exclusion_trashes_without_downloading(
+def test_twoway_global_exclusion_stays_on_proton_and_is_not_downloaded(
         fake_drive, local_tree, write_mappings, engine):
     src = local_tree({"Docs/keep.txt": (b"keep", 1_000_000_000)})
     fake_drive.seed_file(REMOTE + "/secret.txt", b"hide")
@@ -514,5 +514,22 @@ def test_twoway_global_exclusion_trashes_without_downloading(
         exclusions=_exclude("secret.txt"))
     result = engine.reconcile(cfg, "--delete")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert fake_drive.trashed(REMOTE + "/secret.txt")
+    assert not fake_drive.trashed(REMOTE + "/secret.txt")
+    assert fake_drive.content(REMOTE + "/secret.txt") == b"hide"
+    assert not (src / "Docs" / "secret.txt").exists()
+    assert not [c for c in fake_drive.calls()
+                if len(c) >= 2 and c[0] == "filesystem" and c[1] == "download"]
+
+
+def test_twoway_mapping_exclusion_stays_on_proton_whatever_excluded_remote(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/keep.txt": (b"keep", 1_000_000_000)})
+    fake_drive.seed_file(REMOTE + "/secret.txt", b"hide")
+    cfg = write_mappings(
+        [], sync_mappings=[_mapping(
+            src / "Docs", direction="twoway", excluded_remote="prune",
+            exclusions=_exclude("secret.txt"))])
+    result = engine.reconcile(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not fake_drive.trashed(REMOTE + "/secret.txt")
     assert not (src / "Docs" / "secret.txt").exists()

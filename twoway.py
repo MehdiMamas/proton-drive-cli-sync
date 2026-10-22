@@ -94,6 +94,7 @@ class _Ctx:
         self.source_root = source_root
         self.config_path = config_path
         self.delete = bool(delete)
+        self.hold_queue = None
 
 
 def _context(mapping, config_path, cache, exclusions, dry_run, verbose,
@@ -151,8 +152,11 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     local_names = set()
     dir_failed = False
     all_children = True
+    outer_queue, ctx.hold_queue = ctx.hold_queue, []
+    my_queue = ctx.hold_queue
+    n_files = 0
     for entry in entries:
-        if ctx.exclusions and ctx.exclusions.is_excluded(entry.name):
+        if _ps._name_excluded(ctx.exclusions, entry.name):
             continue
         local_names.add(entry.name)
         if _is_conflict_copy(entry.name):
@@ -162,10 +166,14 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
                              listing.get(entry.name)):
                 all_children = False
         elif entry.is_file():
+            n_files += 1
             if not _reconcile_file(
                     entry.path, remote_folder, listing.get(entry.name), ctx):
                 dir_failed = True
 
+    ctx.hold_queue = outer_queue
+    if not _flush_holds(my_queue, n_files, remote_folder, ctx):
+        dir_failed = True
     if not _remote_only(local_dir, remote_folder, listing, local_names, ctx):
         dir_failed = True
 
@@ -200,14 +208,10 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
     for name, info in listing.items():
         if name in local_names:
             continue
-        if ctx.exclusions and ctx.exclusions.is_excluded(name):
-            if _ps._keep_excluded_remote(name, ctx.opts):
-                continue
-            remote_path = remote_folder.rstrip("/") + "/" + name
-            if _can_trash(ctx, remote_path):
-                if not _ps.remote_trash(
-                        remote_path, permanent=False, dry_run=ctx.dry_run):
-                    ok = False
+        if _ps._name_excluded(ctx.exclusions, name):
+            # Two-way folder: the file may come from another device. An
+            # excluded name on Proton is neither downloaded nor trashed,
+            # whatever excluded_remote says.
             continue
         local_path = os.path.join(local_dir, name)
         remote_path = remote_folder.rstrip("/") + "/" + name
@@ -500,6 +504,9 @@ def _remote_gone(local_path, remote_folder, remote_info, row, ctx):
             "removed on Proton; local file kept because deletions are off "
             "for this pass: {p}").format(p=local_path))
         return True
+    if ctx.hold_queue is not None:
+        ctx.hold_queue.append(local_path)
+        return True
     return _hold(local_path, ctx)
 
 
@@ -515,33 +522,65 @@ def _remote_changed_since(remote_info, row):
 
 
 def _hold(local_path, ctx):
-    """Move the local file into the state directory. Do not delete the bytes."""
+    """Move the local file into <source>/.proton-sync-holding-<user>/.
+
+    The move is os.rename on the same filesystem only. Anything else leaves the
+    file where it is, counts one failure and keeps the sync row. Never a copy.
+    """
     if ctx.dry_run:
         print("[held] " + _("[DRY-RUN] would move aside: {p}").format(p=local_path))
         return True
     dest = _holding_destination(ctx, local_path)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    # A file held earlier under the same name is never replaced.
-    base, n = dest, 1
-    while os.path.lexists(dest):
-        dest = base + (".kept" if n == 1 else ".kept%d" % n)
-        n += 1
+    dest_dir = os.path.dirname(dest)
     try:
+        if _device_of_nearest_parent(dest_dir) != os.lstat(local_path).st_dev:
+            raise OSError(
+                "the holding folder is on another filesystem")
+        os.makedirs(dest_dir, exist_ok=True)
+        # A file held earlier under the same name is never replaced.
+        base, n = dest, 1
+        while os.path.lexists(dest):
+            dest = base + (".kept" if n == 1 else ".kept%d" % n)
+            n += 1
         os.rename(local_path, dest)
-    except OSError:
-        try:
-            shutil.copy2(local_path, dest)
-        except OSError as exc:
-            print("[download-failed] " + _(
-                "could not move aside {p}: {e}").format(p=local_path, e=exc))
-            _ps._RUN.add("files_failed")
-            return False
-        print("[held] " + local_path + " -> " + dest)
+    except OSError as exc:
+        print("[held-failed] " + _(
+            "kept in place, not moved aside: {p} ({e})").format(
+                p=local_path, e=exc))
         _ps._RUN.add("files_failed")
         return False
     ctx.db.delete(local_path)
     print("[held] " + local_path + " -> " + dest)
     return True
+
+
+def _device_of_nearest_parent(path):
+    while True:
+        try:
+            return os.stat(path).st_dev
+        except FileNotFoundError:
+            parent = os.path.dirname(path)
+            if parent == path:
+                raise
+            path = parent
+
+
+def _flush_holds(queue, local_count, remote_folder, ctx):
+    """Hold the files queued for one folder, unless the mass-delete guard
+    refuses. Returns False when something stayed behind."""
+    if not queue:
+        return True
+    if _refusing_mass_delete(queue, local_count, ctx, always=True):
+        print("[delete-guard] " + _(
+            "refusing to hold {n} of {t} local file(s) in {p}").format(
+                n=len(queue), t=local_count, p=remote_folder))
+        _ps._RUN.add("deletions_refused")
+        return False
+    ok = True
+    for local_path in queue:
+        if not _hold(local_path, ctx):
+            ok = False
+    return ok
 
 
 def _can_trash(ctx, remote_path):
@@ -567,12 +606,17 @@ def _can_trash(ctx, remote_path):
     return False
 
 
-def _refusing_mass_delete(gone, listing, ctx):
+def _refusing_mass_delete(gone, total, ctx, always=False):
+    """``total`` is the number of items the folder holds (a listing, or a count).
+
+    ``always``: apply the thresholds even when the mass_delete_guard setting is
+    off (used for local holds, which are guarded whatever the setting says).
+    """
     if not gone or ctx.opts.get("allow_mass_delete"):
         return False
-    if not ctx.opts.get("mass_delete_guard"):
+    if not always and not ctx.opts.get("mass_delete_guard"):
         return False
-    n_remote = len(listing)
+    n_remote = total if isinstance(total, int) else len(total)
     if not n_remote:
         return False
     max_min = ctx.opts.get("max_delete_min", 20)
@@ -710,16 +754,24 @@ def _set_state(row, state, ctx):
     ctx.db.upsert(stored)
 
 
+def _holding_user():
+    try:
+        import getpass
+        name = getpass.getuser()
+    except Exception:
+        name = ""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "_"
+
+
 def _holding_destination(ctx, local_path):
-    import config as appconfig
-    stem = os.path.splitext(os.path.basename(os.fspath(ctx.config_path)))[0]
     try:
         rel = os.path.relpath(local_path, ctx.source_root)
     except ValueError:
         rel = os.path.basename(local_path)
     if rel.startswith(".."):
         rel = os.path.basename(local_path)
-    return os.path.join(appconfig.DATA_DIR, "holding", stem, rel)
+    return os.path.join(
+        ctx.source_root, ".proton-sync-holding-" + _holding_user(), rel)
 
 
 def _conflict_path(local_path):

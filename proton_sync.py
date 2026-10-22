@@ -321,7 +321,7 @@ def _normalize_uppercase_ext(local_dir, entries, exclusions, dry_run=False, verb
         except OSError:
             continue
         name = entry.name
-        if exclusions and exclusions.is_excluded(name):
+        if _name_excluded(exclusions, name):
             continue
         base, ext, dup = split_ext_with_dup(name)
         if not ext or ext == ext.lower():
@@ -750,6 +750,8 @@ class Exclusions:
     def is_excluded(self, name):
         """True si 'name' (nom d'un fichier ou dossier) doit être exclu."""
         low = name.lower()
+        if low.startswith(BUILTIN_EXCLUDED_PREFIX):
+            return True
         if low in self.names:
             return True
         for pat in self.patterns:
@@ -769,6 +771,17 @@ class Exclusions:
 
     def __bool__(self):
         return bool(self.names or self.patterns)
+
+
+BUILTIN_EXCLUDED_PREFIX = ".proton-sync-"
+
+
+def _name_excluded(exclusions, name):
+    """is_excluded, but the built-in rule also holds when there is no Exclusions
+    object or it is empty (an empty Exclusions is falsy)."""
+    if exclusions is None:
+        return name.lower().startswith(BUILTIN_EXCLUDED_PREFIX)
+    return exclusions.is_excluded(name)
 
 
 def load_config(path):
@@ -2671,6 +2684,8 @@ def _keep_excluded_remote(name, opts):
         return False
     mapping_ex = opts.get("mapping_exclusions")
     global_ex = opts.get("global_exclusions")
+    if name.lower().startswith(BUILTIN_EXCLUDED_PREFIX):
+        return False
     return bool(mapping_ex and mapping_ex.is_excluded(name)
                 and not (global_ex and global_ex.is_excluded(name)))
 
@@ -2897,7 +2912,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
     # Ensemble des noms locaux NON exclus (sert à détecter les orphelins distants).
     local_names = set()
     for entry in entries:
-        if exclusions and exclusions.is_excluded(entry.name):
+        if _name_excluded(exclusions, entry.name):
             continue
         local_names.add(entry.name)
 
@@ -2967,7 +2982,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
         all_children_complete = True
         for entry in entries:
             if entry.is_dir(follow_symlinks=False):
-                if exclusions and exclusions.is_excluded(entry.name):
+                if _name_excluded(exclusions, entry.name):
                     if verbose:
                         print(_("  🚫 excluded (folder): {p}").format(p=entry.path))
                     continue
@@ -3062,7 +3077,7 @@ def sync_folder(local_dir, remote_parent, dry_run=False, verbose=False, verify_h
     if cache is not None and not ignore_cache:
         baseline = cache.file_baseline(local_dir, remote_folder, current_fp)
     for entry in entries:
-        if exclusions and exclusions.is_excluded(entry.name):
+        if _name_excluded(exclusions, entry.name):
             if verbose:
                 kind = "dossier" if entry.is_dir(follow_symlinks=False) else "fichier"
                 print(_("    🚫 excluded ({k}): {p}").format(k=kind, p=entry.path))
@@ -3237,7 +3252,7 @@ def sync_file(local_file, remote_parent, dry_run=False, verbose=False, verify_ha
     # Pour un fichier unique, le coût de l'appel `list` du dossier parent est
     # déjà minime (un seul list pour un seul fichier à vérifier). On garde la
     # logique simple sans cache.
-    if exclusions and exclusions.is_excluded(os.path.basename(local_file)):
+    if _name_excluded(exclusions, os.path.basename(local_file)):
         if verbose:
             print(_("    🚫 excluded (file): {p}").format(p=local_file))
         return True
@@ -3329,8 +3344,6 @@ def _first_excluded_segment(mapping, subpath, exclusions):
 
     On ne teste pas les segments de la racine elle-même (pour ne pas exclure par
     accident un dossier parent légitime du mapping)."""
-    if not exclusions:
-        return None
     try:
         source = os.path.normpath(mapping["source"])
     except (KeyError, TypeError):
@@ -3340,12 +3353,12 @@ def _first_excluded_segment(mapping, subpath, exclusions):
     if rel in (".", ""):
         # Le sous-chemin EST la racine du mapping : on teste juste son nom.
         base = os.path.basename(sub)
-        return base if exclusions.is_excluded(base) else None
+        return base if _name_excluded(exclusions, base) else None
     if rel.startswith(".."):
         # Hors du mapping (ne devrait pas arriver) : on ne juge rien ici.
         return None
     for seg in rel.split(os.sep):
-        if seg and exclusions.is_excluded(seg):
+        if seg and _name_excluded(exclusions, seg):
             return seg
     return None
 
