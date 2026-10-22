@@ -397,8 +397,8 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
             "refusing to trash {n} of {t} remote item(s) in {p}").format(
                 n=len(gone), t=len(listing), p=remote_folder))
         _ps._RUN.add("deletions_refused")
-        for local_path, remote_path, info, row in gone:
-            _set_state(row, "pending-down", ctx)
+        # The rows stay as they are (synced): the next pass decides again
+        # from scratch, so a refused deletion is never turned into a restore.
         return False
 
     for local_path, remote_path, info, row in gone:
@@ -410,7 +410,13 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
             else:
                 ok = False
         else:
-            _set_state(row, "pending-down", ctx)
+            if not _deletion_switched_on(ctx):
+                # Deletion is simply off: the documented behaviour, the file
+                # comes back on the next pass.
+                _set_state(row, "pending-down", ctx)
+            # Otherwise a guard refused it (mount, source_kind, shared
+            # folder): the row stays synced and the next pass decides again,
+            # so a refused deletion is never turned into a restore.
             if ctx.opts.get("mount_lost"):
                 ok = False
 
@@ -519,7 +525,7 @@ def _fetch(remote_path, directory):
     back.
     """
     result = _ps.run_cli(
-        ["filesystem", "download", "-f", "replace", remote_path, directory])
+        ["filesystem", "download", "-f", "skip", remote_path, directory])
     text = (result.stdout or "") + "\n" + (result.stderr or "")
     if "skipped:" in text:
         return None, True, ""
@@ -740,6 +746,10 @@ def _flush_holds(queue, local_count, remote_folder, ctx):
         if not _hold(local_path, ctx):
             ok = False
     return ok
+
+
+def _deletion_switched_on(ctx):
+    return bool(ctx.delete and ctx.mapping.get("allow_delete"))
 
 
 def _can_trash(ctx, remote_path):

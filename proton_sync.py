@@ -3594,7 +3594,7 @@ def _pass_mode(args):
 
 def _summary_line():
     """Une ligne traduite, juste avant le JSON machine [run-result]."""
-    return _("Summary: uploaded {files_uploaded}, would upload {files_would_upload}, "
+    line = _("Summary: uploaded {files_uploaded}, would upload {files_would_upload}, "
              "failed {files_failed}, vanished {files_vanished}, "
              "listing failed {folders_listing_failed}, unreadable {folders_unreadable}, "
              "permission denied {folders_permission_denied}, "
@@ -3602,6 +3602,10 @@ def _summary_line():
              "trash failed {trash_failed}, deletions refused {deletions_refused}, "
              "sources missing {sources_missing}, "
              "mappings {mappings_complete}/{mappings_total}.").format(**_RUN.to_dict())
+    paused = _RUN.to_dict().get("twoway_paused", 0)
+    if paused:
+        line += " " + _("Two-way sync paused: {n} mapping(s), no events probe.").format(n=paused)
+    return line
 
 
 # ── Reprise des vérifications SHA1 déjà faites, d'après les journaux ─────────
