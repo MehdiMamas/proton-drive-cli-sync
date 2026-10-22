@@ -5,6 +5,7 @@ one-way mapping in the same file never downloads.
 """
 
 import os
+import re
 
 import pytest
 
@@ -246,7 +247,31 @@ def test_holding_the_same_name_again_keeps_every_copy(
         held.append(result.stdout.split("[held] ", 1)[1].split(" -> ", 1)[1]
                     .splitlines()[0].strip())
     assert len(set(held)) == 3
+    for p in held:
+        assert re.search(r"a~\d{8}-\d{6}(-\d+)?\.txt$", p), p
     assert [open(p, "rb").read() for p in held] == [b"v1", b"v2", b"v3"]
+
+
+def test_emptied_remote_tree_of_small_folders_holds_nothing(
+        fake_drive, local_tree, write_mappings, engine):
+    files = {"Docs/d%02d/f%d.txt" % (d, i): (b"x%d%d" % (d, i), 1_000_000_000)
+             for d in range(10) for i in range(5)}
+    src = local_tree(files)
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    prefix = remote_state.normalize("/my-files/Backups/Docs")
+
+    def wipe(state):
+        for key in list(state["nodes"]):
+            if key.startswith(prefix):
+                state["nodes"].pop(key)
+    fake_drive._update(wipe)
+    result = engine(cfg, "--delete")
+    assert "[held] " not in result.stdout, result.stdout
+    assert '"deletions_refused": 0' not in result.stdout, result.stdout
+    for d in range(10):
+        assert len(os.listdir(src / "Docs" / ("d%02d" % d))) == 5
+    assert "Docs" not in fake_drive.listing("/my-files/Backups")
 
 
 def test_failed_listing_does_not_update_the_sync_row(
@@ -589,7 +614,7 @@ def test_emptied_remote_folder_does_not_hold_every_local_file(
 
     def wipe(state):
         for key in list(state["nodes"]):
-            if key.startswith(prefix):
+            if key.startswith(prefix + "/"):
                 state["nodes"].pop(key)
     fake_drive._update(wipe)
     result = engine(cfg, "--delete")
@@ -612,7 +637,8 @@ def test_held_file_goes_into_the_holding_folder_inside_the_source(
     _drop_remote(fake_drive, "/my-files/Backups/Docs/sub/a.txt")
     result = engine(cfg, "--delete")
     assert result.returncode == 0, result.stdout + result.stderr
-    held = src / "Docs" / ".proton-sync-holding-ann_smith_x" / "sub" / "a.txt"
+    folder = src / "Docs" / ".proton-sync-holding-ann_smith_x" / "sub"
+    [held] = list(folder.glob("a~*.txt"))
     assert held.read_bytes() == b"AAAA"
     assert not (src / "Docs" / "sub" / "a.txt").exists()
     # The holding folder is never uploaded or touched by later passes.

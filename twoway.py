@@ -12,6 +12,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 import syncdb
 
@@ -132,6 +133,8 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     """List this folder even when the one-way fingerprint is unchanged."""
     remote_folder = _remote_folder(local_dir, remote_parent, ctx)
     print("📂 " + local_dir)
+    if _folder_gone_from_proton(local_dir, remote_folder, remote_info, ctx):
+        return False
     if not ctx.dry_run and not _ps.ensure_remote_path(remote_folder):
         return False
     listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
@@ -185,6 +188,32 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
             ctx.cache.update(local_dir, signature, subtree_complete=True)
             ctx.cache.maybe_save()
     return complete
+
+
+def _folder_gone_from_proton(local_dir, remote_folder, remote_info, ctx):
+    """True when this folder is missing on Proton while the database still has
+    synced files under it. The folder was renamed or removed as a whole, so
+    nothing under it is held, uploaded or recreated on this pass."""
+    if not ctx.db.has_synced_under(local_dir):
+        return False
+    if isinstance(remote_info, dict):
+        return False
+    if _ps.remote_exists(remote_folder):
+        return False
+    print("[folder-missing] " + _(
+        "{p}: this folder no longer exists on Proton. "
+        "To be safe, nothing was changed in it here.").format(p=local_dir))
+    _ps._RUN.add("deletions_refused")
+    if not ctx.dry_run:
+        known = ctx.db.get_folder(local_dir) or {}
+        ctx.db.upsert_folder({
+            "local_path": local_dir,
+            "remote_path": known.get("remote_path") or remote_folder,
+            "remote_node_id": known.get("remote_node_id"),
+            "local_seen": 1,
+            "remote_seen": 0,
+        })
+    return True
 
 
 def _remember_folder(local_dir, remote_folder, remote_info, ctx):
@@ -538,10 +567,7 @@ def _hold(local_path, ctx):
                 "the holding folder is on another filesystem")
         os.makedirs(dest_dir, exist_ok=True)
         # A file held earlier under the same name is never replaced.
-        base, n = dest, 1
-        while os.path.lexists(dest):
-            dest = base + (".kept" if n == 1 else ".kept%d" % n)
-            n += 1
+        dest = _timed_name(dest)
         os.rename(local_path, dest)
     except OSError as exc:
         print("[held-failed] " + _(
@@ -552,6 +578,19 @@ def _hold(local_path, ctx):
     ctx.db.delete(local_path)
     print("[held] " + local_path + " -> " + dest)
     return True
+
+
+def _timed_name(dest):
+    """``a.txt`` -> ``a~20261022-073300.txt`` (local time); ``-2``, ``-3`` when
+    that second is already taken. The extension stays last."""
+    stem, ext = os.path.splitext(dest)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    candidate = "{s}~{t}{e}".format(s=stem, t=stamp, e=ext)
+    n = 2
+    while os.path.lexists(candidate):
+        candidate = "{s}~{t}-{n}{e}".format(s=stem, t=stamp, n=n, e=ext)
+        n += 1
+    return candidate
 
 
 def _device_of_nearest_parent(path):
