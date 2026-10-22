@@ -129,15 +129,31 @@ def _remote_folder(local_dir, remote_parent, ctx):
     return parent + "/" + name if parent else "/" + name
 
 
-def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
-    """List this folder even when the one-way fingerprint is unchanged."""
+def _sync_dir(local_dir, remote_parent, ctx, remote_info=None,
+              parent_listed=False):
+    """List this folder even when the one-way fingerprint is unchanged.
+
+    ``parent_listed`` says the caller just listed the parent: a ``remote_info``
+    of None then means the parent does not contain this folder."""
     remote_folder = _remote_folder(local_dir, remote_parent, ctx)
     print("📂 " + local_dir)
-    if _folder_gone_from_proton(local_dir, remote_folder, remote_info, ctx):
-        return False
-    if not ctx.dry_run and not _ps.ensure_remote_path(remote_folder):
-        return False
-    listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
+    listing = None
+    if remote_info is None and ctx.db.has_synced_under(local_dir):
+        if parent_listed:
+            _report_folder_gone(local_dir, remote_folder, ctx)
+            return False
+        # Top folder of the pass: its own listing tells whether it exists.
+        listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
+        if not listing.ok and _ps._missing_node_error(listing.error):
+            _report_folder_gone(local_dir, remote_folder, ctx)
+            return False
+        if listing.ok:
+            _ps._remember_remote(remote_folder)
+    if listing is None or listing.ok:
+        if not ctx.dry_run and not _ps.ensure_remote_path(remote_folder):
+            return False
+        if listing is None:
+            listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
     if not listing.ok:
         print("[list-skipped] " + _(
             "Could not list {p} — folder skipped this pass "
@@ -166,7 +182,7 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
             continue
         if entry.is_dir(follow_symlinks=False):
             if not _sync_dir(entry.path, remote_folder, ctx,
-                             listing.get(entry.name)):
+                             listing.get(entry.name), parent_listed=True):
                 all_children = False
         elif entry.is_file():
             n_files += 1
@@ -190,16 +206,10 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None):
     return complete
 
 
-def _folder_gone_from_proton(local_dir, remote_folder, remote_info, ctx):
-    """True when this folder is missing on Proton while the database still has
-    synced files under it. The folder was renamed or removed as a whole, so
-    nothing under it is held, uploaded or recreated on this pass."""
-    if not ctx.db.has_synced_under(local_dir):
-        return False
-    if isinstance(remote_info, dict):
-        return False
-    if _ps.remote_exists(remote_folder):
-        return False
+def _report_folder_gone(local_dir, remote_folder, ctx):
+    """This folder is missing on Proton while the database still has synced
+    files under it. It was renamed or removed as a whole, so nothing under it
+    is held, uploaded or recreated on this pass."""
     print("[folder-missing] " + _(
         "{p}: this folder no longer exists on Proton. "
         "To be safe, nothing was changed in it here.").format(p=local_dir))
@@ -213,7 +223,6 @@ def _folder_gone_from_proton(local_dir, remote_folder, remote_info, ctx):
             "local_seen": 1,
             "remote_seen": 0,
         })
-    return True
 
 
 def _remember_folder(local_dir, remote_folder, remote_info, ctx):

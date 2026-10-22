@@ -198,8 +198,9 @@ def _list(state, path, as_json):
             return _fail("auth failed", 1)
         print("ok")
         return 0
-    if remote_state.consume_faults(state, "list", path):
-        return _fail("not found", 1)
+    fired = remote_state.consume_faults(state, "list", path)
+    if fired:
+        return _fail(fired[0].get("stderr") or "not found", 1)
     if path != "/":
         node = state["nodes"].get(path)
         if not isinstance(node, dict) or node.get("trashed"):
@@ -218,8 +219,9 @@ def _list(state, path, as_json):
 
 def _info(state, path):
     path = remote_state.normalize(path)
-    if remote_state.consume_faults(state, "info", path):
-        return _fail("not found", 1)
+    fired = remote_state.consume_faults(state, "info", path)
+    if fired:
+        return _fail(fired[0].get("stderr") or "not found", 1)
     node = state["nodes"].get(path)
     if not isinstance(node, dict) or node.get("trashed"):
         return _fail("not found", 1)

@@ -274,6 +274,31 @@ def test_emptied_remote_tree_of_small_folders_holds_nothing(
     assert "Docs" not in fake_drive.listing("/my-files/Backups")
 
 
+@pytest.mark.parametrize("cmd", ["info", "list"])
+def test_failed_call_on_top_folder_is_not_a_missing_folder(
+        fake_drive, local_tree, write_mappings, engine, isolated_home, cmd):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
+    cfg = write_mappings([_mapping(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg).returncode == 0
+    local_dir = str(src / "Docs")
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        before = database.get_folder(local_dir)
+    assert before["remote_seen"] == 1
+    fake_drive.add_fault(
+        cmd=cmd, match="/my-files/Backups/Docs", mode="fail", times=1,
+        stderr="Error: network unreachable")
+    result = engine(cfg, "--delete")
+    assert "[folder-missing] " not in result.stdout, result.stdout
+    assert '"deletions_refused": 0' in result.stdout, result.stdout
+    assert (src / "Docs" / "a.txt").read_bytes() == b"AAAA"
+    assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"AAAA"
+    with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
+        after = database.get_folder(local_dir)
+    assert after["remote_seen"] == 1
+    if cmd == "list":
+        assert "[list-skipped] " in result.stdout, result.stdout
+
+
 def test_failed_listing_does_not_update_the_sync_row(
         fake_drive, local_tree, write_mappings, engine, isolated_home):
     src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000)})
@@ -287,7 +312,8 @@ def test_failed_listing_does_not_update_the_sync_row(
     assert before["sha1"]
     local_tree.write("Docs/a.txt", b"BBBB", 1_000_000_100)
     fake_drive.add_fault(
-        cmd="list", match="/my-files/Backups/Docs", mode="fail", times=1)
+        cmd="list", match="/my-files/Backups/Docs", mode="fail", times=1,
+        stderr="Error: network unreachable")
     failed = engine(cfg)
     assert failed.returncode == 5, failed.stdout + failed.stderr
     assert "[list-skipped] " in failed.stdout
@@ -672,7 +698,7 @@ for _name in ("copy", "copy2", "copyfile", "move"):
         assert '"files_failed": 1' in result.stdout
         assert (src / "Docs" / "a.txt").read_bytes() == b"AAAA"
     assert not marker.exists()
-    # Nothing was moved aside, so no ".kept2" style leftovers either.
+    # Nothing was moved aside, so no timestamped leftovers either.
     assert os.listdir(src / "Docs") == ["a.txt"]
     with syncdb.SyncDB(_db(isolated_home, cfg)) as database:
         assert database.get(str(src / "Docs" / "a.txt"))["state"] == "synced"
