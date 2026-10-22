@@ -4,7 +4,7 @@ The path comes from ``config.DATA_DIR`` (or an explicit directory). This
 module does not call the Proton CLI and does not decide uploads or downloads.
 """
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 import os
 import sqlite3
@@ -112,6 +112,9 @@ def _optional_float(value):
     return number
 
 
+BUSY_TIMEOUT_MS = 5000
+
+
 class SyncDB:
     """Rows for files this mappings file has already reconciled."""
 
@@ -120,15 +123,13 @@ class SyncDB:
         if parent:
             os.makedirs(parent, exist_ok=True)
         self.path = os.fspath(path)
-        self._conn = sqlite3.connect(self.path, timeout=5)
+        self._conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000)
         try:
-            # Several processes (engine pass, editor, watcher) may open the
-            # same file: WAL lets readers and one writer work together, and
-            # busy_timeout waits instead of failing with "database is locked".
-            # Every write below commits on its own and stays short; callers
-            # never hold a transaction open across a Proton CLI call.
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA busy_timeout=5000")
+            # The scheduled pass and real time may open this file at the same
+            # time: WAL lets readers and one writer overlap, and the busy
+            # timeout makes a second writer wait instead of failing at once.
+            self._conn.execute("PRAGMA busy_timeout = %d" % BUSY_TIMEOUT_MS)
+            self._conn.execute("PRAGMA journal_mode = WAL")
             self._ensure()
         except Exception:
             self._conn.close()
