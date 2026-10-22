@@ -292,7 +292,8 @@ A second top-level key, `sync_mappings`, lists folders that sync both ways. `map
 
 - `direction`: `"twoway"` is the only value for now. An entry with any other direction (or an unknown `type`) is skipped with one log line; it is never run as an upload.
 - **No overlaps.** A two-way mapping may not overlap any other mapping, upload or two-way: not the same local folder, not a parent, not a subfolder. On the Proton side the arrival-folder rule above applies too. This is checked each time the file is loaded; a two-way mapping in conflict does not run, and the engine logs one line naming it and the reason. Upload mappings keep their behaviour. The check is `mapping_keys.sync_mapping_conflicts(sync_mappings, upload_mappings)`.
-- **Trigger.** The `twoway_trigger` setting (settings.json) defaults to `"none"`: no events probe, so the engine lists the whole Proton side on every pass. A trigger that is missing or unknown behaves the same way.
+- **Paused by default.** There is no events probe, so a two-way mapping does not run on a normal pass. Each pass logs one line per mapping saying two-way sync is paused, and the run result counts them in `twoway_paused`. `--twoway-full-check` lists the whole Proton side and runs the mappings once.
+- **Upload mappings that overlap a two-way mapping** (in this file or in the other service's file) run with deletions held, in memory only, with a `[twoway-conflict]` log line; a remote wipe is refused for them. A two-way mapping that overlaps any mapping of the other service's file does not run.
 
 ### Exclusions
 

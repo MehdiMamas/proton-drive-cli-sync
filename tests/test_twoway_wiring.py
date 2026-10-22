@@ -118,7 +118,7 @@ def test_trigger_none_lists_the_whole_remote_and_runs(
     src = local_tree({"Two/a.txt": (b"AAAA", 1_000_000_000)})
     fake_drive.seed_file("/my-files/TW/Two/web.txt", b"WEB")
     cfg = _write(tmp_path, [], [_tw(src / "Two", "/my-files/TW")])
-    result = engine(cfg)  # default trigger: none
+    result = engine(cfg)  # the harness passes --twoway-full-check
     assert result.returncode == 0, result.stdout + result.stderr
     lists = [c for c in _calls_with(fake_drive.calls(), "list")]
     assert any("/my-files/TW/Two" in c for c in lists)
@@ -126,15 +126,32 @@ def test_trigger_none_lists_the_whole_remote_and_runs(
     assert (src / "Two" / "web.txt").read_bytes() == b"WEB"
 
 
-def test_unknown_trigger_name_falls_back_to_full_listing(
+def test_without_the_switch_a_two_way_mapping_is_paused(
         fake_drive, local_tree, engine, tmp_path):
     src = local_tree({"Two/a.txt": (b"AAAA", 1_000_000_000)})
-    engine.update_settings(twoway_trigger="events")
+    fake_drive.seed_file("/my-files/TW/Two/web.txt", b"WEB")
     cfg = _write(tmp_path, [], [_tw(src / "Two", "/my-files/TW")])
-    result = engine(cfg)
+    result = engine(cfg, full_check=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "unknown" in result.stdout
-    assert fake_drive.content("/my-files/TW/Two/a.txt") == b"AAAA"
+    assert "Two-way sync paused for" in result.stdout
+    assert "no events probe" in result.stdout
+    assert not [c for c in _calls_with(fake_drive.calls(), "list")
+                if "/my-files/TW" in c]
+    assert not (src / "Two" / "web.txt").exists()
+    assert fake_drive.content("/my-files/TW/Two/a.txt") is None
+
+
+def test_pause_is_counted_in_the_run_result(
+        fake_drive, local_tree, engine, tmp_path):
+    src = local_tree({"Two/a.txt": (b"AAAA", 1_000_000_000),
+                      "Three/b.txt": (b"B", 1_000_000_000)})
+    cfg = _write(tmp_path, [], [_tw(src / "Two", "/my-files/TW"),
+                                _tw(src / "Three", "/my-files/TH")])
+    result = engine(cfg, full_check=False)
+    assert result.stdout.count("Two-way sync paused for") == 2
+    line = [l for l in result.stdout.splitlines() if l.startswith("[run-result] ")]
+    assert len(line) == 1, result.stdout
+    assert json.loads(line[0][len("[run-result] "):])["twoway_paused"] == 2
 
 
 def test_valid_mapping_runs_next_to_an_upload_mapping(
@@ -147,3 +164,50 @@ def test_valid_mapping_runs_next_to_an_upload_mapping(
     assert result.returncode == 0, result.stdout + result.stderr
     assert fake_drive.content("/my-files/OneWay/One/b.txt") == b"BBBB"
     assert fake_drive.content("/my-files/TwoWay/Two/a.txt") == b"AAAA"
+
+
+def test_upload_mapping_overlapping_a_two_way_does_not_trash(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"A", 1_000_000_000)})
+    upload = {"type": "folder", "source": str(src / "Docs"),
+              "dest_parent": "/my-files/Backups", "allow_delete": True,
+              "source_kind": "local"}
+    two_way = {"type": "folder", "source": str(src / "Docs"),
+               "dest_parent": "/my-files/Backups", "direction": "twoway",
+               "allow_delete": True}
+    cfg = write_mappings([upload], sync_mappings=[two_way])
+    assert engine(cfg).returncode == 0
+    # A file added on Proton from another device.
+    fake_drive.seed_file("/my-files/Backups/Docs/from-phone.txt", b"P")
+    result = engine(cfg, "--delete")
+    assert not fake_drive.trashed("/my-files/Backups/Docs/from-phone.txt"), result.stdout
+
+
+def test_held_upload_mapping_logs_and_keeps_sending(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"A", 1_000_000_000)})
+    upload = {"type": "folder", "source": str(src / "Docs"),
+              "dest_parent": "/my-files/Backups", "allow_delete": True,
+              "source_kind": "local"}
+    two_way = dict(upload, direction="twoway")
+    cfg = write_mappings([upload], sync_mappings=[two_way])
+    result = engine(cfg, "--delete")
+    assert "[twoway-conflict]" in result.stdout, result.stdout
+    assert str(src / "Docs") in result.stdout
+    assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"A"
+    doc = json.loads(open(cfg).read())
+    assert doc["mappings"][0]["allow_delete"] is True  # memory only
+
+
+def test_wipe_is_refused_for_an_upload_mapping_held_by_a_two_way(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"A", 1_000_000_000)})
+    upload = {"type": "folder", "source": str(src / "Docs"),
+              "dest_parent": "/my-files/Backups", "allow_delete": True,
+              "source_kind": "local"}
+    cfg = write_mappings([upload], sync_mappings=[dict(upload, direction="twoway")])
+    assert engine(cfg).returncode == 0
+    result = engine(cfg, "--reset-source", str(src / "Docs"), "--wipe-remote", "--delete")
+    out = result.stdout + result.stderr
+    assert "REFUSED" in out, out
+    assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"A"

@@ -135,6 +135,7 @@ class RunStats:
         "sources_missing",
         "mappings_total",
         "mappings_complete",
+        "twoway_paused",
     )
     # Un de ces compteurs > 0 => le passage est allé au bout, mais incomplet.
     _FAILURES = (
@@ -843,11 +844,9 @@ TWOWAY_TRIGGERS = {"none": None}
 
 
 def twoway_runner():
-    """(nom, exécuteur) du déclencheur configuré. Exécuteur None = listing
-    complet. Un nom inconnu se comporte comme "none" (sonde absente)."""
+    """(nom, exécuteur) du déclencheur. Exécuteur None = aucune sonde
+    d'événements : le deux sens est en pause, sauf --twoway-full-check."""
     name = "none"
-    if _HAS_CONFIG:
-        name = appconfig.twoway_trigger()
     return name, TWOWAY_TRIGGERS.get(name)
 
 
@@ -2610,6 +2609,26 @@ def _hold_arrival_conflicts(mappings):
     return held
 
 
+def _hold_sync_conflicts(mappings, sync_mappings, held):
+    """Retient les suppressions des mappings à sens unique qui chevauchent un
+    mapping deux sens du même fichier (les six relations de
+    mapping_keys.sync_mapping_conflicts), même règle que _hold_arrival_conflicts :
+    en mémoire seulement, pour tout le passage, le vidage distant est refusé
+    pour eux. Le mapping deux sens, lui, est écarté par twoway.plan.
+
+    Complète `held` (6e place : True, conflit avec un mapping deux sens)."""
+    if not _HAS_MAPPING_KEYS or not sync_mappings:
+        return
+    for i, (twoway_m, _reason, _detail) in mapping_keys.upload_sync_holds(
+            mappings, sync_mappings).items():
+        m = mappings[i]
+        if id(m) in held:
+            continue
+        held[id(m)] = (twoway_m.get("source", "?"), mapping_keys.arrival_folder(m),
+                       bool(m.get("allow_delete")), False, None, True)
+        m["allow_delete"] = False
+
+
 def _running_mappings_files():
     """Fichiers de mappings des services en service : celui de la planification
     et celui du temps réel (None quand le service est absent ou désactivé). Lus
@@ -2619,7 +2638,8 @@ def _running_mappings_files():
     return realtime_manager.services_mappings_files()
 
 
-def _hold_cross_file_conflicts(config_path, mappings, held):
+def _hold_cross_file_conflicts(config_path, mappings, held, sync_mappings=(),
+                               blocked=None):
     """Même retenue que _hold_arrival_conflicts, mais contre les mappings des
     AUTRES fichiers en service (planification, temps réel) : un mapping d'un
     fichier et un mapping de l'autre qui arrivent dans le même dossier du
@@ -2633,6 +2653,13 @@ def _hold_cross_file_conflicts(config_path, mappings, held):
     Si les fichiers en service ne peuvent pas être connus (gestionnaire absent,
     erreur en le chargeant), on ne peut pas savoir : toutes les suppressions
     sont refusées, comme sans mount_check.
+
+    Les entrées "sync_mappings" de l'autre fichier comptent aussi : un mapping
+    à sens unique de ce fichier qui en chevauche un voit ses suppressions
+    retenues (6e place de `held` : True), et un mapping deux sens de ce
+    fichier qui chevauche un mapping quelconque de l'autre fichier n'est pas
+    lancé : il est consigné dans `blocked` ({id(mapping deux sens): (raison,
+    autre mapping, détail, autre fichier)}), que twoway.run_pass applique.
 
     Complète `held` (mêmes entrées, l'autre fichier en 5e position) et
     retourne False seulement si le contrôle n'a pas pu se faire."""
@@ -2657,6 +2684,27 @@ def _hold_cross_file_conflicts(config_path, mappings, held):
         if doc is None:
             continue
         theirs, global_theirs = doc
+        theirs_sync = mapping_keys.read_sync_mappings(other_path)
+        if theirs_sync:
+            for i, (twoway_m, _r, _d) in mapping_keys.upload_sync_holds(
+                    mappings, theirs_sync).items():
+                m = mappings[i]
+                if id(m) in held:
+                    continue
+                held[id(m)] = (twoway_m.get("source", "?"),
+                               mapping_keys.arrival_folder(m),
+                               bool(m.get("allow_delete")), False, other_path, True)
+                m["allow_delete"] = False
+        if blocked is not None:
+            pool = list(theirs) + mapping_keys.runnable_sync_mappings(theirs_sync)
+            for t in mapping_keys.runnable_sync_mappings(sync_mappings):
+                if id(t) in blocked:
+                    continue
+                for o in pool:
+                    hit = mapping_keys.sync_overlap(t, o)
+                    if hit:
+                        blocked[id(t)] = (hit[0], o, hit[1], other_path)
+                        break
         for i, j, kind, folder, _f in mapping_keys.cross_conflicts(
                 mappings, global_mine, theirs, global_theirs):
             m = mappings[i]
@@ -2675,7 +2723,16 @@ def _print_arrival_holds(scope, held, delete):
         return
     for m in scope:
         info = held.get(id(m))
-        if info and info[2] and info[4]:
+        if info and info[2] and len(info) > 5 and info[5]:
+            if info[4]:
+                text = _("deletions held for {s}: it overlaps the two-way mapping "
+                         "{o}, in the mappings file {f}; files are still sent.")
+            else:
+                text = _("deletions held for {s}: it overlaps the two-way mapping "
+                         "{o}; files are still sent.")
+            print("  ⚠  [twoway-conflict] " + text.format(
+                s=m.get("source", "?"), o=info[0], f=info[4]))
+        elif info and info[2] and info[4]:
             if info[3]:
                 text = _("deletions held for {s}: {o}, in the mappings file {f}, "
                          "puts its content in the same Proton folder, {r}; files "
@@ -3748,6 +3805,13 @@ def main():
              "coup n'est pas touché (voir --allow-mass-delete).",
     )
     parser.add_argument(
+        "--twoway-full-check", action="store_true",
+        help="Lance les mappings deux sens (clé sync_mappings) par un parcours "
+             "complet du côté Proton. Sans sonde d'événements (le seul cas "
+             "aujourd'hui), ils sont en pause à chaque passage : ce parcours "
+             "n'a lieu que sur demande explicite.",
+    )
+    parser.add_argument(
         "--allow-mass-delete", action="store_true",
         help="Coupe, pour CE passage seulement, le garde-fou de suppression de "
              "masse ([delete-guard]), même s'il est allumé dans les réglages. "
@@ -3981,7 +4045,10 @@ def main():
     # Conflits de dossiers d'arrivée : suppressions retenues en mémoire pour
     # tout le passage, AVANT toute restriction de portée.
     arrival_held = _hold_arrival_conflicts(mappings)
-    cross_checked = _hold_cross_file_conflicts(args.config, mappings, arrival_held)
+    _hold_sync_conflicts(mappings, sync_mappings, arrival_held)
+    twoway_blocked = {}
+    cross_checked = _hold_cross_file_conflicts(args.config, mappings, arrival_held,
+                                               sync_mappings, twoway_blocked)
 
     # Le cache est indexé par le nom du fichier de mappings (sans son chemin).
     # Comme ça, déplacer le JSON ne casse pas le cache.
@@ -4280,7 +4347,10 @@ def main():
                     # Vider ce dossier jetterait aussi ce qu'un autre mapping y
                     # a déposé : même règle que les suppressions.
                     info = arrival_held[id(m)]
-                    if info[4]:
+                    if len(info) > 5 and info[5]:
+                        print(_("  ⛔ Remote wipe REFUSED: this mapping overlaps the "
+                                "two-way mapping {o}.").format(o=info[0]))
+                    elif info[4]:
                         print(_("  ⛔ Remote wipe REFUSED: this mapping's Proton "
                                 "folder is the same as the one of {o}, in the "
                                 "mappings file {f}, or nested with it.").format(
@@ -4377,7 +4447,8 @@ def main():
                 sync_mappings, all_mappings, args.config, cache, global_ex,
                 only_source=args.only_source, trigger_name=trigger_name,
                 runner=runner, dry_run=args.dry_run, verbose=args.verbose,
-                allow_mass_delete=args.allow_mass_delete, delete=args.delete):
+                allow_mass_delete=args.allow_mass_delete, delete=args.delete,
+                full_check=args.twoway_full_check, blocked=twoway_blocked):
             health.append((src, complete, unreadable))
 
     # Publication de l'état de santé : ce que ce passage a constaté, réécrit

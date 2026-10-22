@@ -297,10 +297,15 @@ class EngineRunner:
 
     def reconcile(self, mappings, *args):
         """Run a pass; main() reconciles the sync_mappings entries itself
-        (default trigger "none": full remote listing)."""
+        (full remote listing, through --twoway-full-check)."""
         return self(mappings, *args)
 
-    def __call__(self, mappings, *args, settings_doc=None, driver=None):
+    def __call__(self, mappings, *args, settings_doc=None, driver=None,
+                 full_check=True):
+        """full_check adds --twoway-full-check, so two-way mappings run (without
+        it they are paused: there is no events probe)."""
+        if full_check:
+            args = (*args, "--twoway-full-check")
         if settings_doc is not None:
             self.settings.write_text(json.dumps(settings_doc) + "\n", encoding="utf-8")
         cli = os.environ.get("PROTON_DRIVE_CLI")

@@ -1,5 +1,5 @@
 """Pure helpers for mapping dictionaries (no GUI imports, testable without a display)."""
-__version__ = "1.2.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
+__version__ = "1.3.0"   # version propre à CE fichier ; incrémentée quand il change (indépendant de GitHub)
 
 import os
 
@@ -277,6 +277,69 @@ def local_overlap(a, b):
     if pa.startswith(pb.rstrip("/") + "/"):
         return "child"
     return None
+
+
+def sync_overlap(mapping, other):
+    """Relation entre un mapping et un autre : (raison, détail) avec la même
+    raison que sync_mapping_conflicts ("local-same", "local-parent",
+    "local-child", "arrival-same", "arrival-inside", "arrival-contains"), ou
+    None. Le détail est le dossier d'arrivée de l'autre pour les trois
+    dernières, "" sinon."""
+    rel = local_overlap(mapping, other)
+    if rel:
+        return "local-" + rel, ""
+    hit = first_arrival_conflict(mapping, [other])
+    if hit:
+        _other, rel, _mine, theirs = hit
+        return "arrival-" + rel, theirs
+    return None
+
+
+def runnable_sync_mappings(sync_mappings):
+    """Les entrées de "sync_mappings" que le moteur peut lancer : un objet de
+    direction et de type connus, avec source et destination. Seules celles-là
+    comptent pour retenir les suppressions d'un mapping à sens unique."""
+    return [m for m in (sync_mappings or ())
+            if isinstance(m, dict)
+            and m.get("direction") in SYNC_DIRECTIONS
+            and m.get("type") in SYNC_TYPES
+            and m.get("source") and m.get("dest_parent")]
+
+
+def upload_sync_holds(upload_mappings, sync_mappings):
+    """Mappings à sens unique qui chevauchent un mapping deux sens (les six
+    relations de sync_mapping_conflicts). Retourne {indice dans
+    upload_mappings: (mapping deux sens, raison, détail)}, au premier trouvé.
+    Leurs suppressions doivent être retenues : sinon ils mettraient à la
+    corbeille ce que l'autre côté a ajouté sur Proton."""
+    twoway = runnable_sync_mappings(sync_mappings)
+    out = {}
+    if not twoway:
+        return out
+    for i, m in enumerate(upload_mappings or ()):
+        if not isinstance(m, dict):
+            continue
+        for t in twoway:
+            hit = sync_overlap(t, m)
+            if hit:
+                out[i] = (t, hit[0], hit[1])
+                break
+    return out
+
+
+def read_sync_mappings(path):
+    """Les entrées (objets) de la clé "sync_mappings" d'un fichier de mappings ;
+    liste vide si la clé manque, si le fichier est une liste, absent ou
+    illisible (read_mappings_document dit déjà si le fichier se lit)."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+    except (OSError, ValueError):
+        return []
+    found = data.get("sync_mappings") if isinstance(data, dict) else None
+    if not isinstance(found, list):
+        return []
+    return [m for m in found if isinstance(m, dict)]
 
 
 def sync_mapping_conflicts(sync_mappings, upload_mappings=()):

@@ -118,17 +118,35 @@ def plan(sync_mappings, upload_mappings):
 
 def run_pass(sync_mappings, upload_mappings, config_path, cache, global_ex,
              only_source=None, trigger_name="none", runner=None, dry_run=False,
-             verbose=False, allow_mass_delete=False, delete=False):
+             verbose=False, allow_mass_delete=False, delete=False,
+             full_check=False, blocked=None):
     """Run the two-way pass of one engine run. Returns a list of
     (source, complete, unreadable) for the health report.
 
     ``runner`` is a trigger's own function; None means no events probe, so
-    the whole Proton side is listed (``sync_mapping``). ``upload_mappings`` is
-    the full ``mappings`` list, for the overlap check."""
+    the whole Proton side would be listed (``sync_mapping``); that is only
+    done when ``full_check`` is set (--twoway-full-check), otherwise each
+    mapping is paused with one line and counted in ``twoway_paused``.
+    ``upload_mappings`` is the full ``mappings`` list, for the overlap check;
+    ``blocked`` maps id(mapping) to (reason, other, detail, file) for the
+    mappings that overlap a mapping of the other service's file."""
     if runner is None and trigger_name != "none":
         print(_("Two-way trigger {t!r} unknown: listing the whole Proton side")
               .format(t=trigger_name))
     runnable, skipped = plan(sync_mappings, upload_mappings)
+    if blocked:
+        still = []
+        for m in runnable:
+            hit = blocked.get(id(m))
+            if hit:
+                reason, other, detail, where = hit
+                why = _(_CONFLICT_TEXT[reason]).format(o=other.get("source", "?"), d=detail)
+                skipped.append((m, _("Two-way mapping not run: {s} ({w}, in the "
+                                     "mappings file {f})").format(
+                                         s=m["source"], w=why, f=where)))
+            else:
+                still.append(m)
+        runnable = still
     for _skipped, line in skipped:
         print("  \u23ed " + line)
     if only_source:
@@ -136,6 +154,14 @@ def run_pass(sync_mappings, upload_mappings, config_path, cache, global_ex,
         runnable = [m for m in runnable
                     if os.path.normpath(m["source"]) in wanted]
     out = []
+    if runner is None and not full_check:
+        for m in runnable:
+            print("  \u23f8 " + _("Two-way sync paused for {s}: there is no events "
+                                  "probe, so a pass would have to list the whole "
+                                  "Proton side. Run with --twoway-full-check to "
+                                  "do that once.").format(s=m["source"]))
+            _ps._RUN.add("twoway_paused")
+        return out
     for m in runnable:
         print(_("\n\u25b6 Two-way mapping: {s}  =>  {d}").format(
             s=m["source"], d=m["dest_parent"]))
