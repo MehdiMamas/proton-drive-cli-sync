@@ -508,6 +508,7 @@ def _download_over(local_path, remote_path, remote_info, ctx):
         if fetched is None:
             _download_failed(local_path, reason)
             return False
+        _keep_remote_mtime(fetched, remote_info)
         os.replace(fetched, local_path)
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
@@ -543,6 +544,23 @@ def _fetch(remote_path, directory):
     return None, False, _cli_reason(result) or _(
         "the Proton CLI finished but wrote {n} files instead of one").format(
             n=len(written))
+
+
+def _keep_remote_mtime(path, remote_info):
+    """Give a downloaded file the modification time Proton has for it.
+
+    CLI 0.9.0 writes downloads with the current time. Without a date in the
+    listing the file stays as the CLI wrote it.
+    """
+    if not isinstance(remote_info, dict):
+        return
+    mtime = _ps._remote_mtime_seconds(remote_info.get("mtime"))
+    if mtime is None:
+        return
+    try:
+        os.utime(path, (os.stat(path).st_atime, mtime))
+    except OSError:
+        pass
 
 
 def _cli_reason(result):
@@ -586,6 +604,7 @@ def _write_conflict(local_path, remote_path, remote_info, row, ctx):
         if fetched is None:
             _download_failed(local_path, reason)
             return False
+        _keep_remote_mtime(fetched, remote_info)
         conflict_path = _conflict_path(local_path)
         os.replace(fetched, conflict_path)
     finally:

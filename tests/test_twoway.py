@@ -494,6 +494,12 @@ def _conflict(fake_drive, local_tree, write_mappings, engine):
     return src, remote, cfg, copy
 
 
+def test_conflict_copy_keeps_the_proton_modification_time(
+        fake_drive, local_tree, write_mappings, engine):
+    _, _, _, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    assert int(os.stat(copy).st_mtime) == 1_000_000_400
+
+
 def test_conflict_clears_once_both_copies_match(
         fake_drive, local_tree, write_mappings, engine, isolated_home):
     src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)

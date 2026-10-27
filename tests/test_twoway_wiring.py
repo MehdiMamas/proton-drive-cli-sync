@@ -1,6 +1,7 @@
 """main() runs the sync_mappings entries: validation, overlap rules, trigger."""
 
 import json
+import os
 
 import pytest
 
@@ -211,3 +212,34 @@ def test_wipe_is_refused_for_an_upload_mapping_held_by_a_two_way(
     out = result.stdout + result.stderr
     assert "REFUSED" in out, out
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"A"
+
+
+def test_downloaded_file_keeps_the_proton_modification_time(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"A", 1_000_000_000)})
+    mapping = {"type": "folder", "source": str(src / "Docs"),
+               "dest_parent": "/my-files/E", "direction": "twoway"}
+    cfg = write_mappings([], sync_mappings=[mapping])
+    assert engine(cfg).returncode == 0
+    fake_drive.seed_file("/my-files/E/Docs/b.txt", b"B", mtime=1_500_000_000)
+    result = engine(cfg)
+    assert "[download] " in result.stdout, result.stdout
+    assert int(os.stat(src / "Docs" / "b.txt").st_mtime) == 1_500_000_000
+
+
+def test_download_without_a_digest_is_quiet_on_the_next_pass(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"A", 1_000_000_000)})
+    mapping = {"type": "folder", "source": str(src / "Docs"),
+               "dest_parent": "/my-files/E", "direction": "twoway"}
+    cfg = write_mappings([], sync_mappings=[mapping])
+    assert engine(cfg).returncode == 0
+    fake_drive.seed_file("/my-files/E/Docs/b.txt", b"B",
+                         mtime=1_500_000_000, digest=False)
+    result = engine(cfg)
+    assert "[download] " in result.stdout, result.stdout
+    assert int(os.stat(src / "Docs" / "b.txt").st_mtime) == 1_500_000_000
+    result = engine(cfg)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[download] " not in result.stdout, result.stdout
+    assert "[upload] " not in result.stdout, result.stdout
