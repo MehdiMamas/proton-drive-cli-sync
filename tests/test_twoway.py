@@ -494,6 +494,12 @@ def _conflict(fake_drive, local_tree, write_mappings, engine):
     return src, remote, cfg, copy
 
 
+def test_conflict_copy_keeps_the_proton_modification_time(
+        fake_drive, local_tree, write_mappings, engine):
+    _, _, _, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
+    assert int(os.stat(copy).st_mtime) == 1_000_000_400
+
+
 def test_conflict_clears_once_both_copies_match(
         fake_drive, local_tree, write_mappings, engine, isolated_home):
     src, remote, cfg, copy = _conflict(fake_drive, local_tree, write_mappings, engine)
@@ -745,3 +751,25 @@ def test_builtin_exclusion_covers_proton_sync_names(
     assert result.returncode == 0, result.stdout + result.stderr
     assert all(".proton-sync-" not in p for p in fake_drive.uploads())
     assert fake_drive.content("/my-files/Backups/Docs/a.txt") == b"AAAA"
+
+
+def test_local_deletion_trashes_while_another_file_waits_on_a_conflict(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"AAAA", 1_000_000_000),
+                      "Docs/b.txt": (b"BBBB", 1_000_000_000)})
+    remote = "/my-files/Backups/Docs/b.txt"
+    cfg = write_mappings([_trashing(src / "Docs", "/my-files/Backups")])
+    assert engine(cfg, "--delete").returncode == 0
+    local_tree.write("Docs/a.txt", b"MINE", 1_000_000_300)
+    _set_remote(fake_drive, "/my-files/Backups/Docs/a.txt", b"THEIRS",
+                1_000_000_400)
+    assert engine(cfg, "--delete").returncode == 0
+    assert (src / "Docs" / "a (proton conflict).txt").exists()
+    (src / "Docs" / "b.txt").unlink()
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert fake_drive.trashed(remote)
+    again = engine(cfg, "--delete")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert not (src / "Docs" / "b.txt").exists()
+    assert "[download]" not in again.stdout
