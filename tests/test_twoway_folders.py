@@ -356,3 +356,26 @@ def test_forget_tree_matches_whole_path_parts(tmp_path):
             "/a/bc", "/a/bc/d"]
         assert sorted(r["local_path"] for r in database.rows()) == [
             "/a/bc/d/f", "/a/bc/f"]
+
+
+def test_folder_missing_refusal_starts_with_a_warning_glyph(
+        fake_drive, local_tree, write_mappings, engine):
+    src, cfg = _tree(local_tree, write_mappings, engine, {
+        "Docs/gone-there/a.txt": (b"A", 1_000_000_000)}, allow_delete=False)
+    _drop_remote(fake_drive, "/my-files/Backups/Docs/gone-there")
+    result = engine(cfg)
+    assert any(line.startswith("  ⚠  [folder-missing] ")
+               for line in result.stdout.splitlines()), result.stdout
+
+
+def test_delete_guard_refusal_starts_with_a_warning_glyph(
+        fake_drive, local_tree, write_mappings, engine):
+    engine.update_settings(mass_delete_guard=True)
+    files = {"Docs/keep.txt": (b"K", 1_000_000_000)}
+    files.update({"Docs/sub/f%02d.txt" % i: (b"x%d" % i, 1_000_000_000)
+                  for i in range(25)})
+    src, cfg = _tree(local_tree, write_mappings, engine, files)
+    shutil.rmtree(src / "Docs" / "sub")
+    refused = engine(cfg, "--delete")
+    assert any(line.startswith("  ⚠  [delete-guard] ")
+               for line in refused.stdout.splitlines()), refused.stdout

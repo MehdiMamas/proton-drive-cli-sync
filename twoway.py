@@ -234,7 +234,7 @@ def _sync_file(local_file, remote_parent, ctx):
         return False
     listing = _ps.get_remote_listing(remote_parent, verbose=ctx.verbose)
     if not listing.ok:
-        print("[list-skipped] " + _(
+        print("  ⚠  [list-skipped] " + _(
             "Could not list {p} — file skipped this pass "
             "(nothing sent, nothing deleted).").format(p=remote_parent))
         _ps._RUN.add("folders_listing_failed")
@@ -288,7 +288,7 @@ def _sync_dir(local_dir, remote_parent, ctx, remote_info=None,
         if listing is None:
             listing = _ps.get_remote_listing(remote_folder, verbose=ctx.verbose)
     if not listing.ok:
-        print("[list-skipped] " + _(
+        print("  ⚠  [list-skipped] " + _(
             "Could not list {p} — folder skipped this pass "
             "(nothing sent, nothing deleted).").format(p=remote_folder))
         _ps._RUN.add("folders_listing_failed")
@@ -348,7 +348,7 @@ def _report_folder_gone(local_dir, remote_folder, ctx):
     """This folder is missing on Proton while the database still has synced
     files under it. It was renamed or removed as a whole, so nothing under it
     is held, uploaded or recreated on this pass."""
-    print("[folder-missing] " + _(
+    print("  ⚠  [folder-missing] " + _(
         "{p}: this folder no longer exists on Proton. "
         "To be safe, nothing was changed in it here.").format(p=local_dir))
     _ps._RUN.add("deletions_refused")
@@ -525,7 +525,7 @@ def _remote_only(local_dir, remote_folder, listing, local_names, ctx):
             restores.append((local_path, remote_path, info))
 
     if _refusing_mass_delete(gone, listing, ctx):
-        print("[delete-guard] " + _(
+        print("  ⚠  [delete-guard] " + _(
             "refusing to trash {n} of {t} remote item(s) in {p}").format(
                 n=len(gone), t=len(listing), p=remote_folder))
         _ps._RUN.add("deletions_refused")
@@ -787,7 +787,7 @@ def _download_failed(local_path, reason):
         text = _("could not download {p}").format(p=local_path)
     if reason:
         text += " — " + _("Proton CLI said: {r}").format(r=reason)
-    print("[download-failed] " + text)
+    print("  ❌ [download-failed] " + text)
     _ps._RUN.add("files_failed")
 
 
@@ -922,7 +922,7 @@ def _hold(local_path, ctx):
         dest = _timed_name(dest)
         os.rename(local_path, dest)
     except OSError as exc:
-        print("[held-failed] " + _(
+        print("  ❌ [held-failed] " + _(
             "kept in place, not moved aside: {p} ({e})").format(
                 p=local_path, e=exc))
         _ps._RUN.add("files_failed")
@@ -962,7 +962,7 @@ def _flush_holds(queue, local_count, remote_folder, ctx):
     if not queue:
         return True
     if _refusing_mass_delete(queue, local_count, ctx, always=True):
-        print("[delete-guard] " + _(
+        print("  ⚠  [delete-guard] " + _(
             "refusing to hold {n} of {t} local file(s) in {p}").format(
                 n=len(queue), t=local_count, p=remote_folder))
         _ps._RUN.add("deletions_refused")
@@ -995,7 +995,7 @@ def _can_trash(ctx, remote_path):
     if ok:
         return True
     ctx.opts["mount_lost"] = True
-    print("[delete-guard] " + _(
+    print("  ⚠  [delete-guard] " + _(
         "mount check failed, remote file kept: {r}").format(r=reason))
     _ps._RUN.add("deletions_refused")
     return False
