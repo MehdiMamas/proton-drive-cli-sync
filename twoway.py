@@ -414,7 +414,7 @@ def _may_follow_deletion(local_dir, remote_folder, ctx):
         return True
     files = _synced_files_under(local_dir, ctx)
     if _refusing_mass_delete(files, len(files), ctx, always=True):
-        print("[delete-guard] " + _(
+        print("  ⚠  [delete-guard] " + _(
             "refusing to hold {n} of {t} local file(s) in {p}").format(
                 n=len(files), t=len(files), p=local_dir))
         _ps._RUN.add("deletions_refused")
