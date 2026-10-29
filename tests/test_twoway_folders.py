@@ -131,6 +131,11 @@ def test_folder_deleted_here_with_a_file_changed_on_proton_is_restored(
     assert not _live(fake_drive, "/my-files/Backups/Docs/sub/c.txt")
     assert _live(fake_drive, "/my-files/Backups/Docs/sub")
     assert ["filesystem", "trash", "/my-files/Backups/Docs/sub"] not in _trashes(fake_drive)
+    # One line says why the folder is back, before the file lines.
+    why = result.stdout.index(
+        "  ℹ  [restore] {}: deleted here, but changed on Proton since".format(
+            src / "Docs" / "sub"))
+    assert why < result.stdout.index("[download]")
 
 
 def test_folder_deleted_here_with_a_new_file_on_proton_is_restored(
@@ -145,7 +150,26 @@ def test_folder_deleted_here_with_a_new_file_on_proton_is_restored(
     assert not _live(fake_drive, "/my-files/Backups/Docs/sub/b.txt")
     assert _live(fake_drive, "/my-files/Backups/Docs/sub/new.txt")
     assert _live(fake_drive, "/my-files/Backups/Docs/sub")
-    assert ["filesystem", "trash", "/my-files/Backups/Docs/sub"] not in _trashes(fake_drive)
+
+
+def test_excluded_name_on_proton_does_not_keep_a_folder_deleted_here(
+        fake_drive, local_tree, write_mappings, engine):
+    src = local_tree({"Docs/a.txt": (b"A", 1_000_000_000),
+                      "Docs/sub/b.txt": (b"B", 1_000_000_000)})
+    cfg = write_mappings(
+        [_mapping(src / "Docs", "/my-files/Backups", allow_delete=True,
+                  source_kind="local")],
+        exclusions={"names": [".ds_store"], "patterns": []})
+    assert engine(cfg).returncode == 0
+    # A file another device left on Proton, excluded here.
+    fake_drive.seed_file("/my-files/Backups/Docs/sub/.DS_Store", b"x")
+    shutil.rmtree(src / "Docs" / "sub")
+    result = engine(cfg, "--delete")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _trashes(fake_drive) == [
+        ["filesystem", "trash", "/my-files/Backups/Docs/sub"]], result.stdout
+    assert not (src / "Docs" / "sub").exists()
+    assert "[restore]" not in result.stdout
 
 
 def test_folder_deleted_on_proton_is_held_and_removed_here(

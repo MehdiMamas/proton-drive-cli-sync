@@ -562,15 +562,16 @@ def _unchanged_subtree(local_dir, remote_dir, ctx):
     """("same", remote file paths), ("changed", None) or ("failed", None).
 
     "same": every item under the Proton folder is a file with a synced row
-    that Proton has not changed since, or a folder with a row. Anything else
-    (new, changed, a document, an excluded name) is "changed"."""
+    that Proton has not changed since, or a folder with a row. Excluded names
+    are ignored and go to the trash with the folder. Anything else (new,
+    changed, a document) is "changed"."""
     listing = _ps.get_remote_listing(remote_dir, verbose=ctx.verbose)
     if not listing.ok:
         return "failed", None
     files = []
     for name, info in listing.items():
         if _ps._name_excluded(ctx.exclusions, name):
-            return "changed", None
+            continue
         local_path = os.path.join(local_dir, name)
         remote_path = remote_dir.rstrip("/") + "/" + name
         rtype = info.get("type") if isinstance(info, dict) else None
@@ -609,7 +610,12 @@ def _folder_deleted_here(local_path, remote_path, parent_listing, ctx):
             "(nothing sent, nothing deleted).").format(p=remote_path))
         _ps._RUN.add("folders_listing_failed")
         return False
-    if status == "changed" or not _deletion_switched_on(ctx):
+    if status == "changed":
+        print("  ℹ  [restore] " + _(
+            "{p}: deleted here, but changed on Proton since; new or changed "
+            "files are kept and the folder comes back.").format(p=local_path))
+        return None
+    if not _deletion_switched_on(ctx):
         return None
     total = len(parent_listing) - 1 + len(files)
     if _refusing_mass_delete(files, total, ctx):
