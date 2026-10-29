@@ -604,7 +604,7 @@ def _folder_deleted_here(local_path, remote_path, parent_listing, ctx):
         return None
     status, files = _unchanged_subtree(local_path, remote_path, ctx)
     if status == "failed":
-        print("[list-skipped] " + _(
+        print("  ⚠  [list-skipped] " + _(
             "Could not list {p} — folder skipped this pass "
             "(nothing sent, nothing deleted).").format(p=remote_path))
         _ps._RUN.add("folders_listing_failed")
@@ -613,7 +613,7 @@ def _folder_deleted_here(local_path, remote_path, parent_listing, ctx):
         return None
     total = len(parent_listing) - 1 + len(files)
     if _refusing_mass_delete(files, total, ctx):
-        print("[delete-guard] " + _(
+        print("  ⚠  [delete-guard] " + _(
             "refusing to trash {n} of {t} remote item(s) in {p}").format(
                 n=len(files), t=total, p=remote_path))
         _ps._RUN.add("deletions_refused")
