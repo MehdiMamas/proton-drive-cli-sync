@@ -150,6 +150,7 @@ def test_folder_deleted_here_with_a_new_file_on_proton_is_restored(
     assert not _live(fake_drive, "/my-files/Backups/Docs/sub/b.txt")
     assert _live(fake_drive, "/my-files/Backups/Docs/sub/new.txt")
     assert _live(fake_drive, "/my-files/Backups/Docs/sub")
+    assert ["filesystem", "trash", "/my-files/Backups/Docs/sub"] not in _trashes(fake_drive)
 
 
 def test_excluded_name_on_proton_does_not_keep_a_folder_deleted_here(
